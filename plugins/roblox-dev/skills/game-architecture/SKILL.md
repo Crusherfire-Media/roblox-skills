@@ -1,13 +1,17 @@
 ---
 name: game-architecture
-description: Architecture rules for Roblox game code run by Module Loader (crusherfire/module-loader) - single-script layout, system categories, <Name>System folders split into SystemPackage and Implementation, realm and relocation attributes, the Init/Start lifecycle, and which modules may require which. Load it before creating, moving, or renaming any system, module, Script, or LocalScript in a Rojo repo or a connected Studio place; before adding a require between modules, or when Script Analysis reports a cyclic module dependency; before a system starts playing a sound; and when debugging load order, Init/Start, relocation, or anything else the ModuleLoader does. Load it even for one small helper module or a single new require.
+description: Architecture rules for Roblox game code run by Module Loader (crusherfire/module-loader) - single-script layout, system categories, <Name>System folders split into SystemPackage and Implementation, realm and relocation attributes, the Init/Start lifecycle, and which modules may require which. In a project that uses the loader (a Start script that requires it, or LOAD_MODULE tags), load it before creating, moving, or renaming any system, module, Script, or LocalScript; before adding a require between modules, or when Script Analysis reports a cyclic module dependency; before a system starts playing a sound; and when debugging load order, Init/Start, relocation, or anything else the ModuleLoader does. Load it even for one small helper module or a single new require.
 ---
 
 # Game architecture
 
 Game code runs from two scripts. Everything else is a ModuleScript that the Module Loader
-finds, requires, and then runs `Init` and `Start` on. This skill sets where modules live, which
-attributes they carry, what their lifecycle methods may do, and which modules may require which.
+finds, requires, and then runs `Init` and `Start` on.
+
+**Fit the existing project.** Make the smallest change that fits its structure, keeping working
+code paths and module shapes unless the task needs them changed. The rules below apply to a
+project that uses the loader (a `Start` script that requires it, or `LOAD_MODULE` tags); in a
+project without it, follow the patterns of its existing scripts.
 
 The loader's exact behavior (discovery, relocation, error handling, API, the relocation check)
 is in [references/module-loader.md](references/module-loader.md). Read it before relying on any
@@ -47,7 +51,7 @@ the relocation check lists no server module, and a playtest logs no `>> Failed` 
   templates a system clones at runtime, kept inside that system.
 - If a task seems to need any other Script or LocalScript, ask the user first.
 - Scripts outside these rules are legacy. Leave them alone unless the user asks for a migration,
-  and never use them as a pattern.
+  and model new code on the rules here.
 
 ## Layout
 
@@ -152,9 +156,8 @@ everything it needs. Where each one goes, and how other modules reach it, is in
 
 `RelocateToServerScriptService` only works set on the module itself; it does not cascade from a
 folder. The loader adds `ServerOnly` on its own. Loader attributes are booleans (`LoaderPriority`
-is a number), so set real booleans: a string `"true"` looks right in the Properties panel, but it
-is a mistake the loader has to guess around, differently by version (Attributes in the
-reference). After adding or moving any module, run the relocation check in the reference.
+is a number), so set real booleans (a string `"true"` is a mistake; see
+Attributes in the reference). After adding or moving any module, run the relocation check in the reference.
 
 ## Lifecycle
 
@@ -172,9 +175,8 @@ reference). After adding or moving any module, run the relocation check in the r
 - A Shared service's `Init` and `Start` run once per realm, called on the Shared service itself.
   The loader does not call them again for the Server or Client service that inherits them.
 - Require-time setup that creates instances (folders, sounds, pools) is gated behind
-  `RunService:IsRunning()`, because modules also get required from the command bar, plugins, and
-  UI Labs stories in edit mode, where that setup would litter the edit DataModel. UI Labs requires
-  modules again on every story reload, and Jest specs load them the same way.
+  `RunService:IsRunning()`, because the command bar, plugins, Jest specs, and UI Labs stories (on
+  every reload) also require modules in edit mode, where that setup would litter the edit DataModel.
 - The same holds for require-time connections to engine signals (`RunService`,
   `UserInputService`, `GuiService`, `Players`, a camera) and for threads that never finish. In
   edit mode each fresh copy's connection keeps that copy, and every module loaded with it, in
@@ -274,6 +276,5 @@ On top of the checks in CLAUDE.md:
   `taking a while`, and `Loader attribute`. None should mention your modules. `[S]` lines come
   from the server and `[C]` lines from the client.
 - The loader never runs in edit mode, so inspect its state during a playtest by running Luau in
-  the server or client runtime. Check its version before requiring it outside a playtest (Luau run
-  in edit mode, specs, stories): versions before v4.0.0 wait forever there (Side effects of
-  requiring the loader, in the reference).
+  the server or client runtime. Before requiring it outside a playtest (Luau run in edit mode,
+  specs, stories), read Side effects of requiring the loader in the reference.

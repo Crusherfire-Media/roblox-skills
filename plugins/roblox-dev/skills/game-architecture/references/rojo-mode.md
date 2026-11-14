@@ -16,6 +16,9 @@ how changes travel, and how Module Loader is installed through pesde.
 - A system is a directory, `src/ServerScriptService/Modules/Systems/<Category>/<Name>System/`,
   holding `SystemPackage/` and `Implementation/`. A module with children is a folder with an
   `init.luau`; its children are the folder's other files.
+- Turning `Foo.luau` into `Foo/init.luau` leaves the ModuleScript `Foo` where it was, so the requires
+  inside it stay as they were: `./` still names its siblings, and only its new children take
+  `@self/`.
 - **A shared system's SystemPackage is a pesde package**, installed into `roblox_packages` and
   required through its alias link. In the game repo that system's folder holds only
   `Implementation/`. Game-only systems keep both halves in the game repo. Moving a game system
