@@ -1,6 +1,6 @@
-# roblox-lua-style-guide evals
+# luau-style-guide evals
 
-Four tasks and a trigger set for the `roblox-lua-style-guide` skill: two write tasks (a plain
+Four tasks and a trigger set for the `luau-style-guide` skill: two write tasks (a plain
 module and a class), a behavior-preserving refactor, and a review written to `docs/review.md`. The
 prompts never mention the skill or a style rule. All fixtures and prompts are written for this
 repo; nothing is copied from the Roblox Lua Style Guide, which has no license.
