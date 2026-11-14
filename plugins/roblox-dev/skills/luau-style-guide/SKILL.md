@@ -1,6 +1,6 @@
 ---
 name: luau-style-guide
-description: Load before writing or editing any Roblox Luau, even a one-line fix - new scripts and modules, edits to existing scripts (as files or through a Studio MCP), and code you review or reformat - and whenever the user asks for clean code or the clean code skill. Load it once per session, before the first edit, alongside game-architecture or vide when those apply. Luau style rules based on Roblox's Lua style guide, written as agent rules, plus typing rules.
+description: Load before writing or editing any Roblox Luau, even a one-line fix - new scripts and modules, edits to existing scripts (as files or through a Studio MCP), and code you review or reformat - and whenever the user asks for clean or idiomatic Luau, or for the clean code skill. Load it once per session, before the first edit, alongside game-architecture or vide when those apply. Luau style rules based on Roblox's Lua style guide, written as agent rules, plus typing rules.
 ---
 
 # Luau Style Guide
@@ -25,6 +25,11 @@ skill. Load it alongside this one.
 
 ## Precedence
 
+**Existing files.** In a file that already exists, match its conventions: its
+require style, `local` or `const` bindings, and strict mode. Change the lines
+the task needs and leave the rest as they are. The rules below apply in full
+to new files, and to code you write where the file has no established pattern.
+
 The project's own `CLAUDE.md` wins wherever it overrides or tightens a rule
 below. When a rule here seems to contradict the Roblox guide or habits from
 it, [references/official-guide.md](references/official-guide.md) lists every
@@ -38,8 +43,8 @@ lines your edit touches, so the diff stays about your change.
 
 ## File structure
 
-Every script starts with `--!strict` on its first line. The rest follows in
-this order, skipping parts that do not apply: services (`game:GetService`
+Every new script starts with `--!strict` on its first line. The rest follows
+in this order, skipping parts that do not apply: services (`game:GetService`
 into `const` bindings, sorted alphabetically; Workspace comes from the
 `workspace` global), requires, constants, types, module state, private
 functions, the public API, and the `return`. One blank line separates the
@@ -50,8 +55,8 @@ belongs in each part and how to group code inside one.
 ## Requires
 
 - Put every `require` above the rest of the code, so dependencies stay static.
-- Bind each one with `const` and use require-by-string; never write
-  `local Foo = require(script.Parent.Foo)`.
+- Bind each one with `const` and use require-by-string:
+  `const Foo = require("./Foo")`.
 - Sort requires alphabetically by module name.
 - A module required purely for its types goes in the types part of the file,
   after the other dependencies.
@@ -196,7 +201,7 @@ pattern, and weak tables, which cannot track Roblox Instances.
 
 ## Types
 
-Every script runs under `--!strict` (see File structure).
+New scripts run under `--!strict` (see File structure).
 
 - Fully type every public function: each parameter and the return type.
   Public means another script can call it directly, such as a method or dot
@@ -214,6 +219,9 @@ Every script runs under `--!strict` (see File structure).
   Roblox `Enum` items: `export type Rarity = "Common" | "Rare" | "Epic"`.
   Export it from the module that owns it, a `<Name>Types` module when
   several modules share it, so every module checks against one definition.
+- luau-lsp (1.70.1) types the variable of a generic `for` over an array of a
+  string-literal union (`{ BlockType }`) as `string`. Cast it
+  (`blockType :: BlockType`) or index the array.
 - When a branch must handle every member of an enum, end the `if` chain with
   `exhaustiveMatch`, kept once in a shared utility library.
 
