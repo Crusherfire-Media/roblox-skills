@@ -1,6 +1,10 @@
 You are judging two attempts at the same task in a Roblox game project. The project is a Rojo
-repo: Luau files under `src/` become scripts in the place, and Vide (a reactive UI library) is
-installed as `ReplicatedStorage.Packages.Vide`. Each attempt started from the same files. You see
+repo: Luau files under `src/` become scripts in the place. Installed packages (from Wally, through
+pesde) sit in `ReplicatedStorage.Packages`: Vide 0.4.1 (a reactive UI library) as `Vide`, Charm
+0.11.1 as `Charm`, vide-charm 0.4.1 as `VideCharm`, CharmSync 0.4.1 as `CharmSync`, the UI Labs
+utility package 2.4.2 as `UILabs`, and Module Loader 4.0.1 as `ModuleLoader`. Jest Roblox 3.20.1
+sits in `ServerScriptService.Tests.Packages` as `Jest` and `JestGlobals`, and specs go in
+`ServerScriptService.Tests.Specs`. Each attempt started from the same files. You see
 each attempt as a git diff of what it changed, plus the results of automatic checks (luau-lsp type
 analysis, selene lint, StyLua formatting) on its changed Luau files.
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
@@ -12,7 +12,7 @@ import { hooksFired, parseEvents, skillFileReads, skillsLoaded, usageTotals } fr
 import { loadTask, validateTask } from "../lib/task.mjs";
 import { ancestorMemoryFiles, resolveInside } from "../lib/workspace.mjs";
 import { redact } from "../export-results.mjs";
-import { assignLabels, fillTemplate, scrub, summarizeJudgements } from "../judge.mjs";
+import { assignLabels, buildJudgePrompt, fillTemplate, renderFacts, scrub, summarizeJudgements } from "../judge.mjs";
 import { redactPaths } from "../prove-isolation.mjs";
 import { trialStatus } from "../run-trials.mjs";
 
@@ -174,6 +174,21 @@ describe("task files", () => {
 		assert.throws(() => validateTask({ ...base, rubric: [] }), /rubric/);
 		assert.throws(() => validateTask({ ...base, name: "Bad Name" }), /name/);
 	});
+
+	test("judge_facts defaults to none and keeps valid facts", () => {
+		assert.deepEqual(validateTask(base).judge_facts, []);
+		const facts = ["Charm.listen runs its callback once right away.", "x".repeat(600)];
+		assert.deepEqual(validateTask({ ...base, judge_facts: facts }).judge_facts, facts);
+		assert.equal(validateTask({ ...base, judge_facts: Array(12).fill("A fact.") }).judge_facts.length, 12);
+	});
+
+	test("judge_facts rejects non-arrays, too many facts, and bad entries", () => {
+		assert.throws(() => validateTask({ ...base, judge_facts: "one fact" }), /judge_facts/);
+		assert.throws(() => validateTask({ ...base, judge_facts: Array(13).fill("A fact.") }), /at most 12/);
+		assert.throws(() => validateTask({ ...base, judge_facts: ["x".repeat(601)] }), /longer than 600/);
+		assert.throws(() => validateTask({ ...base, judge_facts: ["  "] }), /judge_facts\[0\]/);
+		assert.throws(() => validateTask({ ...base, judge_facts: [42] }), /judge_facts\[0\]/);
+	});
 });
 
 describe("task checks", () => {
@@ -268,6 +283,43 @@ describe("blind judge", () => {
 
 	test("template placeholders are filled", () => {
 		assert.equal(fillTemplate("{{A}} and {{B}} and {{C}}", { A: "1", B: "$&" }), "1 and $& and {{C}}");
+	});
+
+	describe("judge facts in the prompt", () => {
+		const template = "<facts>\n{{FACTS}}\n</facts>\n<task>{{TASK_PROMPT}}</task>\n{{RUBRIC}}\n{{OUTPUT_A}}|{{OUTPUT_B}}";
+		const attempt = (diff) => ({ diff, checks: "- [pass] ok" });
+		const meta = (extra = {}) => ({ prompt: "Do it", rubric: ["Works"], ...extra });
+
+		test("a task without judge_facts gets only the global facts", () => {
+			assert.equal(renderFacts("- Global fact.", undefined), "- Global fact.");
+			assert.equal(renderFacts("- Global fact.", []), "- Global fact.");
+			const prompt = buildJudgePrompt(template, "- Global fact.", meta(), attempt("a"), attempt("b"));
+			assert.match(prompt, /<facts>\n- Global fact\.\n<\/facts>/);
+			assert.doesNotMatch(prompt, /Facts for this task/);
+		});
+
+		test("task facts follow the global facts, one bullet each", () => {
+			const facts = ["Charm.subscribe skips the first run.", "jest.fn returns\n  two values."];
+			const prompt = buildJudgePrompt(template, "- Global fact.", meta({ judge_facts: facts }), attempt("a"), attempt("b"));
+			const block = /<facts>\n([\s\S]*)\n<\/facts>/.exec(prompt)[1];
+			assert.equal(
+				block,
+				"- Global fact.\n\nFacts for this task, verified against the same source:\n\n- Charm.subscribe skips the first run.\n- jest.fn returns two values.",
+			);
+			assert.match(prompt, /<task>Do it<\/task>\n1\. Works\na\|b$/);
+		});
+
+		test("placeholders inside facts and diffs stay literal", () => {
+			const prompt = buildJudgePrompt(template, "- G", meta({ judge_facts: ["{{OUTPUT_A}} $&"] }), attempt("{{TASK_PROMPT}}"), attempt("b"));
+			assert.match(prompt, /- \{\{OUTPUT_A\}\} \$&/);
+			assert.match(prompt, /\{\{TASK_PROMPT\}\}\|b$/);
+		});
+
+		test("the real template has a FACTS placeholder", () => {
+			const real = readFileSync(path.join(HERE, "..", "judge-prompt.md"), "utf8");
+			const prompt = buildJudgePrompt(real, "- Global fact.", meta({ judge_facts: ["Task fact."] }), attempt("a"), attempt("b"));
+			assert.match(prompt, /<library_facts>\n- Global fact\.\n\nFacts for this task[^\n]*\n\n- Task fact\.\n<\/library_facts>/);
+		});
 	});
 
 	test("summaries count wins per setup", () => {
