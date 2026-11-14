@@ -1,0 +1,82 @@
+{
+	"id": 1,
+	"name": "port-inventory-panel",
+	"skill": "figma-to-roblox",
+	"prompt": "Our designer finished the inventory panel in Figma. There's no Figma access from here, so they exported it with Figma's API (GET /v1/files/:key/nodes) to design/figma/inventory-panel.json: node 12:340 is the screen and 20:1 is the Slot component set. There's no screenshot.\n\nBuild the panel as Vide UI in src/StarterPlayer/StarterPlayerScripts/UI/InventoryPanel.luau (split pieces into more files under UI/ if you like) and show it from Main.client.luau. Use the real data: the ten block types from BlockTypes, counts and locks from BlockInventory, and BlockPlacer.setBlockType when the player equips the selected slot. Match the design as closely as Roblox allows.\n\nNothing has been exported or uploaded as images yet. Write docs/figma/inventory-assets.md listing every visual you decided to turn into an uploaded image instead of building it from UI objects: what it is, the size to export it at, and how it will be drawn in Roblox. Use placeholder asset ids in the code for now.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacement.server.luau",
+			"to": "src/ServerScriptService/BlockPlacement.server.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacer.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+		},
+		{
+			"from": "fixtures/shared/UI/Screen.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau"
+		},
+		{
+			"from": "fixtures/shared/Main.client.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockInventory.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/BlockInventory.luau"
+		},
+		{
+			"from": "fixtures/design/inventory-panel.json",
+			"to": "design/figma/inventory-panel.json"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "file_exists",
+			"path": "src/StarterPlayer/StarterPlayerScripts/UI/InventoryPanel.luau",
+			"text": "The panel is in UI/InventoryPanel.luau"
+		},
+		{
+			"type": "file_exists",
+			"path": "docs/figma/inventory-assets.md",
+			"text": "The image list exists at docs/figma/inventory-assets.md"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "\"UIShadow\"",
+			"text": "Shadows are built with UIShadow"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "ScaleType\\.Tile",
+			"text": "A tiled image is used (the hexagon pattern)"
+		}
+	],
+	"rubric": [
+		"Native vs image: the panel, slots, buttons, fills, gradients, single-radius corners, solid strokes, and the frame and text shadows are built from UI objects (Frame, UICorner, UIStroke, UIGradient, UIShadow), while the hexagon pattern, the close and lock icons, and the block art with its drop shadow become images. docs/figma/inventory-assets.md lists exactly those images and nothing built natively.",
+		"The hexagon pattern (35 hexagon vectors at 6% group opacity) becomes one seamless tile image drawn with ScaleType Tile and TileSize in offsets, kept outside the panel's UIListLayout (it is absolutely positioned in Figma), not dozens of frames or one stretched image.",
+		"Auto layout: the panel is a vertical UIListLayout with Padding 16 and UIPadding 24 top and bottom, 28 left and right; the header spreads title and close button apart (HorizontalFlex SpaceBetween or equivalent), centered vertically; the slot grid wraps with 12 px gaps both ways (UIListLayout Wraps or UIGridLayout CellSize 96, CellPadding 12); the footer name fills the width beside the 200x52 button.",
+		"Fills and strokes: Figma alpha becomes transparency (panel fill alpha 0.92 gives BackgroundTransparency 0.08); slot and Equip gradients run top to bottom (UIGradient Rotation 90) on a white base color so the gradient colors show; panel stroke 2 px Inner, idle slot stroke 1 px Inner, Selected stroke 3 px Outer (BorderStrokePosition); radii 16 panel, 12 slots and button, 22 or full for the 44 px close button.",
+		"Effects: the panel drop shadow is a UIShadow (Offset 0, 12, BlurRadius 32, black, Transparency 0.55); the Equip button's inner shadow is a UIShadow with Inset = true; title and count text shadows use UIShadow with Mode = Text; the Selected glow is a UIShadow on the slot; the background blur becomes a darker or more opaque fill, not a BlurEffect (which blurs the whole 3D view).",
+		"Variants and data: Slot is one component with a state prop (default, selected, locked) driven by game data; counts and names come from BlockInventory and BlockTypes; the locked slot's 40% content opacity is folded into its children's transparencies (or a CanvasGroup); a state change doesn't move other slots.",
+		"Image plan: export sizes in the doc allow for the UI growing up to 2x (UI/Screen.luau), so 2x the display size, and stay at or under 1024 px a side; one-color icons are exported white and tinted with ImageColor3; the ten block images, which always show together, share a sprite sheet (ImageRectOffset, ImageRectSize); placeholder ids live in one module.",
+		"Correct and in scope: the panel works with live data, equipping calls BlockPlacer.setBlockType, placement and the server keep working, and luau-lsp, selene, and StyLua pass on the attempt's own files. Supporting files such as a preview story count neither for nor against."
+	],
+	"judge_facts": [
+		"Roblox engine API in this sandbox's type definitions (globalTypes.d.luau), all real and current: UIShadow (BlurRadius: UDim, Color, Enabled, Inset: boolean, Mode: Enum.ApplyShadowMode Shape or Text, Offset: UDim2, ShowBehindParent, Spread: UDim2, Transparency, ZIndex); UIStroke.BorderStrokePosition (Enum.BorderStrokePosition: Inner, Center, Outer) and UIStroke.BorderOffset; UIGradient.Type (Enum.GradientType: Linear, Radial, Elliptical, Conical); UIListLayout.Wraps, HorizontalFlex, VerticalFlex (Enum.UIFlexAlignment, including SpaceBetween); UIFlexItem.FlexMode (Fill, Grow, Shrink, Custom).",
+		"This project's UI/Screen.luau (a fixture, already in the starting point): all UI is authored in offsets for a screen 1080 pixels tall, and Screen.uiScale() builds one UIScale under the ScreenGui with Scale = clamp(short side / 1080, 1, 2), so UI grows up to 2x on a 4K screen and never shrinks."
+	],
+	"timeout_minutes": 25
+}

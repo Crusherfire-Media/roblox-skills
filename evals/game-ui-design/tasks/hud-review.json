@@ -1,0 +1,68 @@
+{
+  "id": 2,
+  "name": "hud-review",
+  "skill": "game-ui-design",
+  "prompt": "Before we polish the HUD and the daily reward popup, I'd like a design review. The code is in src/StarterPlayer/StarterPlayerScripts/UI/Hud.luau, UI/DailyReward.luau, and Main.client.luau. Most of our players are kids on phones; we also ship on PC and Xbox.\n\nWrite the review to docs/ui-review.md: what's wrong for players, how bad each problem is, and the concrete fix for each. Don't change the code yet; we'll do the fixes in a separate pass.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacement.server.luau",
+      "to": "src/ServerScriptService/BlockPlacement.server.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacer.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+    },
+    {
+      "from": "fixtures/hud-review/UI/Hud.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/UI/Hud.luau"
+    },
+    {
+      "from": "fixtures/hud-review/UI/DailyReward.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/UI/DailyReward.luau"
+    },
+    {
+      "from": "fixtures/hud-review/Main.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+    }
+  ],
+  "auto_checks": [],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/ui-review.md",
+      "text": "The review exists at docs/ui-review.md"
+    },
+    {
+      "type": "file_matches",
+      "path": "docs/ui-review.md",
+      "pattern": "discord",
+      "flags": "im",
+      "text": "The review mentions the Discord invite"
+    },
+    {
+      "type": "file_matches",
+      "path": "docs/ui-review.md",
+      "pattern": "\\bActivated\\b",
+      "flags": "m",
+      "text": "The review names GuiButton.Activated as the input-agnostic button event"
+    }
+  ],
+  "rubric": [
+    "Flags the join flow: the daily reward popup opens on join as a full-screen blocking modal before the player can play. Recommends letting the player play first (for example a non-blocking button or badge, or offering the reward after play has started).",
+    "Flags the pressure aimed at children: the 59-second countdown and the 'lose your 6-day streak' threat. Recommends removing the threat and the timer pressure (for example keep the streak or give a grace period), not just restyling it.",
+    "Flags the 'Join our Discord for free codes! discord.gg/blockbuilders' banner as an off-platform link, which Roblox's rules prohibit in experience UI, and recommends removing it.",
+    "Flags placement against Roblox's own UI: the menu buttons stacked in the bottom-right corner sit on the touch jump button and the right thumb, and the coin counter at (8, 8) with IgnoreGuiInset = true sits under Roblox's top bar buttons. Fixes move them to safe zones (for example top or mid-side) and keep the safe-area insets or read GuiService.TopbarInset.",
+    "Flags input problems: MouseButton1Click doesn't fire from a gamepad (use Activated); button names exist only in hover tooltips, which touch and gamepad never show; nothing gets default gamepad selection and B can't close the popup; TouchEnabled is used to detect phones (also true on touch laptops; use UserInputService.PreferredInput).",
+    "Flags size and text problems: the 32 px menu buttons, the 24 px close button, and the 120x36 claim button are below comfortable touch sizes (about 44 px or 10 mm minimum, larger for primary actions), and TextScaled on every label gives inconsistent text sizes and ignores the player's text size setting.",
+    "Flags readability and feedback: day squares show claimed, today, and future by color alone (needs a second cue such as a check mark or 'Today'); gray body text (150,150,150) on the light panel (240,240,240) is about 2.6:1, below 4.5:1; the Rewards button pulses forever during play; the 1.5 s toast disappears before a young player can read it.",
+    "The review is usable: findings are ordered by harm to play, and each names the element, the problem, who it hurts, and a concrete fix with sizes or API names. It is written to docs/ui-review.md and the code is left unchanged."
+  ],
+  "judge_facts": [
+    "Roblox engine API in this sandbox's type definitions (globalTypes.d.luau), all real and current: UserInputService.PreferredInput (Enum.PreferredInput: KeyboardAndMouse, Gamepad, Touch, MicroGamepad); GuiService.ViewportDisplaySize (Enum.DisplaySize: Small, Medium, Large); GuiService.TopbarInset (Rect); GuiService.PreferredTextSize; GuiService.PreferredTransparency (number); GuiService.ReducedMotionEnabled (boolean); ScreenGui.ScreenInsets (Enum.ScreenInsets: CoreUISafeInsets, DeviceSafeInsets, TopbarSafeInsets, None)."
+  ],
+  "timeout_minutes": 15
+}

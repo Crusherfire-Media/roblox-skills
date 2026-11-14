@@ -1,0 +1,81 @@
+{
+	"id": 2,
+	"name": "export-plan",
+	"skill": "figma-to-roblox",
+	"prompt": "Our designer put every reusable visual for the HUD and menus on one Figma page, exported with Figma's API (GET /v1/files/:key/nodes) to design/figma/hud-kit.json. The text layers named Note are the designer's notes. Before anything gets built, I need an export plan our artist can follow.\n\nWrite docs/figma/export-plan.md. For every visual on the page, say whether we build it from Roblox UI objects or export it from Figma as an image. For each image: the exact export size in pixels, which images go together on a sprite sheet (with the sheet size, cell size, and where each piece sits), and how it's drawn in Roblox (the ImageLabel properties to set). UI in this game is authored at 1080p and scaled up by src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau. No code yet.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacement.server.luau",
+			"to": "src/ServerScriptService/BlockPlacement.server.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacer.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+		},
+		{
+			"from": "fixtures/shared/UI/Screen.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau"
+		},
+		{
+			"from": "fixtures/shared/Main.client.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+		},
+		{
+			"from": "fixtures/design/hud-kit.json",
+			"to": "design/figma/hud-kit.json"
+		}
+	],
+	"auto_checks": [],
+	"checks": [
+		{
+			"type": "file_exists",
+			"path": "docs/figma/export-plan.md",
+			"text": "The plan exists at docs/figma/export-plan.md"
+		},
+		{
+			"type": "file_matches",
+			"path": "docs/figma/export-plan.md",
+			"pattern": "1024",
+			"flags": "m",
+			"text": "The plan mentions the 1024 px image limit"
+		},
+		{
+			"type": "file_matches",
+			"path": "docs/figma/export-plan.md",
+			"pattern": "SliceCenter",
+			"flags": "m",
+			"text": "The plan gives SliceCenter for 9-slice images"
+		},
+		{
+			"type": "file_matches",
+			"path": "docs/figma/export-plan.md",
+			"pattern": "TileSize",
+			"flags": "m",
+			"text": "The plan gives TileSize for the tiled pattern"
+		},
+		{
+			"type": "file_matches",
+			"path": "docs/figma/export-plan.md",
+			"pattern": "rbxthumb|AvatarHeadShot|GetUserThumbnailAsync",
+			"flags": "im",
+			"text": "The avatar uses a Roblox thumbnail"
+		}
+	],
+	"rubric": [
+		"Native vs image per visual: keyboard prompts (solid fill, rounded corners, stroke, text), the progress bar, the glass card, and text labels such as the ribbon's 'NEW' are built from UI objects; console and touch glyphs, HUD icons, the ornate panel, the dashed empty slot, the dot grid, the diamond-gradient badge, the logo with its glow, the layer-blurred glow, and item portraits are images; the avatar is a Roblox thumbnail (rbxthumb AvatarHeadShot), not a baked photo.",
+		"Shapes Roblox can't draw directly: the ribbon with corner radii 16/0/16/0 is a 9-slice image or a native frame with the square corners patched; the glass card's background blur becomes a darker, more opaque fill, not a BlurEffect (which blurs the whole 3D view).",
+		"Sizes: each export is its 1080p display size times the largest UI scale, 2x from Screen.luau (32 px icons export at 64, 128 px portraits at 256), and nothing exceeds 1024 px a side: the 640x240 logo would be 1280x480 at 2x, so the plan splits it or caps it at 1024 and says so.",
+		"Sheets grouped by what shows together: the twelve HUD icons share one sheet; Xbox, PlayStation, and touch prompts are three separate sheets because a player sees one device's set; the 120 item portraits (one shown at a time, more added each update), the logo, and tile or 9-slice images are single images, not on a sheet.",
+		"Sheet layout: a regular grid of equal cells of at least 64 px with transparent padding around each piece, sheets at or under 1024 px, and each piece's ImageRectOffset and ImageRectSize given or derivable from column, row, and cell size; one-color icons and touch glyphs exported white and tinted with ImageColor3, multicolor console glyphs keeping their colors.",
+		"Drawing settings: the dot grid is one seamless 24 px tile (48 px at 2x) with ScaleType Tile and TileSize in offsets (24 px, not scale); the ornate panel and the dashed slot use ScaleType Slice with SliceCenter in image pixels and SliceScale 0.5 for 2x art, keeping the 48 px corners whole; sprites use ImageRectOffset and ImageRectSize with ScaleType Fit.",
+		"Edges and completeness: soft-edged images (glows, the logo, glyphs) are exported with alpha bleed (edge color carried into transparent pixels) so they don't get dark fringes after upload; every layer on the page gets a destination; numbers are exact; no code is written."
+	],
+	"judge_facts": [
+		"This project's UI/Screen.luau (a fixture, already in the starting point): all UI is authored in offsets for a screen 1080 pixels tall, and Screen.uiScale() builds one UIScale under the ScreenGui with Scale = clamp(short side / 1080, 1, 2), so UI grows up to 2x on a 4K screen and never shrinks."
+	],
+	"timeout_minutes": 15
+}

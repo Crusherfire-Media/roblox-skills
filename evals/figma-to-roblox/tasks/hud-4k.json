@@ -1,0 +1,87 @@
+{
+	"id": 4,
+	"name": "hud-4k",
+	"skill": "figma-to-roblox",
+	"prompt": "Build the quest tracker and the coin counter from the designer's HUD frame, exported with Figma's API (GET /v1/files/:key/nodes) to design/figma/hud-4k.json. Our designer works on a 4K canvas.\n\nPut them in src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau and UI/CoinCounter.luau, built with Vide, and mount them in the GameGui in Main.client.luau. They show the real data from HudData (coins and the current quest; it fires Changed when either changes), and quest titles and descriptions can be much longer than the sample. Any visual that has to be an image can use a placeholder asset id for now.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacement.server.luau",
+			"to": "src/ServerScriptService/BlockPlacement.server.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacer.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+		},
+		{
+			"from": "fixtures/shared/UI/Screen.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau"
+		},
+		{
+			"from": "fixtures/shared/Main.client.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+		},
+		{
+			"from": "fixtures/shared/HudData.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/HudData.luau"
+		},
+		{
+			"from": "fixtures/design/hud-4k.json",
+			"to": "design/figma/hud-4k.json"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "file_exists",
+			"path": "src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau",
+			"text": "The coin counter is in UI/CoinCounter.luau"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "\"UIShadow\"",
+			"text": "The card's shadows are built with UIShadow"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "LineHeight\\s*=\\s*1\\.5\\b",
+			"text": "The body text's line height is 1.5 (48 / 32)"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const fs=require(\"fs\"),p=require(\"path\");const card=process.argv[1];if(!fs.existsSync(card)){console.log(\"missing \"+card);process.exit(1)}const re=/TextSize\\s*=\\s*(48|32)\\b/;const hits=[];const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(f.endsWith(\".luau\")&&re.test(fs.readFileSync(f,\"utf8\")))hits.push(f.split(p.sep).join(\"/\"))}};walk(\"src\");if(hits.length){console.log(\"4K text size in \"+hits.join(\", \"));process.exit(1)}console.log(\"QuestCard exists and no 4K text size found\")",
+				"src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau"
+			],
+			"expect_exit": 0,
+			"text": "UI/QuestCard.luau exists and no file uses the 4K text sizes 48 or 32 (they halve to 24 and 16)"
+		}
+	],
+	"rubric": [
+		"Reference size: every number from the 3840x2160 frame is halved, because the project authors UI in offsets for a 1080-tall screen and scales it with UI/Screen.luau: card 360 wide, padding 16, gap 8, radius 16; title TextSize 24, body 16, count 16; pill 44 tall with 24 px coin text. Values are not copied at 4K size and not turned into scale fractions of the screen.",
+		"Constraints: the card is pinned top-right (AnchorPoint (1, 0), Position (1, -24, 0, 80)) and the pill is centered horizontally (AnchorPoint X 0.5, Position X scale 0.5) 20 px from the top; neither is opted out of the safe area (no IgnoreGuiInset = true or ScreenInsets None), so the pill stays clear of Roblox's top bar.",
+		"Auto layout and text: the card is a vertical UIListLayout (Padding 8) with UIPadding 16 and automatic height; the body is TextWrapped with LineHeight 1.5 (48/32) and AutomaticSize Y, so a long quest grows the card; the title row and progress row are horizontal with 8 px gaps, and the title and the track fill the free width.",
+		"Fills and strokes: the card gradient runs left to right (UIGradient Rotation 0) and the progress fill top to bottom (Rotation 90), each on a white base color; the card fill's 0.94 alpha gives transparency 0.06; the card stroke is 2 px, Center, at transparency 0.86; the coin amount's 4 px outside outline becomes a 2 px UIStroke on the text (Contextual).",
+		"Shadows: two UIShadows for the card's two drop shadows, halved: Offset (0, 4) with BlurRadius 12 at Transparency 0.65, and Offset (0, 1) with BlurRadius 2 at Transparency 0.8.",
+		"Native or image: the progress fill is a native frame sized from Progress / Goal (scale width) that updates when HudData changes; the pill's background blur becomes a plain semi-transparent fill (not a BlurEffect); only the multicolor quest icon and the glowing coin icon are images.",
+		"Correct and in scope: both pieces show live HudData, placement and the server keep working, and luau-lsp, selene, and StyLua pass on the attempt's own files. Supporting files such as a preview story count neither for nor against."
+	],
+	"judge_facts": [
+		"Roblox engine API in this sandbox's type definitions (globalTypes.d.luau), all real and current: UIShadow (BlurRadius: UDim, Color, Enabled, Inset: boolean, Mode: Enum.ApplyShadowMode Shape or Text, Offset: UDim2, ShowBehindParent, Spread: UDim2, Transparency, ZIndex); UIStroke.BorderStrokePosition (Enum.BorderStrokePosition: Inner, Center, Outer) and UIStroke.BorderOffset; UIGradient.Type (Enum.GradientType: Linear, Radial, Elliptical, Conical); UIListLayout.Wraps, HorizontalFlex, VerticalFlex (Enum.UIFlexAlignment, including SpaceBetween); UIFlexItem.FlexMode (Fill, Grow, Shrink, Custom).",
+		"This project's UI/Screen.luau (a fixture, already in the starting point): all UI is authored in offsets for a screen 1080 pixels tall, and Screen.uiScale() builds one UIScale under the ScreenGui with Scale = clamp(short side / 1080, 1, 2), so UI grows up to 2x on a 4K screen and never shrinks."
+	],
+	"timeout_minutes": 20
+}
