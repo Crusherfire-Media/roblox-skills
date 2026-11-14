@@ -52,7 +52,8 @@ The project `CLAUDE.md` conventions apply on top, and win where they tighten a s
 Run `luau-lsp analyze`, `selene`, and `stylua --check` on the changed `.luau` files. Take the exact
 invocation (definitions file, sourcemap, config) from the repo's CI workflow, scripts, or
 `.vscode/settings.json`. Report output that falls on changed lines; leave findings on untouched lines
-out. When a tool is missing or unconfigured, note it under "Not checked".
+out. When a tool is missing or unconfigured (luau-lsp without a Roblox definitions file reports `game`
+as an unknown global), note it under "Not checked".
 
 ## 4. Review, most severe class first
 
@@ -87,7 +88,7 @@ Report only what you verified by reading the code. Each finding names a concrete
 
 ## Report
 
-Keep it compact. Rank findings most severe first:
+Keep it compact: one numbered line per finding. Rank findings most severe first:
 
 - **blocker:** exploitable remote, data loss, a hang or crash, a broken build or sync.
 - **should-fix:** a skill or `CLAUDE.md` rule broken, or a latent bug with a plausible trigger.
@@ -100,6 +101,7 @@ Reviewed: <range>, <n> files. Skills: <loaded>. Checks: luau-lsp <result>, selen
 2. [should-fix] ...
 3. [nit] ...
 
+Outside the diff: <bugs on untouched lines that the change builds on, one line each, or omit>.
 Not checked: <what you could not check, and why>.
 ```
 
