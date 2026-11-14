@@ -1,0 +1,64 @@
+{
+  "id": 4,
+  "name": "build-loading",
+  "skill": "roblox-performance",
+  "prompt": "When a player with a big saved build joins, the whole server freezes for about two seconds: a server MicroProfiler capture shows one 2,100 ms frame, almost all of it under Script_Builds, and every player rubber-bands. Clients also hitch hard in Replicator ProcessPackets right afterwards. When someone with a big build leaves, there's a smaller freeze too. Saves go up to 20,000 blocks (SavedBuilds.luau returns a test build that size until real saving ships) and servers hold 8 players.\n\nFix loading and unloading in src/ServerScriptService/Builds.server.luau so they don't freeze the server. Placing and removing blocks have to keep working the way they do now, including the owner check on removal, and we need to keep each block's placed time for an upcoming feature. Write what you changed, and anything players will notice, in docs/perf/build-loading.md.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/build-loading/Builds.server.luau",
+      "to": "src/ServerScriptService/Builds.server.luau"
+    },
+    {
+      "from": "fixtures/build-loading/SavedBuilds.luau",
+      "to": "src/ServerScriptService/SavedBuilds.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacer.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+    },
+    {
+      "from": "fixtures/shared/Main.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+    }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/perf/build-loading.md",
+      "text": "The write-up was written to docs/perf/build-loading.md"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Builds.server.luau",
+      "pattern": "Instance\\.new\\(\\s*\"Part\"\\s*,",
+      "text": "Blocks are no longer parented before their properties are set (planted Instance.new(\"Part\", parent) is gone)"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Builds.server.luau",
+      "pattern": "Instance\\.new\\(\\s*\"(StringValue|NumberValue)\"",
+      "text": "Blocks no longer carry value-object children for their owner and placed time"
+    },
+    {
+      "type": "file_matches",
+      "path": "src/ServerScriptService/Builds.server.luau",
+      "pattern": "task\\.wait\\(|\\.Heartbeat:Wait\\(|\\.Heartbeat:Connect\\(|\\.PostSimulation:Wait\\(|\\.PostSimulation:Connect\\(|\\.Stepped:Wait\\(",
+      "text": "Builds.server.luau yields or steps across frames somewhere (loading can be spread over frames)"
+    }
+  ],
+  "rubric": [
+    "Fewer instances per block: the per-block Owner StringValue and PlacedAt NumberValue are replaced by data that adds no instances (a Luau table keyed by part or cell, or attributes), cutting a full save from about 60,000 instances to about 20,000. The placed time is still kept for every block, saved and newly placed alike.",
+    "Each block's properties are set before it is parented (no `Instance.new(\"Part\", parent)` followed by property writes), or blocks are built under a detached container that is parented once.",
+    "Loading is spread across frames: blocks are created or parented in batches with a per-frame budget (a block count or an os.clock() time allowance), yielding between batches, instead of all 20,000 in one loop. Unloading is spread the same way or otherwise avoids destroying tens of thousands of instances in one frame.",
+    "No overlaps or half states while a load is in progress: every cell of the save is reserved in `occupied` before the first yield (or placement into a loading plot is otherwise blocked), so nobody can place a block into a cell that is still loading; and a player who leaves mid-load stops the load and leaves nothing behind (no orphan blocks, no cells left reserved).",
+    "Removal keeps the same rules (only the block's owner, within reach, frees the cell), and placing still validates everything it did before.",
+    "docs/perf/build-loading.md says that builds now appear over several frames, with roughly how long a full save takes at the chosen budget, does not present unmeasured timings as measured, and lists anything else players will notice.",
+    "Correct and in scope: changes stay in Builds.server.luau and the write-up (plus anything strictly needed), the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files count neither for nor against."
+  ],
+  "timeout_minutes": 25
+}

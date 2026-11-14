@@ -1,0 +1,104 @@
+{
+  "id": 1,
+  "name": "placement-review",
+  "skill": "roblox-performance",
+  "prompt": "A friend who makes games in another engine read our block placement code (src/ServerScriptService/BlockPlacement.server.luau and src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau) and sent me this list of things he says are slowing it down:\n\n1. Pool the block Parts instead of calling Instance.new for every block.\n2. Pack PlaceBlock's arguments into a buffer to cut network traffic.\n3. Change PlaceBlock to an UnreliableRemoteEvent, because unreliable events are faster.\n4. Put --!native at the top of both scripts.\n5. Replace the table.find check with a lookup table.\n6. Create the RaycastParams once instead of on every click.\n\nThe server lets each player place at most 10 blocks a second, servers hold 8 players, and nobody has reported lag. Go through his list and make whichever changes are actually worth making. Write your verdict on each item, with your reasoning, in docs/perf/placement-review.md.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/placement-review/BlockPlacement.server.luau",
+      "to": "src/ServerScriptService/BlockPlacement.server.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacer.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+    },
+    {
+      "from": "fixtures/shared/Main.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+    }
+  ],
+  "auto_checks": [],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/perf/placement-review.md",
+      "text": "The review was written to docs/perf/placement-review.md"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/BlockPlacement.server.luau",
+      "pattern": "UnreliableRemoteEvent",
+      "text": "PlaceBlock is still a reliable RemoteEvent"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\");const re=new RegExp(process.argv[1]);const hits=[];const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(f.endsWith(\".luau\")&&re.test(fs.readFileSync(f,\"utf8\")))hits.push(f.split(p.sep).join(\"/\"))}};walk(\"src\");if(hits.length){console.log(\"matched in \"+hits.join(\", \"));process.exit(1)}console.log(\"no file matched\")",
+        "(--!native|@native)"
+      ],
+      "expect_exit": 0,
+      "text": "No file under src turns on native code generation"
+    },
+    {
+      "type": "command",
+      "run": [
+        "selene",
+        "src"
+      ],
+      "expect_exit": 0,
+      "text": "selene passes on src (the code still lints clean, changed or not)"
+    },
+    {
+      "type": "command",
+      "run": [
+        "stylua",
+        "--check",
+        "src"
+      ],
+      "expect_exit": 0,
+      "text": "stylua --check passes on src"
+    },
+    {
+      "type": "command",
+      "run": [
+        "rojo",
+        "sourcemap",
+        "default.project.json",
+        "-o",
+        "sourcemap.json",
+        "--include-non-scripts"
+      ],
+      "expect_exit": 0,
+      "text": "The Rojo sourcemap builds (needed by the luau-lsp check)"
+    },
+    {
+      "type": "command",
+      "run": [
+        "luau-lsp",
+        "analyze",
+        "--platform=roblox",
+        "--definitions:@roblox=globalTypes.d.luau",
+        "--sourcemap=sourcemap.json",
+        "--ignore=**/roblox_packages/**",
+        "src"
+      ],
+      "expect_exit": 0,
+      "text": "luau-lsp analyze reports no errors under src"
+    }
+  ],
+  "rubric": [
+    "The verdicts are grounded in the actual scale: the write-up works out roughly how much work placement does (at most about 10 placements a second per player, about 80 a second per server, each costing microseconds of server time and a few dozen bytes on the network) and concludes that placement is far too small to cause lag, so no item on the list is needed for performance.",
+    "Item 3 is rejected as a correctness problem, not only for lack of gain: an UnreliableRemoteEvent may drop or reorder messages, so placements could silently be lost. PlaceBlock stays a reliable RemoteEvent.",
+    "No pooling, buffer packing, native code (`--!native` or `@native`), or Parallel Luau is added, and the write-up gives a concrete reason for each rejection (for example the memory and reset bugs a pool brings, a buffer saving a handful of bytes per click, native code doing nothing for code that mostly calls engine APIs).",
+    "Code changes, if any, are small, readable, and keep behavior identical (for example the lookup table in item 5 or reusing RaycastParams in item 6). Making no code changes is equally acceptable when the write-up says why. All server validation (types, NaN, block type, rate limit, reach, occupancy) still works.",
+    "The write-up says how to find out if placement ever does become a problem (for example a MicroProfiler or Script Profiler capture on the server while players build, or the server's network send and receive rates) instead of optimizing ahead of evidence.",
+    "Correct and in scope: only the two named scripts and the write-up change, and luau-lsp, selene, and StyLua still pass. Extra supporting files count neither for nor against."
+  ],
+  "timeout_minutes": 15
+}

@@ -1,0 +1,67 @@
+{
+  "id": 2,
+  "name": "spike-report",
+  "skill": "rbx-perf-profiling",
+  "prompt": "Our hitch catcher (src/ReplicatedStorage/Shared/Dev/HitchSnapshot.luau) saves the MicroProfiler's frames to slot 2 when a playtest hitches. Add src/ReplicatedStorage/Shared/Dev/SpikeReport.luau with a function run(slot: number) that we'll call from the Studio command bar in Edit mode after the playtest, like require(game.ReplicatedStorage.Shared.Dev.SpikeReport).run(2). Dev modules get LibMP through LibMPLoader in the same folder.\n\nFor the snapshot in that slot, run should return a table with:\n\n- the median and 90th percentile frame time;\n- every frame that took more than twice the median, each with the five scopes that spent the most time of their own in that frame (not counting time spent in scopes nested inside them), across the CPU threads;\n- the same top five, averaged over the frames that weren't slow, so we can compare a hitch with a normal frame.\n\nName each slow frame so we can find it both from LibMP and in the MicroProfiler UI.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/LibMPLoader.luau",
+      "to": "src/ReplicatedStorage/Shared/Dev/LibMPLoader.luau"
+    },
+    {
+      "from": "fixtures/spike-report/HitchSnapshot.luau",
+      "to": "src/ReplicatedStorage/Shared/Dev/HitchSnapshot.luau"
+    }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "src/ReplicatedStorage/Shared/Dev/SpikeReport.luau",
+      "text": "SpikeReport.luau was added in the Dev folder"
+    },
+    {
+      "type": "file_matches",
+      "path": "src/ReplicatedStorage/Shared/Dev/SpikeReport.luau",
+      "pattern": "OpenFromSlot",
+      "text": "SpikeReport opens the snapshot from its slot"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ReplicatedStorage/Shared/Dev/SpikeReport.luau",
+      "pattern": "OpenFromLiveData",
+      "text": "SpikeReport does not read the live profiler data"
+    },
+    {
+      "type": "file_matches",
+      "path": "src/ReplicatedStorage/Shared/Dev/SpikeReport.luau",
+      "pattern": "FrameAbsoluteId",
+      "text": "SpikeReport reads each frame's absolute id"
+    },
+    {
+      "type": "file_matches",
+      "path": "src/ReplicatedStorage/Shared/Dev/SpikeReport.luau",
+      "pattern": ":Dispose\\(\\)",
+      "text": "SpikeReport disposes of what it creates"
+    }
+  ],
+  "rubric": [
+    "Opens the slot's snapshot with Session.OpenFromSlot(slot) and handles a failed open; it does not read live data, does not toggle or reconfigure the profiler (no EnableCapture, EnableProfiler, or SetFrameLimit calls), and does not clear the slot, which the user may want to report on again.",
+    "Frame times come from the frame descriptors' CPU ticks converted with TickToMsCpu, incomplete frames are skipped, and the median and 90th percentile are computed from the sorted frame times.",
+    "Per-frame scope time counts only the part of each scope that falls inside that frame: a scope that crosses a frame boundary is split across the frames it overlaps (for example with EmitThreadFrameEnd and EnterTimestampFrameLocal, using the frame's start for an exit whose enter came before the range), rather than being charged entirely to the frame where it exits or being dropped.",
+    "Self time is computed per thread with a scope stack: each scope's in-frame time minus the in-frame time of the scopes directly nested in it. The GPU thread is skipped (or kept separate and converted with TickToMsGpu), never mixed with CPU ticks.",
+    "Each slow frame is reported with both its FrameId and its FrameAbsoluteId, and the normal-frame comparison averages over the frames that were not slow.",
+    "Uses LibMP safely: the iterator and the session are disposed on every path, including when something errors; Get*** views are read immediately (or Fetch*** is used) and any Get*** arrays are disposed; timer names and Find*** results are looked up once and cached rather than per log entry.",
+    "Returns the result as a table rather than only printing it, keeps changes to the new module (plus anything strictly needed), and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files count neither for nor against."
+  ],
+  "judge_facts": [
+    "LibMP (Roblox/libmp upstream api-reference.md and guide; LibMP is not in the sandbox): Control:CaptureToSlotSync(slot) saves a snapshot of the live frames to slot 1-4 (kept across Studio's Play/Edit switch), opened with Session.OpenFromSlot(slot); Control:ResetSlot(slot) clears a slot. Snapshot sessions are frozen. Session.OpenFromLiveData() follows the live profiler instead. Session.OpenFrom*** returns nil on failure. Control:SetFrameLimit and EnableCapture change the engine's one shared MicroProfiler for every reader.",
+    "LibMP (upstream api-reference.md, Memory Management): every Session, LogIterator, and CounterIterator, and every array returned by a Get*** method (GetCounterSamples, GetTimerIds, ...), must be released with :Dispose(); undisposed ones leak memory inside LibMP's WASM instance (LibMP.GetMemUsed() keeps rising). Fetch*** methods (FetchFrameDesc, FetchTimerDesc, FetchCounterSamples, ...) return plain Luau copies that need no disposal.",
+    "LibMP (upstream api-reference.md, Fetch vs Get): Get*** methods such as GetTimerDesc and GetFrameDesc return a view read through getter methods (view:TimerName()); a view is invalidated by any later Get*** or Fetch*** call on the same session and then reads garbage. Fetch*** methods return deep-copied tables with plain fields (desc.TimerName). The iterator state from iter:GetState() is the exception: it stays valid for the iterator's life.",
+    "LibMP (upstream api-reference.md and guide): FetchFrameDesc(id) has FrameId, FrameAbsoluteId (the frame number also used to find the frame in the MicroProfiler UI; it has gaps where capture paused), TickStartCpu, TickEndCpu, TickStartGpu, TickEndGpu, IsIncomplete. FetchGlobalDesc() gives TickToMsCpu and TickToMsGpu. CPU and GPU timestamps have different origins and scales and must not be mixed. session:GetThreadIdGpu() is the GPU thread; FetchThreadDesc(id).IsGpu marks it too.",
+    "LibMP log iterator (upstream api-reference.md and guide): iter:Configure{ThreadIds, TimerIds, GroupIds, SkipEvents, SkipGpuThreads, EmitThreadFrameEnd}; iter:RewindTo(min, max); state = iter:GetState(). A scope instance can span frame boundaries, and its exit entry appears only in the frame where it ends. With EmitThreadFrameEnd = true, state:IsThreadFrameEnd() fires when a thread's log ends in a frame; for each element still on its stack (iter:GetCurrentThreadStackElement(level), 0-based), element:EnterTimestampFrameLocal() is its enter time clamped to that frame's start.",
+    "LibMP log iterator (upstream guide): on an exit (state:IsExit()), iter:GetCurrentThreadStackElement(state:ThreadStackDepth()) is the scope just closed; element:EnterTimestamp() is its original enter time, not clamped to the frame. state:ThreadStackIsUnderflowed() means the enter happened before the iterated range (the frame's TickStartCpu is then the in-frame start). Starting one frame early warms up the stack. Scope times are inclusive: a scope's time includes the scopes nested in it.",
+    "LibMP (upstream api-reference.md): Find*** methods (FindThreadIds, FindGroupId, FindTimerIds, FindCounterId) take name masks, return 0 or an empty list when nothing matches, and are slow, so the guide says to call them once and store the result. FetchTimerDesc(id) has TimerId, TimerName, GroupId, IsUserTimer; FetchGroupDesc(id) has GroupId, GroupName, IsGpu. LibMP has no built-in averages, minimums, maximums, or percentiles."
+  ],
+  "timeout_minutes": 25
+}
