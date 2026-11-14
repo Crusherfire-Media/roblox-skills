@@ -33,12 +33,18 @@ Each `Start` script requires the loader, optionally calls `ChangeSettings`, then
 
 ```lua
 const ModuleLoader = require("@game/ReplicatedStorage/ModuleLoading/ModuleLoader")
-ModuleLoader.ChangeSettings({ VERBOSE_LOADING = script:GetAttribute("VERBOSE_LOADING") })
+ModuleLoader.ChangeSettings({
+	USE_COLLECTION_SERVICE = true,
+	VERBOSE_LOADING = script:GetAttribute("VERBOSE_LOADING"),
+})
 ModuleLoader.Start()
 ```
 
-`Start()` with no arguments discovers modules only by tag. `Start(folderA, folderB, ...)` also
-searches those folders. `Start` may be called once per realm; a second call errors.
+`Start()` with no arguments discovers modules only by tag, and tag discovery runs only while
+`USE_COLLECTION_SERVICE` is true, which defaults to false. Without it, `Start()` loads nothing. In
+a pesde install the loader's script sits inside the package folder, so turn it on with
+`ChangeSettings` as above. `Start(folderA, folderB, ...)` also searches those folders. `Start` may
+be called once per realm; a second call errors.
 
 Settings are attributes on the ModuleLoader script. `ChangeSettings` overrides them at runtime,
 merging its keys into the live settings; keys left out keep their value. A setting attribute of
@@ -48,7 +54,7 @@ the wrong type logs `ModuleLoader setting ... ignoring it.` and counts as unset.
 |---|---|---|
 | `VerboseLoading` (default `true`) | `VERBOSE_LOADING` | Log every step and the load timings; only an explicit `false` turns it off |
 | `YieldThreshold` (default 10) | `YIELD_THRESHOLD` | Seconds before a slow-call warning |
-| `UseCollectionService` | `USE_COLLECTION_SERVICE` | Discover by tag |
+| `UseCollectionService` (default `false`) | `USE_COLLECTION_SERVICE` | Discover by tag; required for `Start()` with no arguments |
 | `LoaderTag` (default `LOAD_MODULE`) | none | The discovery tag, fixed at require time |
 | `ClientWaitForServer` | `WAIT_FOR_SERVER` | Client waits for the server to finish loading |
 | `ClientWaitForPersistentLoaded` | `WAIT_FOR_PERSISTENT` | Client waits for persistent models to stream in |
