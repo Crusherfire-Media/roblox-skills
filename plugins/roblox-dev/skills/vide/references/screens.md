@@ -600,8 +600,9 @@ One arrangement that worked on phones held sideways, as an option to show the us
   pin the screen while the story builds, and build the story inside a frame sized to
   `Screen.usableSize()` in offsets that holds a `UIScale` bound to `Screen.uiScale`. That frame
   comes out at the simulated screen's size below the topbar. Choose the screen from a list
-  control in the `Preview` group, and key the story by it (the `indexes` pattern in
-  `roblox-dev:vide-ui-labs`) so a new choice rebuilds on the new screen. Each mounted story has its own copy
+  control in the `Preview` group, and key the story by it
+  (`indexes(function() return { [controls.Screen()] = true } end, build)`) so a new choice
+  rebuilds on the new screen. Each mounted story has its own copy
   of every module, so the pin does not leak. A screen larger than the preview cannot be shown this
   way. The frame's size was checked; no shared story helper has been built on it yet.
 - "View on Viewport" shows a story at Studio's own viewport size, without the root scale the game

@@ -145,19 +145,27 @@ return {
   prop once shows only the first value; make that prop accept a source.
 - Callbacks the game would handle (purchases, closing) do something visible in the story: print,
   or update a story-local `source` so the UI reacts the way it would in game.
-- To reset story state when a control changes (refill a tray, restart a timer), key that part of
-  the story by the control, so a new value rebuilds it with fresh state:
+- Mount the component once and keep it mounted while controls change. When a control sets a value
+  the UI also changes (a picker's selection that tile clicks change too, a tray a control refills),
+  hold that value in a story-local source: an effect copies the control into it, and the UI's
+  callbacks update it.
 
   ```lua
-  return indexes(function()
-      return { [controls.RestockCount()] = true }
-  end, function(_, restockCount: number)
-      local soldCounts = source({})
-      -- ...build the panel from restockCount and soldCounts
+  local selected = source(controls.Block())
+  effect(function()
+      selected(controls.Block())
   end)
+
+  return BlockPicker({
+      Selected = selected,
+      OnSelect = function(block: string)
+          selected(block)
+      end,
+  })
   ```
 
-  Setting a source from an effect to reset it is the pattern the `roblox-dev:vide` skill steers away from.
+  This is the one place an effect sets a source: the value has two writers, the control from
+  outside the UI and the UI itself, which `derive` cannot express.
 - The story function never yields; UI Labs warns "Vide story yielded when called." when it does.
 
 ## Organize the controls
