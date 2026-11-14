@@ -74,7 +74,8 @@ statement longer than 100 columns.
   end)
   ```
 
-  An `if` whose body is a single `return` gets three lines too:
+  An `if` whose body is a single `return`, `continue`, or `break` gets three
+  lines too:
 
   Good:
   ```lua

@@ -110,8 +110,8 @@ pattern, and weak tables, which cannot track Roblox Instances.
 - Separate logical groups with one blank line. A block's first line is code,
   never a blank line.
 - One statement per line, and function bodies on their own lines. An `if`
-  whose body is only a `return` still takes three lines:
-  `if not plot then`, `return`, `end`.
+  whose body is only a `return`, `continue`, or `break` (a guard clause)
+  still takes three lines: `if not plot then`, `return`, `end`.
 - Put spaces around operators. Drop them only to show precedence:
   `local damage = base + bonus * 2^tier`.
 - Follow every comma in tables and calls with a space.
