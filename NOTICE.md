@@ -83,7 +83,7 @@ The skills below describe these projects in their own words and quote only API n
 
 | Project | Copyright | License | Used by |
 |---|---|---|---|
-| [Roblox Lua Style Guide](https://roblox.github.io/lua-style-guide/) | Roblox Corporation | No license published; rules are summarized in our own words with our own examples | `roblox-lua-style-guide` |
+| [Roblox Lua Style Guide](https://roblox.github.io/lua-style-guide/) | Roblox Corporation | No license published; rules are summarized in our own words with our own examples | `luau-style-guide` |
 | [Vide](https://github.com/centau/vide) | Copyright (c) 2022 centau | MIT | `vide`, `vide-charm`, `vide-performance`, `vide-ui-labs` |
 | [Charm, vide-charm, CharmSync](https://github.com/littensy/charm) | Copyright 2024-present Littensy | MIT | `vide-charm` |
 | [UI Labs](https://github.com/PepeElToro41/ui-labs) plugin | PepeElToro41 | GPL-3.0 | `vide-ui-labs` |
