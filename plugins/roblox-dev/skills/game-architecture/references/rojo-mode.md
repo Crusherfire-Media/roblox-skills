@@ -27,13 +27,14 @@ how changes travel, and how Module Loader is installed through pesde.
 Every attribute and folder tint goes in a `.meta.json` file (the `rojo-workflow` skill shows
 one): Rojo replaces a Studio change on its next sync. Realm flags and `LoaderPriority` sit in
 `<Module>.meta.json` beside the module, and a folder's attributes and tint in its
-`init.meta.json`. `IconTint` is a property, written as a Color3's components from 0 to 1: red
-`[1, 0, 0]` for `SystemPackage`, light blue `[0, 0.6666666865348816, 1]` for `Implementation`.
+`init.meta.json`. `IconTint` is a property; write it in the typed form, `{ "Color3": [r, g, b] }`
+with components from 0 to 1, since Rojo 7.6 rejects the bare array: red `[1, 0, 0]` for
+`SystemPackage`, light blue `[0, 0.6666666865348816, 1]` for `Implementation`.
 
 ```json
 {
   "properties": {
-    "IconTint": [1, 0, 0]
+    "IconTint": { "Color3": [1, 0, 0] }
   }
 }
 ```
