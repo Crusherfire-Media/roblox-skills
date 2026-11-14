@@ -1,0 +1,85 @@
+{
+	"id": 4,
+	"name": "ghost-preview",
+	"skill": "roblox-lua-style-guide",
+	"prompt": "Build mode needs a ghost preview: a see-through copy of the selected block that follows the mouse, snapped to the grid, so players can see where a click would put a block. Write it as a class in src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau. The build mode controller (I'll write it next) will create one when the player enters build mode, change its block type when they pick another block, and tear it down when they leave build mode, which can happen many times in a session.\n\n- Every frame, raycast from the mouse into the world, ignoring the player's character and the ghost itself, and put the ghost in the grid cell next to the surface the ray hits, using PlacementRules.snap from src/ReplicatedStorage/Shared/PlacementRules.luau. Hide it when the mouse points at nothing (the sky).\n- Color it from src/ReplicatedStorage/Shared/BlockTypes.luau, but tint it red where PlacementRules.check says the block can't go. The server keeps placed blocks in a Workspace folder named PlacedBlocks.\n- Most callers will want the defaults, but some will want a different transparency, or a longer or shorter raycast than the default 500 studs.\n- The controller needs to ask it whether the current spot is placeable, and where, so it can send the placement request on click.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/shared/PlacementRules.luau",
+			"to": "src/ReplicatedStorage/Shared/PlacementRules.luau"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "file_exists",
+			"path": "src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau",
+			"text": "The class is at src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau",
+			"pattern": "PlacementRules\\.snap\\(",
+			"text": "It snaps with PlacementRules.snap"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau",
+			"pattern": "PlacementRules\\.check\\(",
+			"text": "It checks the spot with PlacementRules.check"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau",
+			"pattern": ":Disconnect\\(\\)",
+			"text": "It disconnects a connection (the per-frame update) somewhere"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const cp = require('child_process'); const paths = process.argv.slice(1); let out; try { out = cp.execFileSync('git', ['status', '--porcelain', '--', ...paths], { encoding: 'utf8' }); } catch (e) { console.log('git status failed: ' + e.message); process.exit(1); } if (out.trim()) { console.log('changed:\\n' + out.trim()); process.exit(1); } console.log('unchanged: ' + paths.join(', '));",
+				"src/ReplicatedStorage"
+			],
+			"text": "BlockTypes and PlacementRules are unchanged"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau",
+			"pattern": "^--!strict",
+			"flags": "",
+			"text": "Convention: --!strict is the first line"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau",
+			"pattern": "^Module\\.__index = Module",
+			"text": "Convention: a prototype class whose table is named Module"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau",
+			"pattern": "^const \\w+ = game:GetService\\(",
+			"text": "Convention: services are bound with const"
+		}
+	],
+	"rubric": [
+		"Works: updates every frame, raycasts from the mouse while excluding the character and the ghost, steps half a block out along the hit normal before PlacementRules.snap so the ghost sits beside the surface rather than inside it, hides on a miss, takes its look from BlockTypes, tints red when PlacementRules.check fails (against Workspace.PlacedBlocks), and updates its look when the block type changes. Reuses PlacementRules instead of reimplementing it.",
+		"Tears down completely: the teardown method disconnects the per-frame connection and any other connection it made and destroys the ghost part, so entering and leaving build mode many times leaves no parts or running connections behind, and no frame update can run against a destroyed ghost.",
+		"Class shape: one class whose instance fields are all declared in a type the checker enforces (for example typeof(setmetatable(...)) or an explicit type), set together in the constructor, with methods called with a colon; a reader sees the whole instance shape in one place. The ghost part is non-colliding and not hit by its own raycast.",
+		"Typing: the constructor and every public method have typed parameters and returns, the block type parameter uses BlockTypes' BlockType type, and the placeable-and-where query returns a typed answer that represents \"nowhere\" consistently (for example Vector3? that is nil when not placeable, or a boolean plus an optional position).",
+		"Optional settings read clearly: transparency and ray length come in through a named options table (or setters), not as extra positional arguments or boolean flags, and the defaults are named constants.",
+		"Stays in scope and is ready to merge: one class at the given path, no build mode controller, input handling, remotes, or UI, BlockTypes and PlacementRules unchanged, and luau-lsp, selene, and StyLua pass. Supporting files such as specs or stories count neither for nor against."
+	],
+	"notes": "Write branch for classes (references/classes.md): prototype class with a typed instance shape, constructor that sets every field, a Destroy that disconnects and destroys everything it made, an options table for optional settings, an optional return for the placement query. Convention checks cover --!strict, Module.__index = Module, and const services. With-skill trials also load game-architecture (new module with requires); the prompt pins the path.",
+	"timeout_minutes": 20
+}

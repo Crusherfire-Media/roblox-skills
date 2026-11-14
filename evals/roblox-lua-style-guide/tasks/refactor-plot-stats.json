@@ -1,0 +1,104 @@
+{
+	"id": 2,
+	"name": "refactor-plot-stats",
+	"skill": "roblox-lua-style-guide",
+	"prompt": "src/ReplicatedStorage/Shared/PlotStats.luau was thrown together during a game jam and now nobody wants to touch it. Refactor it so it's easy to read and safe to extend. We're moving shared modules to strict type checking, so it should end up typed and passing under --!strict.\n\nThe plot sign and the leaderboard call summarize, getTallest, format, and compare, so those four must keep their names and arguments and return exactly what they return today for every input they handle now, edge cases included. Only change this file.",
+	"setup_files": [
+		{
+			"from": "fixtures/refactor-plot-stats/PlotStats.luau",
+			"to": "src/ReplicatedStorage/Shared/PlotStats.luau"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const cp = require('child_process'); const fs = require('fs'); const os = require('os'); const path = require('path'); const file = process.argv[1]; const lune = process.argv[2]; let before; let after; try { before = cp.execFileSync('git', ['show', 'HEAD:' + file], { encoding: 'utf8' }); after = fs.readFileSync(file, 'utf8'); } catch (e) { console.log('cannot read ' + file + ': ' + e.message); process.exit(1); } const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plotstats-')); try { fs.writeFileSync(path.join(dir, 'before.luau'), before); fs.writeFileSync(path.join(dir, 'after.luau'), after); fs.writeFileSync(path.join(dir, 'check.luau'), lune); const res = cp.spawnSync('lune', ['run', path.join(dir, 'check.luau'), path.join(dir, 'before.luau'), path.join(dir, 'after.luau')], { encoding: 'utf8', timeout: 60000 }); if (res.error) { console.log('cannot run lune: ' + res.error.message); process.exit(1); } process.stdout.write((res.stdout || '') + (res.stderr || '').split(dir).join('')); process.exit(res.status === 0 ? 0 : 1); } finally { fs.rmSync(dir, { recursive: true, force: true }); }",
+				"src/ReplicatedStorage/Shared/PlotStats.luau",
+				"local fs = require(\"@lune/fs\")\nlocal luau = require(\"@lune/luau\")\nlocal process = require(\"@lune/process\")\nlocal roblox = require(\"@lune/roblox\")\n\nlocal Vector3 = roblox.Vector3\n\nlocal function load(path: string, label: string)\n\tlocal ok, result = pcall(function()\n\t\tlocal chunk = luau.load(fs.readFile(path), { debugName = label, environment = { Vector3 = Vector3 } })\n\t\treturn chunk()\n\tend)\n\tif not ok then\n\t\tprint(`{label} failed to load: {result}`)\n\t\tprocess.exit(1)\n\tend\n\treturn result\nend\n\nlocal before = load(process.args[1], \"starting PlotStats\")\nlocal after = load(process.args[2], \"refactored PlotStats\")\n\nlocal function same(a: any, b: any, seen: { [any]: any }): boolean\n\tif type(a) == \"number\" and type(b) == \"number\" then\n\t\treturn a == b or math.abs(a - b) <= 1e-9 * math.max(1, math.abs(a))\n\tend\n\tif type(a) ~= \"table\" or type(b) ~= \"table\" then\n\t\treturn a == b\n\tend\n\tif rawequal(a, b) or seen[a] == b then\n\t\treturn true\n\tend\n\tseen[a] = b\n\tfor k, v in a do\n\t\tif not same(v, b[k], seen) then\n\t\t\treturn false\n\t\tend\n\tend\n\tfor k in b do\n\t\tif a[k] == nil then\n\t\t\treturn false\n\t\tend\n\tend\n\treturn true\nend\n\nlocal function describe(value: any): string\n\tif type(value) ~= \"table\" then\n\t\treturn tostring(value)\n\tend\n\tlocal parts = {}\n\tfor k, v in value do\n\t\ttable.insert(parts, `{tostring(k)}={describe(v)}`)\n\tend\n\ttable.sort(parts)\n\treturn \"{\" .. table.concat(parts, \", \") .. \"}\"\nend\n\nlocal failures = 0\nlocal function compare(label: string, f: (any) -> ...any)\n\tlocal okA, a1, a2 = pcall(f, before)\n\tlocal okB, b1, b2 = pcall(f, after)\n\tif okA ~= okB or not same(a1, b1, {}) or not same(a2, b2, {}) then\n\t\tfailures += 1\n\t\tif failures <= 5 then\n\t\t\tprint(`{label}: expected {okA and \"\" or \"error \"}{describe(a1)}, got {okB and \"\" or \"error \"}{describe(b1)}`)\n\t\tend\n\tend\nend\n\nlocal NAMES = { \"Brick\", \"Dirt\", \"Grass\", \"Window\", \"Wood\" }\nlocal function block(kind: any, x: number, y: number, z: number): any\n\treturn { Type = kind, Position = Vector3.new(x, y, z) }\nend\n\nlocal cases: { [string]: { any } } = {}\ncases.empty = {}\ncases.one = { block(\"Brick\", 0, 2, 0) }\ncases.fraction = { block(\"Window\", 4, 7.5, 4), block(\"Wood\", 8, 2, 8) }\ncases.belowGround = { block(\"Dirt\", 0, -6, 0) }\ncases.skipped = {\n\tblock(\"Glass\", 0, 50, 0),\n\t{ Type = \"Brick\" },\n\tblock(\"Grass\", 0, 10, 0),\n\tblock(\"brick\", 0, 90, 0),\n\tblock(\"Grass\", 4, 6, 0),\n}\ncases.allFive = {}\nfor index, name in NAMES do\n\ttable.insert(cases.allFive, block(name, index * 4, index * 4 - 2, 0))\nend\nfor _, total in { 50, 51, 60, 1500 } do\n\tlocal list = {}\n\tfor index = 1, total do\n\t\ttable.insert(list, block(NAMES[(index * 7) % 5 + 1], index * 4, (index % 13) * 4 + 2, 0))\n\tend\n\tcases[`blocks{total}`] = list\nend\ncases.twoTypes = {}\nfor index = 1, 30 do\n\ttable.insert(cases.twoTypes, block(if index % 2 == 0 then \"Wood\" else \"Window\", index * 4, 2, 0))\nend\n\nlocal summariesBefore = {}\nfor name, list in cases do\n\tcompare(`summarize({name})`, function(m)\n\t\treturn m.summarize(list)\n\tend)\n\tcompare(`getTallest({name})`, function(m)\n\t\treturn m.getTallest(list)\n\tend)\n\tsummariesBefore[name] = before.summarize(list)\nend\n\nfor name, summary in summariesBefore do\n\tfor _, short in { true, false } do\n\t\tcompare(`format({name}, {short})`, function(m)\n\t\t\treturn m.format(table.clone(summary), short)\n\t\tend)\n\tend\n\tcompare(`format({name})`, function(m)\n\t\treturn m.format(table.clone(summary))\n\tend)\nend\n\nlocal summaryList = {}\nfor _, summary in summariesBefore do\n\ttable.insert(summaryList, summary)\nend\ntable.insert(summaryList, { Score = 100, Total = 3 })\ntable.insert(summaryList, { Score = 100, Total = 5 })\nfor i, a in summaryList do\n\tfor j, b in summaryList do\n\t\tcompare(`compare(#{i}, #{j})`, function(m)\n\t\t\treturn m.compare(a, b)\n\t\tend)\n\tend\nend\n\nif failures > 0 then\n\tprint(`{failures} comparisons differ from the starting PlotStats`)\n\tprocess.exit(1)\nend\nprint(\"summarize, getTallest, format, and compare return the same results as the starting PlotStats\")\n"
+			],
+			"timeout_seconds": 120,
+			"text": "Behavior unchanged: summarize, getTallest, format, and compare return the same results as the starting file over a fixed set of inputs (run in Lune)"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ReplicatedStorage/Shared/PlotStats.luau",
+			"pattern": "^--!strict",
+			"flags": "",
+			"text": "The file opts into strict type checking (--!strict on its first line)"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const fs = require('fs'); const [file, ...names] = process.argv.slice(1); let text; try { text = fs.readFileSync(file, 'utf8'); } catch (e) { console.log('cannot read ' + file); process.exit(1); } const bad = []; for (const name of names) { const m = new RegExp('function\\\\s+[A-Za-z_]\\\\w*[.:]' + name + '\\\\s*\\\\(([^)]*)\\\\)(\\\\s*:)?').exec(text); if (!m) { bad.push(name + ': not found as function X.' + name + '(...)'); continue; } const params = m[1].split(',').map((p) => p.trim()).filter(Boolean); const untyped = params.filter((p) => p !== 'self' && !p.includes(':')); if (untyped.length) bad.push(name + ': untyped ' + untyped.join(', ')); if (!m[2]) bad.push(name + ': no return type'); } if (bad.length) { console.log(bad.join('\\n')); process.exit(1); } console.log('typed: ' + names.join(', '));",
+				"src/ReplicatedStorage/Shared/PlotStats.luau",
+				"summarize",
+				"getTallest",
+				"format",
+				"compare"
+			],
+			"text": "summarize, getTallest, format, and compare have typed parameters and return types"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ReplicatedStorage/Shared/PlotStats.luau",
+			"pattern": "^function [A-Za-z_]\\w*\\s*\\(",
+			"text": "No global function is left (fmt was global)"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ReplicatedStorage/Shared/PlotStats.luau",
+			"pattern": "\"(Brick|Dirt|Grass|Window|Wood)\",\\s*(Brick|Dirt|Grass|Window|Wood)\\s*=",
+			"text": "The block name list and the price map are no longer one mixed array and dictionary table"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ReplicatedStorage/Shared/PlotStats.luau",
+			"pattern": "\\b(blks|cnts|tot)\\b|\\bfmt\\(",
+			"text": "The abbreviated names blks, cnts, tot, and fmt are gone"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ReplicatedStorage/Shared/PlotStats.luau",
+			"pattern": ",\\s*(true|false)\\s*,\\s*(true|false)\\s*\\)",
+			"text": "No call passes two positional booleans (the fmt(n, true, false) calls)"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ReplicatedStorage/Shared/PlotStats.luau",
+			"pattern": "^\\s*return\\s*$",
+			"text": "No bare return is left in a function that returns a value (getTallest's empty case)"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ReplicatedStorage/Shared/PlotStats.luau",
+			"pattern": "\\band \"[^\"]*\" or \"",
+			"text": "Convention: the and/or value picks (\"block\" or \"blocks\") are if-then-else expressions"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ReplicatedStorage/Shared/PlotStats.luau",
+			"pattern": "^return Module\\s*$",
+			"text": "Convention: the returned table is named Module"
+		}
+	],
+	"rubric": [
+		"Behavior is unchanged: summarize, getTallest, format, and compare keep their names, arguments, and results, including Counts holding only the types present, the bulk discount starting above 50 blocks, unknown types and blocks without a Position being skipped, getTallest giving nil for an empty or all-skipped list, the exact format strings, and compare's tie-break on Total. No new files or requires.",
+		"Reads clearly: names are spelled out (no blks, cnts, tot, fmt, h, v), the triple-nested ifs become guard clauses or one shared filter, the duplicated block filtering in summarize and getTallest is shared, and the magic numbers (block half height, discount threshold and rate, score weights, bonus) are named constants.",
+		"Helpers are safe and readable at the call site: fmt's two positional booleans (fmt(n, true, false)) become separate functions or named options, and fmt is no longer a global function.",
+		"Fixes the data shape: the table that mixes the array of block names with the name-to-price keys is split into a list and a map. In the original, T[b.Type] also matches the array slots, so a numeric Type such as 1 passes the check and then fails in arithmetic.",
+		"Typing: the file passes under --!strict; the public functions have typed parameters and return types; the block and summary shapes are declared as types; the price lookup is typed so a missing type is handled (an optional value type); getTallest returns nil explicitly or the block on every path instead of a bare return, so callers such as tostring(PlotStats.getTallest(list)) always get one value.",
+		"Stays in scope: only PlotStats.luau changes, comments stay accurate for the code that remains, and luau-lsp, selene, and StyLua pass. Supporting files such as specs or stories count neither for nor against."
+	],
+	"notes": "Refactor branch. Planted: cryptic names (T, fmt, blks, cnts, tot, h, v, sum), a global function, a mixed array/dictionary table (which also lets a numeric Type match an array slot), fmt(n, true, false) boolean flags, triple-nested ifs duplicated between summarize and getTallest, magic numbers, and/or value picks with non-falsy middles, a bare return in getTallest, an assert whose message is built with .. on every call, untyped public functions, no --!strict. The behavior check loads the starting file (from git HEAD) and the trial's file in Lune with luau.load and an environment holding Lune's Vector3, runs summarize, getTallest, format (short true, false, nil), and compare over fixed inputs, and compares results deeply (numbers within 1e-9). It does not test arrays with holes (ipairs stops at the first nil, generalized iteration doesn't) or error messages. It passes on the untouched file and on a hand-made refactor, and fails when the discount boundary or the decimal format changes. Requires inside PlotStats would break the Lune load; the prompt says to change only this file.",
+	"timeout_minutes": 20
+}

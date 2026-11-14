@@ -1,0 +1,62 @@
+{
+  "id": 2,
+  "name": "block-cost",
+  "skill": "game-architecture",
+  "prompt": "Blocks should cost coins now. Prices: Brick 5, Dirt 1, Grass 2, Window 8, Wood 3. Placing a block takes its price from the player's coins. If they can't afford it, nothing is placed and they get a notification saying they need more coins.\n\nCoins and passive income are in src/ServerScriptService/Modules/Systems/Economy/CurrencySystem, placement is in src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem, and the block types are in src/ServerScriptService/Modules/Catalogs/BlockTypes.luau. Keep passive income working the way it does now.",
+  "setup_files": [
+    {
+      "from": "fixtures/base/src",
+      "to": "src"
+    },
+    {
+      "from": "fixtures/placement/src",
+      "to": "src"
+    },
+    {
+      "from": "fixtures/block-cost/src",
+      "to": "src"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\").posix,cp=require(\"child_process\");\nconst R=\"src/ServerScriptService\";\nconst rd=(f)=>{try{return JSON.parse(fs.readFileSync(f,\"utf8\").replace(/^\\uFEFF/,\"\"))}catch(e){return null}};\nconst attrs=(f)=>((rd(f)||{}).attributes)||{};\nconst isInit=(f)=>/^init\\.luau$/.test(p.basename(f));\nconst metaOf=(f)=>isInit(f)?p.join(p.dirname(f),\"init.meta.json\"):f.replace(/\\.luau$/,\".meta.json\");\nconst isModuleDir=(d)=>fs.existsSync(p.join(d,\"init.luau\"));\nconst parentDir=(f)=>isInit(f)?p.dirname(p.dirname(f)):p.dirname(f);\nconst owner=(f)=>{let o=f;let d=parentDir(f);while(d.startsWith(R+\"/\")){if(isModuleDir(d))o=p.join(d,\"init.luau\");d=p.dirname(d)}return o};\nconst cascade=(f,name)=>{let d=parentDir(f);while(d.startsWith(R)){if(!isModuleDir(d)){const v=attrs(p.join(d,\"init.meta.json\"))[name];if(v!==undefined)return v}if(d===R)break;d=p.dirname(d)}return undefined};\nconst relocates=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.RelocateToServerScriptService===true)return false;if(a.RelocateToReplicatedStorage!==undefined)return a.RelocateToReplicatedStorage===true;return cascade(f,\"RelocateToReplicatedStorage\")===true};\nconst clientOnly=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.ClientOnly!==undefined)return a.ClientOnly===true;return cascade(f,\"ClientOnly\")===true};\nconst changed=()=>cp.execFileSync(\"git\",[\"status\",\"--porcelain\",\"--untracked-files=all\"],{encoding:\"utf8\"}).split(/\\r?\\n/).filter(Boolean).map((l)=>l.slice(3).replace(/^\"|\"$/g,\"\")).filter((f)=>fs.existsSync(f));\nconst walk=(d,acc=[])=>{if(!fs.existsSync(d))return acc;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f,acc);else acc.push(f)}return acc};\nconst src=(f)=>fs.readFileSync(f,\"utf8\");\nconst fail=(m)=>{console.log(m);process.exit(1)};\nconst sm=cp.spawnSync(\"rojo\",[\"sourcemap\",\"default.project.json\",\"-o\",\"sourcemap.json\",\"--include-non-scripts\"],{encoding:\"utf8\"});\nif(sm.error||sm.status!==0)fail(\"rojo sourcemap failed: \"+(sm.error?sm.error.message:sm.stderr));\nconst an=cp.spawnSync(\"luau-lsp\",[\"analyze\",\"--platform=roblox\",\"--definitions:@roblox=globalTypes.d.luau\",\"--sourcemap=sourcemap.json\",\"--ignore=**/roblox_packages/**\",\"src\"],{encoding:\"utf8\",maxBuffer:1<<26});\nif(an.error||an.status===null)fail(\"luau-lsp failed to run: \"+(an.error?an.error.message:\"no exit code\"));\nconst hits=((an.stdout||\"\")+(an.stderr||\"\")).split(/\\r?\\n/).filter((l)=>/Cyclic/i.test(l)).map((l)=>l.replace(/^.*?(src[\\\\/])/,\"$1\").slice(0,300));\nif(hits.length)fail(hits.slice(0,3).join(\"\\n\"));\nconsole.log(\"no cyclic module dependency anywhere under src\");"
+      ],
+      "expect_exit": 0,
+      "text": "luau-lsp reports no cyclic module dependency anywhere under src (a require moved inside a function still counts)"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\").posix,cp=require(\"child_process\");\nconst R=\"src/ServerScriptService\";\nconst rd=(f)=>{try{return JSON.parse(fs.readFileSync(f,\"utf8\").replace(/^\\uFEFF/,\"\"))}catch(e){return null}};\nconst attrs=(f)=>((rd(f)||{}).attributes)||{};\nconst isInit=(f)=>/^init\\.luau$/.test(p.basename(f));\nconst metaOf=(f)=>isInit(f)?p.join(p.dirname(f),\"init.meta.json\"):f.replace(/\\.luau$/,\".meta.json\");\nconst isModuleDir=(d)=>fs.existsSync(p.join(d,\"init.luau\"));\nconst parentDir=(f)=>isInit(f)?p.dirname(p.dirname(f)):p.dirname(f);\nconst owner=(f)=>{let o=f;let d=parentDir(f);while(d.startsWith(R+\"/\")){if(isModuleDir(d))o=p.join(d,\"init.luau\");d=p.dirname(d)}return o};\nconst cascade=(f,name)=>{let d=parentDir(f);while(d.startsWith(R)){if(!isModuleDir(d)){const v=attrs(p.join(d,\"init.meta.json\"))[name];if(v!==undefined)return v}if(d===R)break;d=p.dirname(d)}return undefined};\nconst relocates=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.RelocateToServerScriptService===true)return false;if(a.RelocateToReplicatedStorage!==undefined)return a.RelocateToReplicatedStorage===true;return cascade(f,\"RelocateToReplicatedStorage\")===true};\nconst clientOnly=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.ClientOnly!==undefined)return a.ClientOnly===true;return cascade(f,\"ClientOnly\")===true};\nconst changed=()=>cp.execFileSync(\"git\",[\"status\",\"--porcelain\",\"--untracked-files=all\"],{encoding:\"utf8\"}).split(/\\r?\\n/).filter(Boolean).map((l)=>l.slice(3).replace(/^\"|\"$/g,\"\")).filter((f)=>fs.existsSync(f));\nconst walk=(d,acc=[])=>{if(!fs.existsSync(d))return acc;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f,acc);else acc.push(f)}return acc};\nconst src=(f)=>fs.readFileSync(f,\"utf8\");\nconst fail=(m)=>{console.log(m);process.exit(1)};\nconst allowed=new Set([\"src/ServerScriptService/Main.server.luau\",\"src/StarterPlayer/StarterPlayerScripts/Main.client.luau\"]);\nconst extra=walk(\"src\").filter((f)=>/\\.(server|client)\\.luau$/.test(f)&&!allowed.has(f));\nif(extra.length)fail(\"other scripts: \"+extra.join(\", \"));\nconsole.log(\"only the two Main scripts\");"
+      ],
+      "expect_exit": 0,
+      "text": "No Script or LocalScript besides the two Main scripts (all game code runs as modules through Module Loader)"
+    }
+  ],
+  "rubric": [
+    "No require cycle: CurrencyServerService already requires PlacementServerService for passive income, so PlacementServerService must not require CurrencyServerService, directly, through another module, or lazily inside a function. Fine designs: a separate module that requires both and connects them (for example registering a cost check with placement), a check or event API on placement that currency code uses, or removing currency's dependency on placement first.",
+    "Charges correctly: the price is taken only when a block is really placed, after every other placement check passes (a refused or invalid request costs nothing), and exactly once per block. A player who can't afford the block gets no block and a notification that they need more coins.",
+    "The prices are data keyed by block type (for example a price field in BlockTypes, or one price table), with the five prices from the prompt, rather than branches scattered through the placement handler.",
+    "Passive income still pays one coin per placed block every 10 seconds, and placement's other checks (reach, rate, filled cells) still work.",
+    "Any new module follows the project's layout and realms: it sits in a system's SystemPackage or Implementation folder, server-only modules carry `RelocateToServerScriptService: true` as a boolean in their own `.meta.json`, and no new Script or LocalScript is added.",
+    "Correct and in scope: changes stay in the files the feature needs, and luau-lsp, selene, and StyLua pass on the changed files. Supporting files such as stories or specs count neither for nor against."
+  ],
+  "judge_facts": [
+    "luau-lsp 1.70.1 (the project's analyzer) reports a require cycle as 'Cyclic dependencies are only supported if all modules in the cycle use export syntax', including when one of the requires is moved inside a function, so a lazy require does not remove the error.",
+    "Module Loader 4.0.1 (module-loader/src/init.luau, Module.Start): it requires every discovered module, then calls Init on each, then Start on each, in LoaderPriority order (higher first, default 0); modules with equal priority have no fixed order. Each call runs in its own thread, but the loader waits for it to return before calling the next one, with no timeout, so a yield in a module's top level, Init, or Start holds up every module after it. A module whose Init errors gets no Start.",
+    "Module Loader 4.0.1 (module-loader/src/init.luau, tryRelocateModule): before any require, the server moves every module under a Folder marked RelocateToReplicatedStorage into ReplicatedStorage.RELOCATED_MODULES (copying the folder chain, leaving a pointer at the original spot), so its source reaches every client. A module with RelocateToServerScriptService = true on itself opts out: it stays in ServerScriptService, never reaches clients, and gets ServerOnly set on it. RelocateToReplicatedStorage = false on the module also keeps it in place.",
+    "Module Loader 4.0.1 relocation and requires (module-loader/src/init.luau): a module's children (remotes, assets, nested modules) move with it. A relative require between two relocated modules works on both realms. An absolute @game/ServerScriptService/... require works on the server (through the pointer) and on the client (the client rebuilds pointers at the original paths). A relative require from a relocated module to a module kept in ServerScriptService fails on the server and the client, because the copied folder in ReplicatedStorage doesn't contain it."
+  ],
+  "timeout_minutes": 20
+}

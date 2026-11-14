@@ -1,0 +1,75 @@
+{
+  "id": 4,
+  "name": "admin-realm",
+  "skill": "game-architecture",
+  "prompt": "Someone in our Discord posted the full list of admin user IDs and says he pulled it out of the game's modules on his own client. Make sure the admin list never reaches players' clients. Admins still need to see the announcement panel, and the server has to keep refusing announcements from anyone else. The admin code is in src/ServerScriptService/Modules/Systems/Tooling/AdminSystem.\n\nWhile you're at it, the server output shows this at startup:\n\n[S] Loader attribute ClientOnly on 'ServerScriptService.Modules.Systems.Presentation.HudSystem.SystemPackage.HudClientService' is a string, not a boolean; treating it as true.\n[S] >> Failed to init module _HudClientSetup (took 0.000 seconds)\nReplicatedStorage.RELOCATED_MODULES.Systems.Presentation.HudSystem.Implementation._HudClientSetup:12: attempt to index nil with 'DisplayName'\n\nFix those too.",
+  "setup_files": [
+    {
+      "from": "fixtures/base/src",
+      "to": "src"
+    },
+    {
+      "from": "fixtures/admin/src",
+      "to": "src"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\").posix,cp=require(\"child_process\");\nconst R=\"src/ServerScriptService\";\nconst rd=(f)=>{try{return JSON.parse(fs.readFileSync(f,\"utf8\").replace(/^\\uFEFF/,\"\"))}catch(e){return null}};\nconst attrs=(f)=>((rd(f)||{}).attributes)||{};\nconst isInit=(f)=>/^init\\.luau$/.test(p.basename(f));\nconst metaOf=(f)=>isInit(f)?p.join(p.dirname(f),\"init.meta.json\"):f.replace(/\\.luau$/,\".meta.json\");\nconst isModuleDir=(d)=>fs.existsSync(p.join(d,\"init.luau\"));\nconst parentDir=(f)=>isInit(f)?p.dirname(p.dirname(f)):p.dirname(f);\nconst owner=(f)=>{let o=f;let d=parentDir(f);while(d.startsWith(R+\"/\")){if(isModuleDir(d))o=p.join(d,\"init.luau\");d=p.dirname(d)}return o};\nconst cascade=(f,name)=>{let d=parentDir(f);while(d.startsWith(R)){if(!isModuleDir(d)){const v=attrs(p.join(d,\"init.meta.json\"))[name];if(v!==undefined)return v}if(d===R)break;d=p.dirname(d)}return undefined};\nconst relocates=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.RelocateToServerScriptService===true)return false;if(a.RelocateToReplicatedStorage!==undefined)return a.RelocateToReplicatedStorage===true;return cascade(f,\"RelocateToReplicatedStorage\")===true};\nconst clientOnly=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.ClientOnly!==undefined)return a.ClientOnly===true;return cascade(f,\"ClientOnly\")===true};\nconst changed=()=>cp.execFileSync(\"git\",[\"status\",\"--porcelain\",\"--untracked-files=all\"],{encoding:\"utf8\"}).split(/\\r?\\n/).filter(Boolean).map((l)=>l.slice(3).replace(/^\"|\"$/g,\"\")).filter((f)=>fs.existsSync(f));\nconst walk=(d,acc=[])=>{if(!fs.existsSync(d))return acc;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f,acc);else acc.push(f)}return acc};\nconst src=(f)=>fs.readFileSync(f,\"utf8\");\nconst fail=(m)=>{console.log(m);process.exit(1)};\nconst holders=walk(R+\"/Modules\").filter((f)=>/\\.luau$/.test(f)&&/14200731/.test(src(f)));\nif(!holders.length)fail(\"no module holds the admin user IDs any more\");\nconst leaks=holders.filter(relocates);\nif(leaks.length)fail(\"copied to clients: \"+leaks.join(\", \"));\nconsole.log(\"admin IDs stay on the server in: \"+holders.join(\", \"));"
+      ],
+      "expect_exit": 0,
+      "text": "Every module holding the admin user IDs stays on the server (it is not copied to clients by relocation)"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\").posix,cp=require(\"child_process\");\nconst R=\"src/ServerScriptService\";\nconst rd=(f)=>{try{return JSON.parse(fs.readFileSync(f,\"utf8\").replace(/^\\uFEFF/,\"\"))}catch(e){return null}};\nconst attrs=(f)=>((rd(f)||{}).attributes)||{};\nconst isInit=(f)=>/^init\\.luau$/.test(p.basename(f));\nconst metaOf=(f)=>isInit(f)?p.join(p.dirname(f),\"init.meta.json\"):f.replace(/\\.luau$/,\".meta.json\");\nconst isModuleDir=(d)=>fs.existsSync(p.join(d,\"init.luau\"));\nconst parentDir=(f)=>isInit(f)?p.dirname(p.dirname(f)):p.dirname(f);\nconst owner=(f)=>{let o=f;let d=parentDir(f);while(d.startsWith(R+\"/\")){if(isModuleDir(d))o=p.join(d,\"init.luau\");d=p.dirname(d)}return o};\nconst cascade=(f,name)=>{let d=parentDir(f);while(d.startsWith(R)){if(!isModuleDir(d)){const v=attrs(p.join(d,\"init.meta.json\"))[name];if(v!==undefined)return v}if(d===R)break;d=p.dirname(d)}return undefined};\nconst relocates=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.RelocateToServerScriptService===true)return false;if(a.RelocateToReplicatedStorage!==undefined)return a.RelocateToReplicatedStorage===true;return cascade(f,\"RelocateToReplicatedStorage\")===true};\nconst clientOnly=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.ClientOnly!==undefined)return a.ClientOnly===true;return cascade(f,\"ClientOnly\")===true};\nconst changed=()=>cp.execFileSync(\"git\",[\"status\",\"--porcelain\",\"--untracked-files=all\"],{encoding:\"utf8\"}).split(/\\r?\\n/).filter(Boolean).map((l)=>l.slice(3).replace(/^\"|\"$/g,\"\")).filter((f)=>fs.existsSync(f));\nconst walk=(d,acc=[])=>{if(!fs.existsSync(d))return acc;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f,acc);else acc.push(f)}return acc};\nconst src=(f)=>fs.readFileSync(f,\"utf8\");\nconst fail=(m)=>{console.log(m);process.exit(1)};\nconst bad=walk(R+\"/Modules\").filter((f)=>/\\.luau$/.test(f)&&relocates(f)&&/require\\([^)]*AdminList/.test(src(f)));\nif(bad.length)fail(\"copied to clients but requires the admin list: \"+bad.join(\", \"));\nconsole.log(\"no module copied to clients requires the admin list\");"
+      ],
+      "expect_exit": 0,
+      "text": "No module that is copied to clients requires the admin list"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\").posix,cp=require(\"child_process\");\nconst R=\"src/ServerScriptService\";\nconst rd=(f)=>{try{return JSON.parse(fs.readFileSync(f,\"utf8\").replace(/^\\uFEFF/,\"\"))}catch(e){return null}};\nconst attrs=(f)=>((rd(f)||{}).attributes)||{};\nconst isInit=(f)=>/^init\\.luau$/.test(p.basename(f));\nconst metaOf=(f)=>isInit(f)?p.join(p.dirname(f),\"init.meta.json\"):f.replace(/\\.luau$/,\".meta.json\");\nconst isModuleDir=(d)=>fs.existsSync(p.join(d,\"init.luau\"));\nconst parentDir=(f)=>isInit(f)?p.dirname(p.dirname(f)):p.dirname(f);\nconst owner=(f)=>{let o=f;let d=parentDir(f);while(d.startsWith(R+\"/\")){if(isModuleDir(d))o=p.join(d,\"init.luau\");d=p.dirname(d)}return o};\nconst cascade=(f,name)=>{let d=parentDir(f);while(d.startsWith(R)){if(!isModuleDir(d)){const v=attrs(p.join(d,\"init.meta.json\"))[name];if(v!==undefined)return v}if(d===R)break;d=p.dirname(d)}return undefined};\nconst relocates=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.RelocateToServerScriptService===true)return false;if(a.RelocateToReplicatedStorage!==undefined)return a.RelocateToReplicatedStorage===true;return cascade(f,\"RelocateToReplicatedStorage\")===true};\nconst clientOnly=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.ClientOnly!==undefined)return a.ClientOnly===true;return cascade(f,\"ClientOnly\")===true};\nconst changed=()=>cp.execFileSync(\"git\",[\"status\",\"--porcelain\",\"--untracked-files=all\"],{encoding:\"utf8\"}).split(/\\r?\\n/).filter(Boolean).map((l)=>l.slice(3).replace(/^\"|\"$/g,\"\")).filter((f)=>fs.existsSync(f));\nconst walk=(d,acc=[])=>{if(!fs.existsSync(d))return acc;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f,acc);else acc.push(f)}return acc};\nconst src=(f)=>fs.readFileSync(f,\"utf8\");\nconst fail=(m)=>{console.log(m);process.exit(1)};\nconst f=\"src/ServerScriptService/Modules/Systems/Presentation/HudSystem/Implementation/_HudClientSetup.luau\";\nif(!fs.existsSync(f))fail(\"_HudClientSetup.luau is missing\");\nif(!clientOnly(f))fail(\"_HudClientSetup is not ClientOnly (boolean true on itself or a folder above it)\");\nconsole.log(\"_HudClientSetup is ClientOnly\");"
+      ],
+      "expect_exit": 0,
+      "text": "_HudClientSetup is marked ClientOnly as a boolean, on itself or a folder above it"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Modules/Systems/Presentation/HudSystem/SystemPackage/HudClientService.meta.json",
+      "pattern": "\"ClientOnly\"\\s*:\\s*\"",
+      "text": "HudClientService's ClientOnly attribute is no longer a string"
+    }
+  ],
+  "rubric": [
+    "The list stays on the server: the module holding the admin IDs has `RelocateToServerScriptService: true` (a boolean) in its own `.meta.json`, or the IDs move into or under a module that does. Setting that attribute on a folder does nothing (see the library facts).",
+    "No module copied to clients requires the list any more. AdminSharedService and AdminClientService are copied to clients, and a relative require from a copied module to one kept in ServerScriptService fails on both realms, so leaving `require(\"./AdminList\")` in AdminSharedService would also break AdminServerService, which requires AdminSharedService.",
+    "Admins still get the panel: the client learns whether its own player is an admin from the server without receiving the list (for example a player attribute the server sets, or a remote), and the panel still appears if that answer arrives after the client module has started.",
+    "The server still checks the sender against the list on every Announce request and keeps the existing message validation.",
+    "The HUD errors are fixed by realm, not by guarding the code: `_HudClientSetup` is marked `ClientOnly: true` (on itself or its folder) so the server no longer runs it, and HudClientService's `ClientOnly` becomes a real boolean in its `.meta.json`.",
+    "In scope: changes stay in AdminSystem and HudSystem plus anything strictly needed, and luau-lsp, selene, and StyLua pass on the changed files. Supporting files such as stories or specs count neither for nor against."
+  ],
+  "judge_facts": [
+    "Module Loader 4.0.1 (module-loader/src/init.luau, getModules and keepModule): with USE_COLLECTION_SERVICE on, Start() loads every ModuleScript under a Folder tagged LOAD_MODULE whose path back to that Folder is only Folders; a module nested under another ModuleScript is never loaded on its own and moves with its parent. Names don't matter. ClientOnly, ServerOnly, IgnoreLoader, and RelocateToReplicatedStorage cascade from Folders (the module's own value wins, then the closest Folder); LoaderPriority, Parallel, and RelocateToServerScriptService are read from the module only.",
+    "Module Loader 4.0.1 (module-loader/src/init.luau, tryRelocateModule): before any require, the server moves every module under a Folder marked RelocateToReplicatedStorage into ReplicatedStorage.RELOCATED_MODULES (copying the folder chain, leaving a pointer at the original spot), so its source reaches every client. A module with RelocateToServerScriptService = true on itself opts out: it stays in ServerScriptService, never reaches clients, and gets ServerOnly set on it. RelocateToReplicatedStorage = false on the module also keeps it in place.",
+    "Module Loader 4.0.1 relocation and requires (module-loader/src/init.luau): a module's children (remotes, assets, nested modules) move with it. A relative require between two relocated modules works on both realms. An absolute @game/ServerScriptService/... require works on the server (through the pointer) and on the client (the client rebuilds pointers at the original paths). A relative require from a relocated module to a module kept in ServerScriptService fails on the server and the client, because the copied folder in ReplicatedStorage doesn't contain it.",
+    "Module Loader 4.0.1 (module-loader/src/init.luau, keepModule): the server never requires a module marked ClientOnly, and a client never requires one marked ServerOnly. A ClientOnly module under a relocating folder is still copied to ReplicatedStorage so clients can load it. Without ClientOnly, the server also requires a client module and runs its Init and Start.",
+    "Module Loader 4.0.1 (readFlag in module-loader/src/init.luau): a loader flag attribute that isn't a boolean (for example the string \"true\") logs 'Loader attribute <Name> on '<path>' is a string, not a boolean; treating it as ...' and counts as true, except RelocateToReplicatedStorage, which counts as false."
+  ],
+  "timeout_minutes": 20
+}
