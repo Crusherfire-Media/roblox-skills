@@ -1,44 +1,28 @@
 # File layout
 
-How a script is laid out: the header, the order of its parts, and how to
-group code below the top level. Section banners for the top-level parts are
-defined in the `roblox-dev:code-comments` skill.
+How a script is laid out: the order of its parts, and how to group code
+inside a part.
 
 ## File structure
 
 Order the contents of a file like this, skipping parts that do not apply:
 
-1. The script header, always present and always first. The Roblox guide
-   treats a file comment as optional and leaves author and date to version
-   control; here both are required:
-
-   ```lua
-   --!strict
-   --@author: #Author
-   --@date: #Date
-   --[[@description:
-
-   ]]
-   ```
-
-   `--!strict` puts the whole file under strict type checking. When creating
-   a script, replace `#Author` with the author's name and `#Date` with the
-   creation date, matching the format used in neighboring scripts, and write
-   what the file is for on the lines inside the description block. Leave an
-   existing script's author and date alone when editing it.
+1. `--!strict` on the first line, which puts the whole file under strict
+   type checking.
 2. Services, fetched with `game:GetService` into `const` bindings and sorted
    alphabetically. Workspace is the exception: use the `workspace` global.
-3. Dependencies: `const` module imports via require-by-string.
-4. Types: `type` and `export type` definitions, plus any module imported
+3. Requires: `const` module imports via require-by-string.
+4. Module-level `LOUD_SNAKE_CASE` constants, also `const`.
+5. Types: `type` and `export type` definitions, plus any module imported
    purely for its types.
-5. Module-level `LOUD_SNAKE_CASE` constants, also `const`.
-6. Module-level variables and functions.
-7. The main section: the object the module returns, or the top-level logic
-   that runs when a Script starts.
-8. The `return` statement.
+6. Module state: the variables the module keeps between calls.
+7. Private functions: the `local` helpers the rest of the file calls.
+8. The public API: the table the module returns and the functions on it, or
+   the top-level logic that runs when a Script starts.
+9. The `return` statement.
 
-A module required only for its types belongs with the types (part 4), after
-the other dependencies.
+One blank line separates the parts. Because every file follows the same
+order, a reader finds the requires, the state, or the public API by position.
 
 ## When a file grows too large
 
@@ -53,7 +37,7 @@ split:
 
 ## Grouping below the top level
 
-For grouping below the top level, use these instead of a section comment:
+Group code inside a part with these:
 
 - Put the group's description in the block comment of its first function.
   That comment still documents its own function, but it can also say what
@@ -75,6 +59,6 @@ For grouping below the top level, use these instead of a section comment:
 - Related variables can share a block comment the same way. Often a short
   note per variable, or a blank line between clusters, says enough; choose
   whichever leaves the clusters easiest to tell apart.
-- Lean on placement. Part 6 of the file structure sets no order inside
-  itself, so declaring a cluster of state just above the functions that read
-  it makes the pair read as a unit.
+- Lean on placement. A `local` function has to be declared before any
+  function that calls it is defined, so put each private helper just above
+  its first caller. That also keeps the helpers of one job together.

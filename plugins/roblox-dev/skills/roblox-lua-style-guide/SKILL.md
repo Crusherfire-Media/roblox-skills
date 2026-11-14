@@ -20,8 +20,8 @@ for less common work are in `references/`, under the same section names:
 | [references/formatting.md](references/formatting.md) | Wrapping a statement that does not fit in 100 columns, or an `if` expression that does not fit on one line; also the General whitespace examples |
 | [references/examples.md](references/examples.md) | Writing a remote handler, requires inside or against a library, more than one block of requires, an enum branch that must handle every member, or a chain of async steps; or when how a rule applies is unclear |
 
-Comment wording, section banners, and comment cleanup belong to the
-`roblox-dev:code-comments` skill. Load it alongside this one.
+Comment wording and comment cleanup belong to the `roblox-dev:code-comments`
+skill. Load it alongside this one.
 
 ## Precedence
 
@@ -38,24 +38,14 @@ lines your edit touches, so the diff stays about your change.
 
 ## File structure
 
-Every script starts with this header, always present and always first:
-
-```lua
---!strict
---@author: #Author
---@date: #Date
---[[@description:
-
-]]
-```
-
-The rest follows in this order, skipping parts that do not apply: services
-(`game:GetService` into `const` bindings, sorted alphabetically; Workspace
-comes from the `workspace` global), dependencies, types, constants, module
-variables and functions, the main section, and the `return`. Leave an
-existing script's author and date alone when editing it. Read
-`references/file-layout.md` before creating a script or module: it says how
-to fill in the header and what belongs in each part.
+Every script starts with `--!strict` on its first line. The rest follows in
+this order, skipping parts that do not apply: services (`game:GetService`
+into `const` bindings, sorted alphabetically; Workspace comes from the
+`workspace` global), requires, constants, types, module state, private
+functions, the public API, and the `return`. One blank line separates the
+parts; the order itself tells a reader where each one starts. Read
+`references/file-layout.md` before creating a script or module: it says what
+belongs in each part and how to group code inside one.
 
 ## Requires
 
@@ -239,18 +229,14 @@ in `references/examples.md` before writing such a handler.
 - Wrap comments at 80 columns.
 - Use `--` line comments for inline notes. For several lines, use several
   line comments.
-- Use `--[[ ]]` block comments for documentation: the `@description` block
-  in the file header states the file's purpose, and a block comment above a
-  function documents it. Write one only when it explains why the function
-  exists or behaves the way it does, or when the function is publicly
-  exposed (library APIs, object methods) and needs documentation. Other
-  functions get no comment. Block comments are always expanded: `--[[`
-  alone on the first line, text indented on the lines between, `]]` alone
-  on the last line. The header's `--[[@description:` line is the one
-  exception.
+- Use a `--[[ ]]` block comment above a function to document it. Write one
+  only when it explains why the function exists or behaves the way it does,
+  or when the function is publicly exposed (library APIs, object methods)
+  and needs documentation. Other functions get no comment. Block comments
+  are always expanded: `--[[` alone on the first line, text indented on the
+  lines between, `]]` alone on the last line.
 - Explain why, not what.
 - Comments never contain em dashes.
-- Section banners follow `roblox-dev:code-comments`, which owns that rule.
 
 ## Naming
 

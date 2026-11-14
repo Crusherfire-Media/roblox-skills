@@ -1,21 +1,21 @@
 --!strict
 --!optimize 2
---@author: #Author
---@date: #Date
---[[@description:
-	Throwaway measurement harness for before-and-after performance checks. Install it as a
-	ModuleScript, require it from Luau run in the edit session or on the playtest server or
-	client, and delete it when the measurements are done.
-]]
-------------------------------
--- SERVICES --
-------------------------------
+
 const RunService = game:GetService("RunService")
 const Stats = game:GetService("Stats")
 
-------------------------------
--- TYPES --
-------------------------------
+const DEFAULT_EVENT: FrameEvent = "PreSimulation"
+const DEFAULT_FRAMES = 120
+const DEFAULT_WARMUP = 30
+const DEFAULT_ITERATIONS = 100000
+const DEFAULT_SAMPLES = 5
+const DEFAULT_ROUNDS = 3
+const DEFAULT_MINIMUM_BYTES = 1
+const P90_FRACTION = 0.9
+const MILLISECONDS_PER_SECOND = 1000
+const NANOSECONDS_PER_SECOND = 1e9
+const BYTES_PER_MB = 1024 * 1024
+
 export type Summary = {
 	Median: number,
 	P90: number,
@@ -58,27 +58,6 @@ export type MemoryDeltaOptions = {
 
 type Case = (iterations: number) -> any
 
-------------------------------
--- VARIABLES --
-------------------------------
-const DEFAULT_EVENT: FrameEvent = "PreSimulation"
-const DEFAULT_FRAMES = 120
-const DEFAULT_WARMUP = 30
-const DEFAULT_ITERATIONS = 100000
-const DEFAULT_SAMPLES = 5
-const DEFAULT_ROUNDS = 3
-const DEFAULT_MINIMUM_BYTES = 1
-const P90_FRACTION = 0.9
-const MILLISECONDS_PER_SECOND = 1000
-const NANOSECONDS_PER_SECOND = 1e9
-const BYTES_PER_MB = 1024 * 1024
-
-local Module = {}
-
-------------------------------
--- PRIVATE FUNCTIONS --
-------------------------------
-
 local function summarize(samples: { number }): Summary
 	table.sort(samples)
 
@@ -114,9 +93,7 @@ local function getFrameSignal(event: FrameEvent): RBXScriptSignal
 	error(`Unhandled frame event: {event}`)
 end
 
-------------------------------
--- PUBLIC FUNCTIONS --
-------------------------------
+local Module = {}
 
 --[[
 	Runs step on each firing of Event (PreSimulation by default) and returns the times in

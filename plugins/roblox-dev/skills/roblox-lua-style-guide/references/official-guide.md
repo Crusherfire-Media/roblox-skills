@@ -43,16 +43,11 @@ in SKILL.md. Known differences from the Roblox guide:
 - A `do` block that scopes throwaway setup puts `do` on the same line as the
   declaration (`local x do`). The Roblox guide puts `do` on its own line.
 - Comments never contain em dashes.
-- Every script starts with a fixed header: `--!strict`, `--@author:`,
-  `--@date:`, and a `--[[@description:` block whose text starts on the next
-  line. The Roblox guide treats a file comment as optional and leaves author
-  and date to version control; here they are required. See File structure
-  in `file-layout.md`.
+- Every script starts with `--!strict`, and the file layout adds a types
+  part after the constants. See File structure in `file-layout.md`.
 - Inside a ModuleScript the table it returns is always `local Module = {}`
   ... `return Module`. The Roblox guide names it after the file. Consumers
   still name the required variable after the module instance.
-- Section banners: the Roblox guide forbids them. A limited set of top-level
-  banners is allowed here, defined by the `roblox-dev:code-comments` skill.
 - Loops use generalized iteration (`for key, value in t do`) in place of the
   Roblox guide's `ipairs` / `pairs` split. See Tables in SKILL.md.
 - Metatables serve prototype classes and weak tables. Enums are exported
