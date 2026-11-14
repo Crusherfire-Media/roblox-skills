@@ -1,0 +1,132 @@
+diff --git a/src/ServerScriptService/Placement.server.luau b/src/ServerScriptService/Placement.server.luau
+new file mode 100644
+index 0000000..d2a3895
+--- /dev/null
++++ b/src/ServerScriptService/Placement.server.luau
+@@ -0,0 +1,126 @@
++--!strict
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Shared = ReplicatedStorage:WaitForChild("Shared")
++local BlockTypes = require(Shared:WaitForChild("BlockTypes"))
++local PlacementRules = require(Shared:WaitForChild("PlacementRules"))
++
++local MAX_BLOCKS_PER_PLAYER = 150
++local PLACE_COOLDOWN = 0.1 -- seconds
++
++local function createRemote(name: string): RemoteEvent
++	local remote = Instance.new("RemoteEvent")
++	remote.Name = name
++	remote.Parent = ReplicatedStorage
++	return remote
++end
++
++local placeBlockEvent = createRemote("PlaceBlock")
++local removeBlockEvent = createRemote("RemoveBlock")
++
++local blocksFolder = Instance.new("Folder")
++blocksFolder.Name = "PlacedBlocks"
++blocksFolder.Parent = workspace
++
++-- Ownership lives on the server only. The OwnerUserId attribute set on each part is for
++-- clients to read and is never trusted here.
++local ownerOf: { [BasePart]: Player } = {}
++local blocksOf: { [Player]: { [BasePart]: true } } = {}
++local blockCount: { [Player]: number } = {}
++local lastPlaceTime: { [Player]: number } = {}
++
++local function removeBlock(part: BasePart)
++	local owner = ownerOf[part]
++	if owner then
++		ownerOf[part] = nil
++		local owned = blocksOf[owner]
++		if owned and owned[part] then
++			owned[part] = nil
++			blockCount[owner] -= 1
++		end
++	end
++	part:Destroy()
++end
++
++local function buildBlock(blockType: BlockTypes.BlockType, center: Vector3, owner: Player): BasePart
++	local style = BlockTypes.STYLES[blockType]
++	local size = PlacementRules.BLOCK_SIZE
++
++	local part = Instance.new("Part")
++	part.Name = blockType
++	part.Size = Vector3.one * size
++	part.CFrame = CFrame.new(center)
++	part.Anchored = true
++	part.Color = style.color
++	part.Material = style.material
++	part.Transparency = style.transparency
++	part.TopSurface = Enum.SurfaceType.Smooth
++	part.BottomSurface = Enum.SurfaceType.Smooth
++	part:SetAttribute("BlockType", blockType)
++	part:SetAttribute("OwnerUserId", owner.UserId)
++	part.Parent = blocksFolder
++	return part
++end
++
++placeBlockEvent.OnServerEvent:Connect(function(player: Player, blockType: unknown, position: unknown)
++	local owned = blocksOf[player]
++	if not owned then
++		-- Player is leaving (or hasn't been registered yet)
++		return
++	end
++
++	local now = os.clock()
++	local last = lastPlaceTime[player]
++	if last and now - last < PLACE_COOLDOWN then
++		return
++	end
++	lastPlaceTime[player] = now
++
++	if blockCount[player] >= MAX_BLOCKS_PER_PLAYER then
++		return
++	end
++
++	local ok, result = PlacementRules.validate(blockType, position, player.Character, blocksFolder)
++	if not ok then
++		warn(`Rejected placement from {player.Name}: {result}`)
++		return
++	end
++
++	local part = buildBlock(blockType :: BlockTypes.BlockType, result :: Vector3, player)
++	ownerOf[part] = player
++	owned[part] = true
++	blockCount[player] += 1
++end)
++
++removeBlockEvent.OnServerEvent:Connect(function(player: Player, target: unknown)
++	if typeof(target) ~= "Instance" or not target:IsA("BasePart") then
++		return
++	end
++	if ownerOf[target] ~= player then
++		return
++	end
++	removeBlock(target)
++end)
++
++local function onPlayerAdded(player: Player)
++	blocksOf[player] = {}
++	blockCount[player] = 0
++end
++
++Players.PlayerAdded:Connect(onPlayerAdded)
++for _, player in Players:GetPlayers() do
++	onPlayerAdded(player)
++end
++
++Players.PlayerRemoving:Connect(function(player: Player)
++	local owned = blocksOf[player]
++	if owned then
++		for part in owned do
++			removeBlock(part)
++		end
++	end
++	blocksOf[player] = nil
++	blockCount[player] = nil
++	lastPlaceTime[player] = nil
++end)

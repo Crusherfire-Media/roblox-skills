@@ -1,0 +1,127 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are correct and pass all checks. Each builds the hotbar with Vide, binds the highlight, and cleans up its signal connections. A wins on design quality: its tile component takes a typed props table that includes a select callback, the UI is split from the BlockPlacer wiring, the code is strictly typed, and key hints are hidden on touch. B's tile calls BlockPlacer directly, B is untyped, and it handles the camera less carefully.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Built with Vide, mounted once from client code",
+          "score": 5,
+          "note": "`Hotbar.mount` calls `mount(hotbarGui, playerGui)` once from Main.client.luau, and all `create` calls run inside `hotbarGui`, `BlockHotbar` and `slot`."
+        },
+        {
+          "criterion": "Selected highlight is a binding",
+          "score": 5,
+          "note": "`BackgroundColor3`, the stroke `Color` and the stroke `Thickness` are all functions of `props.IsSelected()`, which reads the `selected` source that the BlockTypeChanged handler updates."
+        },
+        {
+          "criterion": "External signal cleaned up with scope",
+          "score": 5,
+          "note": "The connection is wrapped as `cleanup(BlockPlacer.BlockTypeChanged:Connect(...))`, so Vide disconnects it when the scope is destroyed. The Screen module's own connections are module-level and never disconnected, but they are not part of the UI scope."
+        },
+        {
+          "criterion": "Reusable tile component from BlockTypes.List",
+          "score": 5,
+          "note": "`slot(props: SlotProps)` takes BlockType, IsSelected and Select in a typed props table, and `BlockHotbar` loops over `props.BlockTypes`, which is set to `BlockTypes.List`."
+        },
+        {
+          "criterion": "No yields inside Vide scopes",
+          "score": 5,
+          "note": "`localPlayer:WaitForChild(\"PlayerGui\")` runs in Main before `Hotbar.mount`, and no component body yields."
+        },
+        {
+          "criterion": "Works on phones",
+          "score": 5,
+          "note": "Slots are 64 px (UIScale minimum 1), so the bar is 352 px wide and centered, which leaves room for the thumbstick and jump button on a 667 px landscape phone. Key hints are also hidden when `Screen.isTouch()` is true."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "The code is `--!strict`, separates a presentational component from the BlockPlacer wiring, and passes all checks. The Screen module adds some extra infrastructure but is reasonable."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Built with Vide, mounted once from client code",
+          "score": 5,
+          "note": "Main calls `Vide.mount(Hotbar, playerGui)` once, and every `create` call runs inside `Hotbar` and `Slot`."
+        },
+        {
+          "criterion": "Selected highlight is a binding",
+          "score": 5,
+          "note": "The stroke `Color` reads `selected()`, and the transparency, thickness and swatch size follow a `spring` derived from `selected()`."
+        },
+        {
+          "criterion": "External signal cleaned up with scope",
+          "score": 5,
+          "note": "Both the BlockTypeChanged connection and the ViewportSize connection are disconnected inside `cleanup(function() ... end)`."
+        },
+        {
+          "criterion": "Reusable tile component from BlockTypes.List",
+          "score": 4,
+          "note": "`Slot(props)` is generated from `BlockTypes.List`, but the props table has no select callback: `Activated` calls `BlockPlacer.setBlockType` directly, which ties the tile to BlockPlacer."
+        },
+        {
+          "criterion": "No yields inside Vide scopes",
+          "score": 5,
+          "note": "`WaitForChild(\"PlayerGui\")` runs before `Vide.mount`. Reading `Workspace.CurrentCamera` in the component body does not yield."
+        },
+        {
+          "criterion": "Works on phones",
+          "score": 4,
+          "note": "The slot size is a reactive clamp between 44 and 64 px, sized to 60% of the viewport width, so the bar stays centered and clear of the touch controls. However, number-key hints still show on phones, and it assumes CurrentCamera is non-nil and never replaced."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "The code works and passes all checks, but it lacks `--!strict`, and `camera` could be nil without a type check catching it."
+        }
+      ],
+      "overall_score": 7.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Cleanly separates a presentational `BlockHotbar` component from the `Hotbar` module that wires it to BlockPlacer",
+        "Strictly typed props, and the tile component receives a select callback",
+        "Uses `cleanup` directly on the connection",
+        "Hides number-key hints for touch players",
+        "A reactive UIScale responds to screen size"
+      ],
+      "weaknesses": [
+        "The Screen module keeps module-lifetime connections that are never disconnected",
+        "More files and infrastructure than the task strictly needed"
+      ]
+    },
+    "B": {
+      "score": 7.5,
+      "strengths": [
+        "Compact, self-contained implementation",
+        "Responsive slot sizing with a 44 px minimum",
+        "Spring animation on selection",
+        "Both connections are cleaned up"
+      ],
+      "weaknesses": [
+        "The tile is coupled to BlockPlacer rather than receiving a select callback",
+        "Not strictly typed; CurrentCamera is assumed non-nil and its replacement is not tracked",
+        "Shows keyboard hints to touch players"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 7.5
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

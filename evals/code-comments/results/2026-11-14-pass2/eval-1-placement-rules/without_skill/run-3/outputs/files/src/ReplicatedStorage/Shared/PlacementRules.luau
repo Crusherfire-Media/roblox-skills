@@ -1,0 +1,120 @@
+--!strict
+-- Block placement rules shared by the client (ghost preview) and the server (request validation).
+-- Everything that takes input from a remote must tolerate arbitrary values without erroring.
+
+local PlacementRules = {}
+
+PlacementRules.BLOCK_SIZE = 4
+-- Top surface of Workspace.Baseplate (see default.project.json). The grid's Y origin.
+PlacementRules.GROUND_Y = 0
+-- Highest a block's top face may reach, measured from GROUND_Y.
+PlacementRules.MAX_HEIGHT = 200
+-- Max distance from the player's HumanoidRootPart to the block's center.
+PlacementRules.MAX_REACH = 24
+
+PlacementRules.BLOCK_TYPES = table.freeze({ "brick", "dirt", "grass", "window", "wood" })
+
+local blockTypeSet: { [string]: true } = {}
+for _, name in PlacementRules.BLOCK_TYPES do
+	blockTypeSet[name] = true
+end
+
+-- Slack for float noise so blocks sharing a face don't count as overlapping.
+local OVERLAP_EPSILON = 1e-3
+
+local function isFiniteNumber(n: number): boolean
+	-- n ~= n catches NaN; the abs check catches +/-inf.
+	return n == n and math.abs(n) ~= math.huge
+end
+
+local function isFiniteVector3(v: Vector3): boolean
+	return isFiniteNumber(v.X) and isFiniteNumber(v.Y) and isFiniteNumber(v.Z)
+end
+
+function PlacementRules.isValidBlockType(blockType: unknown): boolean
+	return typeof(blockType) == "string" and blockTypeSet[blockType :: string] == true
+end
+
+-- Returns the center of the grid cell containing `position`. Idempotent: snapping a cell center
+-- returns the same center, so the client can send either a raw or already-snapped position.
+-- For a mouse hit, offset the hit point by `normal * (BLOCK_SIZE / 2)` first so the point lands
+-- in the cell in front of the clicked face rather than on its boundary.
+function PlacementRules.snapToGrid(position: Vector3): Vector3
+	local size = PlacementRules.BLOCK_SIZE
+	local half = size / 2
+	local groundY = PlacementRules.GROUND_Y
+	return Vector3.new(
+		math.floor(position.X / size) * size + half,
+		math.floor((position.Y - groundY) / size) * size + groundY + half,
+		math.floor(position.Z / size) * size + half
+	)
+end
+
+local function overlapsPlacedBlock(center: Vector3, placedFolder: Instance): boolean
+	local half = PlacementRules.BLOCK_SIZE / 2
+	for _, descendant in placedFolder:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			-- Axis-aligned box test; placed blocks are never rotated.
+			local delta = (descendant.Position - center):Abs()
+			local reach = descendant.Size / 2 + Vector3.new(half, half, half)
+			if
+				delta.X < reach.X - OVERLAP_EPSILON
+				and delta.Y < reach.Y - OVERLAP_EPSILON
+				and delta.Z < reach.Z - OVERLAP_EPSILON
+			then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- Checks whether `player` may place `blockType` at `position`. `blockType` and `position` may be
+-- anything (they come straight off a remote). `position` is snapped before checking.
+--
+-- Returns the snapped block center on success, or nil and a short reason on failure:
+--   local center, reason = PlacementRules.validate(player, blockType, position, placedFolder)
+--
+-- Comparisons are written as `not (x <= limit)` so that NaN fails them instead of passing.
+function PlacementRules.validate(
+	player: Player,
+	blockType: unknown,
+	position: unknown,
+	placedFolder: Instance
+): (Vector3?, string?)
+	if not PlacementRules.isValidBlockType(blockType) then
+		return nil, "invalid block type"
+	end
+
+	if typeof(position) ~= "Vector3" or not isFiniteVector3(position :: Vector3) then
+		return nil, "invalid position"
+	end
+
+	local center = PlacementRules.snapToGrid(position :: Vector3)
+	local half = PlacementRules.BLOCK_SIZE / 2
+	local groundY = PlacementRules.GROUND_Y
+
+	if not (center.Y - half >= groundY) then
+		return nil, "below ground"
+	end
+	if not (center.Y + half <= groundY + PlacementRules.MAX_HEIGHT) then
+		return nil, "too high"
+	end
+
+	local character = player.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if not (rootPart and rootPart:IsA("BasePart")) then
+		return nil, "no character"
+	end
+	if not ((rootPart.Position - center).Magnitude <= PlacementRules.MAX_REACH) then
+		return nil, "out of reach"
+	end
+
+	if overlapsPlacedBlock(center, placedFolder) then
+		return nil, "overlaps block"
+	end
+
+	return center, nil
+end
+
+return table.freeze(PlacementRules)

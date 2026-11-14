@@ -1,0 +1,126 @@
+--!strict
+-- Block placement rules, shared so the client's ghost preview and the server's request
+-- validation always agree on what is allowed.
+--
+-- Server:
+--   local center, reason = PlacementRules.validate(blockType, position, rootPart, placedFolder)
+--   if not center then warn(`{player.Name}: placement rejected ({reason})`) return end
+--   -- place a block of `blockType` at `center`
+--
+-- Client: call validate() with the same arguments each frame and tint the preview red when it
+-- returns nil. Keep the preview part out of placedFolder or it will collide with itself.
+
+local PlacementRules = {}
+
+export type BlockType = "Brick" | "Dirt" | "Grass" | "Window" | "Wood"
+
+local blockTypes: { BlockType } = { "Brick", "Dirt", "Grass", "Window", "Wood" }
+PlacementRules.BLOCK_TYPES = table.freeze(blockTypes)
+
+PlacementRules.BLOCK_SIZE = 4
+-- Top surface of the Baseplate (Size.Y 16 at Position.Y -8 in default.project.json). Update this
+-- if the Baseplate moves; it's a constant rather than read from Workspace so client and server
+-- can't disagree.
+PlacementRules.GROUND_Y = 0
+-- Highest point any part of a block may reach, measured from GROUND_Y.
+PlacementRules.MAX_HEIGHT = 200
+-- Max distance from the HumanoidRootPart to the block's center.
+PlacementRules.MAX_REACH = 24
+
+local BLOCK_SIZE = PlacementRules.BLOCK_SIZE
+local GROUND_Y = PlacementRules.GROUND_Y
+local MAX_LAYERS = math.floor(PlacementRules.MAX_HEIGHT / BLOCK_SIZE)
+local MAX_REACH = PlacementRules.MAX_REACH
+
+-- Shrink the overlap box slightly so blocks that only share a face don't count as overlapping.
+local OVERLAP_INSET = 0.05
+local OVERLAP_BOX_SIZE = Vector3.one * (BLOCK_SIZE - OVERLAP_INSET * 2)
+
+local isBlockType: { [string]: boolean } = {}
+for _, blockType in PlacementRules.BLOCK_TYPES do
+	isBlockType[blockType] = true
+end
+
+local function isFiniteNumber(n: number): boolean
+	-- NaN fails both comparisons.
+	return n > -math.huge and n < math.huge
+end
+
+local function snapAxis(value: number, origin: number): number
+	local cell = math.floor((value - origin) / BLOCK_SIZE)
+	return origin + (cell + 0.5) * BLOCK_SIZE
+end
+
+function PlacementRules.isBlockType(value: unknown): boolean
+	return type(value) == "string" and isBlockType[value] == true
+end
+
+-- Returns the center of the grid cell containing `position`. Snapping a center returns the same
+-- center, so it's safe to snap on the client and again on the server.
+--
+-- Pass a point *inside* the cell you want, not a raw raycast hit: a hit on a surface sits exactly
+-- on a cell boundary and can round to either side. Offset it along the surface normal first,
+-- e.g. snap(result.Position + result.Normal * (BLOCK_SIZE / 2)).
+function PlacementRules.snap(position: Vector3): Vector3
+	return Vector3.new(
+		snapAxis(position.X, 0),
+		snapAxis(position.Y, GROUND_Y),
+		snapAxis(position.Z, 0)
+	)
+end
+
+-- Checks every placement rule. `blockType` and `position` are treated as untrusted (they come
+-- straight off the remote); `rootPart` and `placedFolder` are expected to come from the caller.
+--
+-- Returns the snapped block center on success, or nil and a short reason on failure.
+function PlacementRules.validate(
+	blockType: unknown,
+	position: unknown,
+	rootPart: BasePart?,
+	placedFolder: Instance
+): (Vector3?, string?)
+	if not PlacementRules.isBlockType(blockType) then
+		return nil, "invalid block type"
+	end
+
+	if typeof(position) ~= "Vector3" then
+		return nil, "position is not a Vector3"
+	end
+	if
+		not (
+			isFiniteNumber(position.X)
+			and isFiniteNumber(position.Y)
+			and isFiniteNumber(position.Z)
+		)
+	then
+		return nil, "position is not finite"
+	end
+
+	local center = PlacementRules.snap(position)
+
+	local layer = math.floor((center.Y - GROUND_Y) / BLOCK_SIZE)
+	if layer < 0 then
+		return nil, "below ground"
+	end
+	if layer >= MAX_LAYERS then
+		return nil, "too high"
+	end
+
+	if not rootPart then
+		return nil, "no character"
+	end
+	if (center - rootPart.Position).Magnitude > MAX_REACH then
+		return nil, "out of reach"
+	end
+
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { placedFolder }
+	if #workspace:GetPartBoundsInBox(CFrame.new(center), OVERLAP_BOX_SIZE, params) > 0 then
+		return nil, "space occupied"
+	end
+
+	return center, nil
+end
+
+return table.freeze(PlacementRules)

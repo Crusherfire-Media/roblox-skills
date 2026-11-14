@@ -1,0 +1,111 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are functionally equivalent and correct. Each fixes the outline with reactive stroke bindings, the card with `show`, the Q/E handler with `cleanup` on the connection, and the leftover pickers with `cleanup(gui)` plus an open guard. Both also move `WaitForChild` out of the scope and replace the effect with a plain function. A wins because it passes every check and uses the more idiomatic `mount`. B fails StyLua on its own code and adds a redundant property.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Fixes the outline",
+          "score": 5,
+          "note": "`isSelected` is now a function, and the stroke's `Color`/`Thickness` are bound to functions that call `isSelected()`, so the outline follows the selection."
+        },
+        {
+          "criterion": "Fixes the info card error",
+          "score": 5,
+          "note": "The children binding is replaced with `show(isHovered, function() return infoCard(...) end)`, so the card is built in a stable scope."
+        },
+        {
+          "criterion": "Fixes the stacking Q/E handler",
+          "score": 5,
+          "note": "`cleanup(UserInputService.InputBegan:Connect(onInputBegan))` disconnects the handler when the picker's scope is destroyed."
+        },
+        {
+          "criterion": "Fixes the leftover pickers",
+          "score": 5,
+          "note": "`pickerGui` calls `cleanup(gui)` and is mounted with `mount(pickerGui, playerGui)`, so destroying the mount destroys the ScreenGui; an open guard also stops duplicate pickers."
+        },
+        {
+          "criterion": "Also fixes the unreported misuses",
+          "score": 5,
+          "note": "`WaitForChild` moves to module level, and the effect that wrote a source is replaced by a plain `selectedDisplayName` function."
+        },
+        {
+          "criterion": "Keeps behavior and passes the checks",
+          "score": 5,
+          "note": "Changes stay in the two files, the look is unchanged, and luau-lsp, selene, and StyLua all pass."
+        }
+      ],
+      "overall_score": 9.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Fixes the outline",
+          "score": 5,
+          "note": "`isSelected` is a `derive`, and the stroke's `Color`/`Thickness` are bound to functions that read it."
+        },
+        {
+          "criterion": "Fixes the info card error",
+          "score": 5,
+          "note": "Uses `show(isHovered, ...)` to build the card in its own scope."
+        },
+        {
+          "criterion": "Fixes the stacking Q/E handler",
+          "score": 5,
+          "note": "Wraps the `InputBegan:Connect(...)` call in `cleanup(...)`."
+        },
+        {
+          "criterion": "Fixes the leftover pickers",
+          "score": 5,
+          "note": "Inside `root`, it calls `cleanup(gui)`, then sets `gui.Parent = playerGui`, and adds an open guard, so the GUI is destroyed when build mode ends."
+        },
+        {
+          "criterion": "Also fixes the unreported misuses",
+          "score": 5,
+          "note": "`WaitForChild` moves outside `root`, and the effect is replaced by a plain function."
+        },
+        {
+          "criterion": "Keeps behavior and passes the checks",
+          "score": 3,
+          "note": "StyLua fails on B's own `cleanup(UserInputService.InputBegan:Connect(function ...))` block, and the explicit `ResetOnSpawn = false` is redundant because Vide's defaults already set it."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9.5,
+      "strengths": [
+        "Fixes every reported bug and both unreported misuses with idiomatic Vide (`show`, `cleanup`, `mount`).",
+        "Uses one clean `mount` with `cleanup(gui)`, and its comment correctly explains why the cleanup is needed.",
+        "All checks pass."
+      ],
+      "weaknesses": [
+        "Minor: `isSelected` is a plain function rather than a `derive`, but that is perfectly fine here."
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Fixes every reported bug and both unreported misuses correctly.",
+        "Comments explain the scoping choices."
+      ],
+      "weaknesses": [
+        "StyLua formatting check fails on its own code.",
+        "Redundant `ResetOnSpawn = false`, and it parents the GUI by hand inside `root` rather than using `mount`."
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9.5,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

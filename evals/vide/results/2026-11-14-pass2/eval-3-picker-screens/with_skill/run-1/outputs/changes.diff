@@ -1,0 +1,712 @@
+diff --git a/src/ServerScriptService/Stories/BlockGame.storybook.luau b/src/ServerScriptService/Stories/BlockGame.storybook.luau
+new file mode 100644
+index 0000000..b8ac89f
+--- /dev/null
++++ b/src/ServerScriptService/Stories/BlockGame.storybook.luau
+@@ -0,0 +1,4 @@
++return {
++	name = "Block Game",
++	storyRoots = { script.Parent },
++}
+diff --git a/src/ServerScriptService/Stories/BlockPicker.story.luau b/src/ServerScriptService/Stories/BlockPicker.story.luau
+new file mode 100644
+index 0000000..2c2028b
+--- /dev/null
++++ b/src/ServerScriptService/Stories/BlockPicker.story.luau
+@@ -0,0 +1,100 @@
++--!strict
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local StarterPlayer = game:GetService("StarterPlayer")
++
++local BlockPicker = require(StarterPlayer.StarterPlayerScripts.BlockPicker)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local create = Vide.create
++local indexes = Vide.indexes
++local source = Vide.source
++
++local MAXIMUM_BLOCK_COUNT = 12
++
++local CONTROLS = {
++	-- The hotbar shown on touch screens and phone-sized windows.
++	IsRow = false,
++	-- Changing it starts the story over. Kept between 1 and 12.
++	BlockCount = #BlockTypes.List,
++	HasLongNames = false,
++}
++
++type StoryProps = {
++	controls: {
++		IsRow: () -> boolean,
++		BlockCount: () -> number,
++		HasLongNames: () -> boolean,
++	},
++	target: Frame,
++}
++
++type Sample = {
++	Count: number,
++	HasLongNames: boolean,
++}
++
++local function sampleBlockTypes(sample: Sample): { BlockTypes.BlockType }
++	local list = {}
++	for index = 1, sample.Count do
++		local base = BlockTypes.List[(index - 1) % #BlockTypes.List + 1]
++		list[index] = table.freeze({
++			Name = `{base.Name}{index}`,
++			DisplayName = if sample.HasLongNames
++				then `Polished {base.DisplayName} Panel`
++				else base.DisplayName,
++			Color = base.Color,
++			Material = base.Material,
++			Transparency = base.Transparency,
++		})
++	end
++	return list
++end
++
++local function story(props: StoryProps)
++	local controls = props.controls
++
++	local function layout(): BlockPicker.Layout
++		return if controls.IsRow() then "Row" else "Column"
++	end
++
++	return create("Frame")({
++		Name = "Preview",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundTransparency = 1,
++
++		create("UIListLayout")({
++			HorizontalAlignment = Enum.HorizontalAlignment.Center,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++		}),
++
++		indexes(function()
++			local count = math.clamp(math.floor(controls.BlockCount()), 1, MAXIMUM_BLOCK_COUNT)
++			local hasLongNames = controls.HasLongNames()
++			return {
++				[`{count}:{hasLongNames}`] = { Count = count, HasLongNames = hasLongNames },
++			}
++		end, function(sample: () -> Sample)
++			local blockTypes = sampleBlockTypes(sample())
++			local selected = source(blockTypes[1].Name)
++
++			return BlockPicker.component({
++				Layout = layout,
++				BlockTypes = blockTypes,
++				Selected = selected,
++				Select = function(name: string)
++					print(`Selected {name}`)
++					selected(name)
++				end,
++			})
++		end),
++	})
++end
++
++return {
++	summary = "The block picker in its desktop column and touch hotbar layouts.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index b45f323..f7696c2 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -1,6 +1,9 @@
++--!strict
+ --[[
+-	The block picker: a column of tiles down the left side of the screen, one per block type, each
+-	with the block's name beside it, under a title naming the selected block.
++	The block picker: one tile per block type under a title naming the selected
++	block. The Column layout lists the tiles down the screen with each block's
++	name beside it; the Row layout is a hotbar of larger tiles for thumbs.
++	Where the picker sits on screen is up to whoever mounts it.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+@@ -9,15 +12,17 @@ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
++local derive = Vide.derive
++local read = Vide.read
+ 
+-type BlockType = BlockTypes.BlockType
+-
+-local TILE_SIZE = 40
+ local TILE_GAP = 6
+ local TILE_RADIUS = 6
++local IDLE_STROKE_THICKNESS = 1
++local SELECTED_STROKE_THICKNESS = 3
+ local NAME_WIDTH = 96
++local NAME_TEXT_SIZE = 16
+ local TITLE_HEIGHT = 30
+-local TITLE_MAX_TEXT_SIZE = 24
++local TITLE_TEXT_SIZE = 24
+ local PANEL_PADDING = 10
+ local PANEL_RADIUS = 10
+ local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+@@ -25,25 +30,95 @@ local SELECTED_COLOR = Color3.fromRGB(255, 200, 60)
+ local IDLE_STROKE_COLOR = Color3.fromRGB(70, 70, 80)
+ local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
+ 
++type BlockType = BlockTypes.BlockType
++
++export type Layout = "Column" | "Row"
++
++type Metrics = {
++	TileSize: number,
++	ShowsNames: boolean,
++	FillDirection: Enum.FillDirection,
++	TitleAlignment: Enum.TextXAlignment,
++}
++
++local COLUMN_METRICS: Metrics = table.freeze({
++	TileSize = 40,
++	ShowsNames = true,
++	FillDirection = Enum.FillDirection.Vertical,
++	TitleAlignment = Enum.TextXAlignment.Left,
++})
++-- No names beside the tiles, so the row fits between the thumbstick and the
++-- jump button on a phone.
++local ROW_METRICS: Metrics = table.freeze({
++	TileSize = 52,
++	ShowsNames = false,
++	FillDirection = Enum.FillDirection.Horizontal,
++	TitleAlignment = Enum.TextXAlignment.Center,
++})
++
++local COLUMN_CONTENT_WIDTH = COLUMN_METRICS.TileSize + TILE_GAP + NAME_WIDTH
++
+ type TileProps = {
+ 	BlockType: BlockType,
+ 	LayoutOrder: number,
++	Metrics: () -> Metrics,
+ 	IsSelected: () -> boolean,
+ 	Select: () -> (),
+ }
+ 
++export type BlockPickerProps = {
++	Layout: Layout | () -> Layout,
++	Selected: () -> string,
++	Select: (name: string) -> (),
++	-- Defaults to every block type in the game.
++	BlockTypes: { BlockType }?,
++}
++
++local BlockPicker = {}
++
++local function metricsFor(layout: Layout): Metrics
++	return if layout == "Column" then COLUMN_METRICS else ROW_METRICS
++end
++
++local function contentWidth(layout: Layout, count: number): number
++	if layout == "Column" then
++		return COLUMN_CONTENT_WIDTH
++	end
++	local tileSize = ROW_METRICS.TileSize
++	local rowWidth = count * tileSize + math.max(count - 1, 0) * TILE_GAP
++	-- The title needs room even when only a tile or two shows.
++	return math.max(rowWidth, COLUMN_CONTENT_WIDTH)
++end
++
++local function contentHeight(layout: Layout, count: number): number
++	if layout == "Column" then
++		return TITLE_HEIGHT + count * (TILE_GAP + COLUMN_METRICS.TileSize)
++	end
++	return TITLE_HEIGHT + TILE_GAP + ROW_METRICS.TileSize
++end
++
+ local function tile(props: TileProps): TextButton
+ 	return create("TextButton")({
+ 		Name = props.BlockType.Name,
+ 		LayoutOrder = props.LayoutOrder,
+-		Size = UDim2.fromOffset(TILE_SIZE + TILE_GAP + NAME_WIDTH, TILE_SIZE),
++		Size = function()
++			local metrics = props.Metrics()
++			local width = metrics.TileSize
++			if metrics.ShowsNames then
++				width += TILE_GAP + NAME_WIDTH
++			end
++			return UDim2.fromOffset(width, metrics.TileSize)
++		end,
+ 		BackgroundTransparency = 1,
+ 
+ 		Activated = props.Select,
+ 
+ 		create("Frame")({
+ 			Name = "Swatch",
+-			Size = UDim2.fromOffset(TILE_SIZE, TILE_SIZE),
++			Size = function()
++				local tileSize = props.Metrics().TileSize
++				return UDim2.fromOffset(tileSize, tileSize)
++			end,
+ 			BackgroundColor3 = props.BlockType.Color,
+ 
+ 			create("UICorner")({ CornerRadius = UDim.new(0, TILE_RADIUS) }),
+@@ -52,36 +127,71 @@ local function tile(props: TileProps): TextButton
+ 					return if props.IsSelected() then SELECTED_COLOR else IDLE_STROKE_COLOR
+ 				end,
+ 				Thickness = function()
+-					return if props.IsSelected() then 3 else 1
++					return if props.IsSelected()
++						then SELECTED_STROKE_THICKNESS
++						else IDLE_STROKE_THICKNESS
+ 				end,
+ 			}),
+ 		}),
+ 
+ 		create("TextLabel")({
+ 			Name = "BlockName",
+-			Position = UDim2.fromOffset(TILE_SIZE + TILE_GAP, 0),
+-			Size = UDim2.fromOffset(NAME_WIDTH, TILE_SIZE),
++			Visible = function()
++				return props.Metrics().ShowsNames
++			end,
++			Position = function()
++				return UDim2.fromOffset(props.Metrics().TileSize + TILE_GAP, 0)
++			end,
++			Size = function()
++				return UDim2.fromOffset(NAME_WIDTH, props.Metrics().TileSize)
++			end,
+ 			BackgroundTransparency = 1,
+ 			Font = Enum.Font.Gotham,
+-			TextSize = 16,
++			TextSize = NAME_TEXT_SIZE,
+ 			TextColor3 = TEXT_COLOR,
+ 			TextXAlignment = Enum.TextXAlignment.Left,
++			TextTruncate = Enum.TextTruncate.AtEnd,
+ 			Text = props.BlockType.DisplayName,
+ 		}),
+ 	})
+ end
+ 
+-export type BlockPickerProps = {
+-	Selected: () -> string,
+-	Select: (name: string) -> (),
+-}
++--[[
++	The picker's size in UI units for the given layout and number of block
++	types, before any scale. Use it to place or fit the picker without reading
++	its AbsoluteSize.
++]]
++function BlockPicker.designSize(layout: Layout, count: number): Vector2
++	return Vector2.new(
++		contentWidth(layout, count) + PANEL_PADDING * 2,
++		contentHeight(layout, count) + PANEL_PADDING * 2
++	)
++end
++
++function BlockPicker.component(props: BlockPickerProps): Frame
++	local blockTypes = props.BlockTypes or BlockTypes.List
++	local count = #blockTypes
++
++	local byName: { [string]: BlockType? } = {}
++	for _, blockType in blockTypes do
++		byName[blockType.Name] = blockType
++	end
++
++	-- Derived, so bindings rerun when the layout flips, not on every pixel of
++	-- a window resize.
++	local layout = derive(function(): Layout
++		return read(props.Layout)
++	end) :: () -> Layout
++	local metrics = derive(function(): Metrics
++		return metricsFor(layout())
++	end)
+ 
+-local function blockPicker(props: BlockPickerProps): Frame
+ 	local tiles = {}
+-	for index, blockType in BlockTypes.List do
++	for index, blockType in blockTypes do
+ 		tiles[index] = tile({
+ 			BlockType = blockType,
+-			LayoutOrder = index + 1,
++			LayoutOrder = index,
++			Metrics = metrics,
+ 			IsSelected = function()
+ 				return props.Selected() == blockType.Name
+ 			end,
+@@ -93,9 +203,10 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 
+ 	return create("Frame")({
+ 		Name = "BlockPicker",
+-		AnchorPoint = Vector2.new(0, 0.5),
+-		Position = UDim2.new(0, 20, 0.5, 0),
+-		AutomaticSize = Enum.AutomaticSize.XY,
++		Size = function()
++			local size = BlockPicker.designSize(layout(), count)
++			return UDim2.fromOffset(size.X, size.Y)
++		end,
+ 		BackgroundColor3 = PANEL_COLOR,
+ 		BackgroundTransparency = 0.2,
+ 
+@@ -108,27 +219,46 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 		}),
+ 		create("UIListLayout")({
+ 			FillDirection = Enum.FillDirection.Vertical,
++			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+ 			Padding = UDim.new(0, TILE_GAP),
+ 		}),
+ 
+ 		create("TextLabel")({
+ 			Name = "Title",
+ 			LayoutOrder = 1,
+-			Size = UDim2.fromOffset(TILE_SIZE + TILE_GAP + NAME_WIDTH, TITLE_HEIGHT),
++			Size = function()
++				return UDim2.fromOffset(contentWidth(layout(), count), TITLE_HEIGHT)
++			end,
+ 			BackgroundTransparency = 1,
+ 			Font = Enum.Font.GothamBold,
+-			TextScaled = true,
++			TextSize = TITLE_TEXT_SIZE,
+ 			TextColor3 = TEXT_COLOR,
+-			TextXAlignment = Enum.TextXAlignment.Left,
++			TextXAlignment = function()
++				return metrics().TitleAlignment
++			end,
++			TextTruncate = Enum.TextTruncate.AtEnd,
+ 			Text = function()
+-				return BlockTypes.ByName[props.Selected()].DisplayName
++				local blockType = byName[props.Selected()]
++				return if blockType then blockType.DisplayName else ""
+ 			end,
+-
+-			create("UITextSizeConstraint")({ MaxTextSize = TITLE_MAX_TEXT_SIZE }),
+ 		}),
+ 
+-		tiles,
++		create("Frame")({
++			Name = "Tiles",
++			LayoutOrder = 2,
++			AutomaticSize = Enum.AutomaticSize.XY,
++			BackgroundTransparency = 1,
++
++			create("UIListLayout")({
++				FillDirection = function()
++					return metrics().FillDirection
++				end,
++				Padding = UDim.new(0, TILE_GAP),
++			}),
++
++			tiles,
++		}),
+ 	})
+ end
+ 
+-return blockPicker
++return BlockPicker
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 04bc27a..2d84e61 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -3,12 +3,24 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockPicker = require(script.Parent.BlockPicker)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Screen = require(script.Parent.UI.Screen)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
++local scaledScreenGui = require(script.Parent.UI.scaledScreenGui)
+ 
+ local create = Vide.create
++local derive = Vide.derive
+ local mount = Vide.mount
+ local source = Vide.source
+ 
++local COLUMN_ANCHOR = Vector2.new(0, 0.5)
++local COLUMN_POSITION = UDim2.new(0, 20, 0.5, 0)
++local ROW_ANCHOR = Vector2.new(0.5, 1)
++local EDGE_PADDING = 16
++-- Keeps the Row layout's 52 pixel tiles at 44 or more, the smallest a thumb
++-- hits reliably.
++local MINIMUM_FIT_SCALE = 0.85
++
+ local localPlayer = Players.LocalPlayer
+ local playerGui = localPlayer:WaitForChild("PlayerGui")
+ 
+@@ -17,17 +29,65 @@ BlockPlacer.BlockTypeChanged:Connect(function(name: string)
+ 	selected(name)
+ end)
+ 
+-local function app()
+-	return create("ScreenGui")({
+-		Name = "BlockPickerGui",
++local function blockPickerDock()
++	local layout: () -> BlockPicker.Layout = derive(function(): BlockPicker.Layout
++		return if Screen.isTouchLayout() then "Row" else "Column"
++	end)
++
++	local function designSize(): Vector2
++		return BlockPicker.designSize(layout(), #BlockTypes.List)
++	end
+ 
+-		BlockPicker({
++	local function room(): Vector2
++		local usable = Screen.usableSize()
++		local height = usable.Y - EDGE_PADDING * 2
++		if layout() == "Row" then
++			local span = Screen.bottomTouchSpan()
++			return Vector2.new(span.Right - span.Left - EDGE_PADDING * 2, height)
++		end
++		return Vector2.new(usable.X - EDGE_PADDING * 2, height)
++	end
++
++	return create("Frame")({
++		Name = "BlockPickerDock",
++		BackgroundTransparency = 1,
++		AnchorPoint = function()
++			return if layout() == "Row" then ROW_ANCHOR else COLUMN_ANCHOR
++		end,
++		Position = function()
++			if layout() == "Column" then
++				return COLUMN_POSITION
++			end
++			-- Centered in the gap between the thumbstick and the jump button.
++			local span = Screen.bottomTouchSpan()
++			return UDim2.new(0, math.round((span.Left + span.Right) / 2), 1, -EDGE_PADDING)
++		end,
++		Size = function()
++			local size = designSize()
++			return UDim2.fromOffset(size.X, size.Y)
++		end,
++
++		create("UIScale")({
++			Scale = function()
++				return Screen.fitScale(designSize(), room(), MINIMUM_FIT_SCALE)
++			end,
++		}),
++
++		BlockPicker.component({
++			Layout = layout,
+ 			Selected = selected,
+ 			Select = BlockPlacer.setBlockType,
+ 		}),
+ 	})
+ end
+ 
++local function app()
++	return scaledScreenGui({
++		Name = "BlockPickerGui",
++		Children = { blockPickerDock() },
++	})
++end
++
+ mount(app, playerGui)
+ 
+ BlockPlacer.start()
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+new file mode 100644
+index 0000000..e77c1e1
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+@@ -0,0 +1,167 @@
++--!strict
++--[[
++	Live facts about the player's screen, as Vide sources, shared by every
++	screen of UI. Sizes are in UI units: the offsets UI is authored in, for a
++	screen 1080 pixels tall. Build ScreenGuis with scaledScreenGui so those
++	units grow on larger screens.
++]]
++
++local GuiService = game:GetService("GuiService")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
++local UserInputService = game:GetService("UserInputService")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local batch = Vide.batch
++local source = Vide.source
++
++local REFERENCE_SHORT_SIDE = 1080
++local MINIMUM_SCALE = 1
++local MAXIMUM_SCALE = 3
++local LARGE_DISPLAY_BOOST = 1.25
++local PHONE_SHORT_SIDE = 600
++local FALLBACK_VIEWPORT = Vector2.new(1920, 1080)
++
++-- Where the default PlayerModule puts its touch controls, in real pixels: the
++-- dynamic thumbstick can start anywhere in the left 40 percent, and the jump
++-- button's left edge sits this far from the right edge.
++local THUMBSTICK_WIDTH_SHARE = 0.4
++local SMALL_TOUCH_SHORT_SIDE = 500
++local SMALL_JUMP_LEFT_FROM_RIGHT = 95
++local LARGE_JUMP_LEFT_FROM_RIGHT = 170
++
++export type Span = {
++	Left: number,
++	Right: number,
++}
++
++local Screen = {}
++
++local realViewport = source(FALLBACK_VIEWPORT)
++local realInset = source(Vector2.zero)
++local prefersTouch = source(false)
++local isLargeDisplay = source(false)
++local viewportConnection: RBXScriptConnection? = nil
++
++local function refresh()
++	local camera = workspace.CurrentCamera
++	local topLeftInset = GuiService:GetGuiInset()
++	batch(function()
++		-- ViewportSize reads (1, 1) before the first frame, which would pass
++		-- for a tiny phone.
++		if camera and camera.ViewportSize.X > 1 and camera.ViewportSize.Y > 1 then
++			realViewport(camera.ViewportSize)
++		end
++		realInset(topLeftInset)
++		prefersTouch(UserInputService.PreferredInput == Enum.PreferredInput.Touch)
++		isLargeDisplay(GuiService.ViewportDisplaySize == Enum.DisplaySize.Large)
++	end)
++end
++
++local function watchCamera()
++	if viewportConnection then
++		viewportConnection:Disconnect()
++	end
++	local camera = workspace.CurrentCamera
++	if camera then
++		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(refresh)
++	end
++	refresh()
++end
++
++--[[
++	How much the whole UI grows: the short side over 1080, kept between 1 and
++	3, with a quarter more on a TV. Smaller screens change layout instead.
++]]
++function Screen.uiScale(): number
++	local view = realViewport()
++	local boost = if isLargeDisplay() then LARGE_DISPLAY_BOOST else 1
++	return math.clamp(
++		math.min(view.X, view.Y) / REFERENCE_SHORT_SIDE * boost,
++		MINIMUM_SCALE,
++		MAXIMUM_SCALE
++	)
++end
++
++function Screen.viewport(): Vector2
++	return realViewport() / Screen.uiScale()
++end
++
++--[[
++	The viewport below the Roblox topbar.
++]]
++function Screen.usableSize(): Vector2
++	local view = Screen.viewport()
++	return Vector2.new(view.X, view.Y - realInset().Y / Screen.uiScale())
++end
++
++--[[
++	Whether touch is the primary input, which is when Roblox shows its
++	thumbstick and jump button.
++]]
++function Screen.isTouch(): boolean
++	return prefersTouch()
++end
++
++--[[
++	A short side under 600 UI units, which includes a desktop window dragged
++	that small.
++]]
++function Screen.isPhone(): boolean
++	local view = Screen.viewport()
++	return math.min(view.X, view.Y) < PHONE_SHORT_SIDE
++end
++
++--[[
++	Whether UI should use its touch layout: the touch controls are up, or the
++	screen is too small for the desktop layout.
++]]
++function Screen.isTouchLayout(): boolean
++	return prefersTouch() or Screen.isPhone()
++end
++
++--[[
++	The stretch along the bottom edge that the touch controls leave free,
++	measured from the left edge. Without touch controls it is the whole width.
++]]
++function Screen.bottomTouchSpan(): Span
++	local view = realViewport()
++	local scale = Screen.uiScale()
++	if not prefersTouch() then
++		return { Left = 0, Right = view.X / scale }
++	end
++
++	local isSmallTouchArea = math.min(view.X, view.Y) <= SMALL_TOUCH_SHORT_SIDE
++	local jumpLeftFromRight = if isSmallTouchArea
++		then SMALL_JUMP_LEFT_FROM_RIGHT
++		else LARGE_JUMP_LEFT_FROM_RIGHT
++	return {
++		Left = view.X * THUMBSTICK_WIDTH_SHARE / scale,
++		Right = (view.X - jumpLeftFromRight) / scale,
++	}
++end
++
++--[[
++	The scale that fits a panel's design size into the room it has. Never
++	above 1, and never below minimumScale, past which its text or buttons get
++	too small to use.
++]]
++function Screen.fitScale(designSize: Vector2, room: Vector2, minimumScale: number): number
++	local fit = math.min(room.X / designSize.X, room.Y / designSize.Y)
++	return math.clamp(fit, minimumScale, 1)
++end
++
++-- UI Labs loads a fresh copy of this module on every reload, and an engine
++-- connection would keep each copy in memory, so edit mode reads once.
++if RunService:IsRunning() then
++	watchCamera()
++	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
++	GuiService:GetPropertyChangedSignal("TopbarInset"):Connect(refresh)
++	GuiService:GetPropertyChangedSignal("ViewportDisplaySize"):Connect(refresh)
++	UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(refresh)
++else
++	refresh()
++end
++
++return Screen
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/scaledScreenGui.luau b/src/StarterPlayer/StarterPlayerScripts/UI/scaledScreenGui.luau
+new file mode 100644
+index 0000000..01ad666
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/scaledScreenGui.luau
+@@ -0,0 +1,30 @@
++--!strict
++--[[
++	A ScreenGui that grows the UI inside it on screens larger than 1080p. Build
++	every screen of game UI with it, so no component does its own screen math.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Screen = require(script.Parent.Screen)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local create = Vide.create
++
++export type ScaledScreenGuiProps = {
++	Name: string,
++	DisplayOrder: number?,
++	Children: { any },
++}
++
++local function scaledScreenGui(props: ScaledScreenGuiProps): ScreenGui
++	return create("ScreenGui")({
++		Name = props.Name,
++		DisplayOrder = props.DisplayOrder,
++
++		create("UIScale")({ Scale = Screen.uiScale }),
++		props.Children,
++	})
++end
++
++return scaledScreenGui
