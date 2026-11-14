@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  PESDE_VERSION: 0.7.4+registry.0.2.3
+  ROKIT_VERSION: v1.2.0
+
+jobs:
+  production:
+    name: Publish to production
+    # Pre-releases stay off production.
+    if: ${{ !github.event.release.prerelease && vars.PRODUCTION_PLACE_ID != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: publish-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Players only get code that reached main, where CI checked it.
+      - name: Check the release is on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "The release's commit isn't on main, so it isn't published."
+            exit 1
+          fi
+      - uses: CompeyDev/setup-rokit@1d9390883f7ebce19d48f5b8d006e11d387c92ab # v0.2.1
+        with:
+          version: ${{ env.ROKIT_VERSION }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install pesde
+        run: bash tools/ci/install-pesde.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install packages
+        run: pesde install --locked || { echo "Retrying in 30 seconds"; sleep 30; pesde install --locked; }
+      - name: Build and publish
+        run: |
+          mkdir -p build
+          rojo build default.project.json -o build/game.rbxl
+          lune run tools/ci/publish build/game.rbxl
+        env:
+          ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+          ROBLOX_PLACE_ID: ${{ vars.PRODUCTION_PLACE_ID }}

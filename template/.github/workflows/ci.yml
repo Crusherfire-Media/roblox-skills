@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to a pull request replaces its older run. Each push to main
+# gets its own group, so every merge is checked and published.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+env:
+  PESDE_VERSION: 0.7.4+registry.0.2.3
+  ROKIT_VERSION: v1.2.0
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: CompeyDev/setup-rokit@1d9390883f7ebce19d48f5b8d006e11d387c92ab # v0.2.1
+        with:
+          version: ${{ env.ROKIT_VERSION }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install pesde
+        run: bash tools/ci/install-pesde.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install packages
+        run: pesde install --locked || { echo "Retrying in 30 seconds"; sleep 30; pesde install --locked; }
+      - name: Generate the sourcemap
+        run: rojo sourcemap default.project.json -o sourcemap.json
+      - name: Download Roblox type definitions
+        run: >-
+          curl -fsSL --retry 3 -o globalTypes.None.d.luau
+          https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau
+      - name: luau-lsp analyze
+        run: >-
+          luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json
+          --definitions:@roblox=globalTypes.None.d.luau
+          --ignore="**/roblox_packages/**" src
+      - name: selene
+        run: selene src tools
+      - name: StyLua
+        run: stylua --check src tools
+
+  specs:
+    name: Specs
+    needs: checks
+    # Skipped until the CI place is set up (tools/ci/README.md).
+    if: vars.CI_PLACE_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Luau Execution allows 5 task creates per minute per key owner, so a
+    # newer push cancels this branch's running specs instead of adding a task.
+    concurrency:
+      group: luau-execution-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: CompeyDev/setup-rokit@1d9390883f7ebce19d48f5b8d006e11d387c92ab # v0.2.1
+        with:
+          version: ${{ env.ROKIT_VERSION }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install pesde
+        run: bash tools/ci/install-pesde.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install packages
+        run: pesde install --locked || { echo "Retrying in 30 seconds"; sleep 30; pesde install --locked; }
+      - name: Build the test place
+        run: |
+          mkdir -p build
+          rojo build default.project.json -o build/game.rbxl
+          lune run tools/ci/prepare-test-place build/game.rbxl build/test.rbxl
+      - name: Run the specs in the CI place
+        run: lune run tools/ci/run-tests build/test.rbxl
+        env:
+          ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+          ROBLOX_UNIVERSE_ID: ${{ vars.CI_UNIVERSE_ID }}
+          ROBLOX_PLACE_ID: ${{ vars.CI_PLACE_ID }}
+
+  staging:
+    name: Publish to staging
+    needs: [checks, specs]
+    # Runs only after the specs pass, so it also waits for the CI place setup.
+    if: github.event_name == 'push' && vars.STAGING_PLACE_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: publish-staging
+      cancel-in-progress: false
+    steps:
+      # Pushes run in parallel, so an older one can finish last. Only main's
+      # newest commit publishes, so staging never goes back to an older build.
+      - name: Check this is main's newest commit
+        id: head
+        run: |
+          main=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$main" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "main has moved on to $main, so $GITHUB_SHA isn't published"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.head.outputs.current == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.head.outputs.current == 'true'
+        uses: CompeyDev/setup-rokit@1d9390883f7ebce19d48f5b8d006e11d387c92ab # v0.2.1
+        with:
+          version: ${{ env.ROKIT_VERSION }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install pesde
+        if: steps.head.outputs.current == 'true'
+        run: bash tools/ci/install-pesde.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install packages
+        if: steps.head.outputs.current == 'true'
+        run: pesde install --locked || { echo "Retrying in 30 seconds"; sleep 30; pesde install --locked; }
+      - name: Build and publish
+        if: steps.head.outputs.current == 'true'
+        run: |
+          mkdir -p build
+          rojo build default.project.json -o build/game.rbxl
+          lune run tools/ci/publish build/game.rbxl
+        env:
+          ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+          ROBLOX_PLACE_ID: ${{ vars.STAGING_PLACE_ID }}
