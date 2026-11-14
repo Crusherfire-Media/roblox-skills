@@ -4,7 +4,7 @@ Claude Code hooks that make sure the right skills are loaded before Luau edits a
 
 ## `skill-gate.mjs` (PreToolUse: Edit, Write, MultiEdit)
 
-Denies a Luau file edit until the skills it needs are loaded, and names them in the deny reason so Claude loads them and retries. Every edit needs `roblox-dev:roblox-lua-style-guide` and `roblox-dev:code-comments`. Vide code adds `vide` (plus `vide-ui-labs` for components and stories, `vide-charm` for Charm state), specs add `roblox-testing`, and a new script or a new `require` adds `game-architecture`. Only skills loaded under the `roblox-dev:` name count, so a same-named skill from another plugin doesn't satisfy it. Edits inside `roblox_packages` are denied outright. After three denials in a row it steps aside, in case it is missing a load.
+Denies a Luau file edit until the skills it needs are loaded, and names them in the deny reason so Claude loads them and retries. Every edit needs `roblox-dev:luau-style-guide` and `roblox-dev:code-comments`. Vide code adds `vide` (plus `vide-ui-labs` for components and stories, `vide-charm` for Charm state), specs add `roblox-testing`, and a new script or a new `require` adds `game-architecture`. Only skills loaded under the `roblox-dev:` name count, so a same-named skill from another plugin doesn't satisfy it. Edits inside `roblox_packages` are denied outright. After three denials in a row it steps aside, in case it is missing a load.
 
 ## `after-edit.mjs` (PostToolUse: Edit, Write, MultiEdit)
 

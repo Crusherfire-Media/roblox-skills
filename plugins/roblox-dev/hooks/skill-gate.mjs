@@ -36,7 +36,7 @@ const PACKAGE_EDIT_REASON =
 // known; `isGameCode` is false for Luau outside the place (a Lune tool), which needs no
 // architecture rules.
 function luauSkills(need, { tool, input, path, added, replaced, calls, isGameCode }) {
-  need('roblox-lua-style-guide', 'it changes Luau');
+  need('luau-style-guide', 'it changes Luau');
   need('code-comments', 'it changes Luau, and every Luau edit follows the comment rules');
   const reads = scriptsRead(calls);
   const read = readOf(reads, path);

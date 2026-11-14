@@ -31,7 +31,7 @@ const call = (name, input, text = 'ok', isError = false) => {
 const skill = (name) => call('Skill', { skill: name }, `Launching skill: ${name}`);
 const own = (...names) => names.flatMap((name) => skill(`roblox-dev:${name}`));
 // The two skills every Luau edit needs.
-const BASE = ['roblox-lua-style-guide', 'code-comments'];
+const BASE = ['luau-style-guide', 'code-comments'];
 const boundary = () => ({ type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted', timestamp: at() });
 const reattach = (skills) => ({
   type: 'attachment',
@@ -134,8 +134,8 @@ describe('skill-gate', () => {
   test('denies a Luau edit until the style guide and code-comments are loaded', () => {
     const output = gate(transcript(human('fix it')), 'Edit', editFile(SHOP));
     assert.ok(denied(output));
-    assert.match(reasonOf(output), /Load `roblox-dev:roblox-lua-style-guide`, `roblox-dev:code-comments`/);
-    const styleOnly = gate(transcript(human('fix it'), own('roblox-lua-style-guide')), 'Edit', editFile(SHOP));
+    assert.match(reasonOf(output), /Load `roblox-dev:luau-style-guide`, `roblox-dev:code-comments`/);
+    const styleOnly = gate(transcript(human('fix it'), own('luau-style-guide')), 'Edit', editFile(SHOP));
     assert.ok(denied(styleOnly));
     assert.match(reasonOf(styleOnly), /Load `roblox-dev:code-comments`/);
     assert.equal(gate(transcript(human('fix it'), own(...BASE)), 'Edit', editFile(SHOP)), undefined);
@@ -143,19 +143,19 @@ describe('skill-gate', () => {
 
   test('counts only skills loaded under the roblox-dev: name', () => {
     const edit = editFile(SHOP);
-    const privatePlugin = transcript(human('fix it'), skill('roblox:roblox-lua-style-guide'), skill('roblox:code-comments'));
-    assert.match(reasonOf(gate(privatePlugin, 'Edit', edit)), /roblox-lua-style-guide.*code-comments/);
-    const bare = transcript(human('fix it'), skill('roblox-lua-style-guide'), skill('code-comments'));
+    const privatePlugin = transcript(human('fix it'), skill('roblox:luau-style-guide'), skill('roblox:code-comments'));
+    assert.match(reasonOf(gate(privatePlugin, 'Edit', edit)), /luau-style-guide.*code-comments/);
+    const bare = transcript(human('fix it'), skill('luau-style-guide'), skill('code-comments'));
     assert.ok(denied(gate(bare, 'Edit', edit)));
     const typed = transcript(human('fix it'), {
       type: 'user',
       timestamp: at(),
-      message: { role: 'user', content: [{ type: 'text', text: '<command-name>/roblox-dev:roblox-lua-style-guide</command-name>\n<command-name>/roblox:code-comments</command-name>' }] },
+      message: { role: 'user', content: [{ type: 'text', text: '<command-name>/roblox-dev:luau-style-guide</command-name>\n<command-name>/roblox:code-comments</command-name>' }] },
     });
     assert.match(reasonOf(gate(typed, 'Edit', edit)), /^Load `roblox-dev:code-comments` with/);
-    const reattached = transcript(human('go'), boundary(), reattach([['roblox-dev:roblox-lua-style-guide', false], ['roblox-dev:code-comments', false]]));
+    const reattached = transcript(human('go'), boundary(), reattach([['roblox-dev:luau-style-guide', false], ['roblox-dev:code-comments', false]]));
     assert.equal(gate(reattached, 'Edit', edit), undefined);
-    const reattachedPrivate = transcript(human('go'), boundary(), reattach([['roblox:roblox-lua-style-guide', false], ['roblox:code-comments', false]]));
+    const reattachedPrivate = transcript(human('go'), boundary(), reattach([['roblox:luau-style-guide', false], ['roblox:code-comments', false]]));
     assert.ok(denied(gate(reattachedPrivate, 'Edit', edit)));
   });
 
@@ -163,8 +163,8 @@ describe('skill-gate', () => {
     const before = [human('go'), own(...BASE), boundary()];
     const edit = editFile(SHOP);
     assert.ok(denied(gate(transcript(...before), 'Edit', edit)));
-    assert.ok(denied(gate(transcript(...before, reattach([['roblox-dev:roblox-lua-style-guide', true], ['roblox-dev:code-comments', false]])), 'Edit', edit)));
-    assert.equal(gate(transcript(...before, reattach([['roblox-dev:roblox-lua-style-guide', false], ['roblox-dev:code-comments', false]])), 'Edit', edit), undefined);
+    assert.ok(denied(gate(transcript(...before, reattach([['roblox-dev:luau-style-guide', true], ['roblox-dev:code-comments', false]])), 'Edit', edit)));
+    assert.equal(gate(transcript(...before, reattach([['roblox-dev:luau-style-guide', false], ['roblox-dev:code-comments', false]])), 'Edit', edit), undefined);
   });
 
   test('reads a subagent transcript, where frontmatter preloads show as <command-name>', () => {
@@ -182,7 +182,7 @@ describe('skill-gate', () => {
     const main = transcript(human('run the workflow'));
     const runDir = join(main.replace(/\.jsonl$/, ''), 'subagents', 'workflows', 'wf_123');
     writeLines(join(runDir, 'agent-w1.jsonl'), own('vide'));
-    assert.match(reasonOf(gate(main, 'Edit', editFile(SHOP), { agent_id: 'w1' })), /roblox-lua-style-guide/);
+    assert.match(reasonOf(gate(main, 'Edit', editFile(SHOP), { agent_id: 'w1' })), /luau-style-guide/);
     writeLines(join(runDir, 'agent-w2.jsonl'), own(...BASE));
     assert.equal(gate(main, 'Edit', editFile(SHOP), { agent_id: 'w2' }), undefined);
     assert.equal(gate(main, 'Edit', editFile(SHOP), { agent_id: 'missing' }), undefined);
@@ -197,7 +197,7 @@ describe('skill-gate', () => {
     const output = gate(path, 'Edit', editFile(SHOP));
     assert.ok(denied(output));
     assert.match(reasonOf(output), /`roblox-dev:vide`.*`roblox-dev:vide-ui-labs`/);
-    assert.doesNotMatch(reasonOf(output), /roblox-lua-style-guide/);
+    assert.doesNotMatch(reasonOf(output), /luau-style-guide/);
   });
 
   test('recognizes Vide, Charm, stories, and specs from the edit itself', () => {
@@ -235,7 +235,7 @@ describe('skill-gate', () => {
     const fresh = transcript(human('fix it'));
     const multi = { file_path: SHOP, edits: [{ old_string: 'return {}', new_string: 'return create "Frame" {}' }] };
     assert.match(reasonOf(gate(fresh, 'MultiEdit', multi)), /code-comments.*vide/);
-    assert.match(reasonOf(gate(fresh, 'Edit', editFile(PACKAGE_FILE))), /roblox-lua-style-guide/);
+    assert.match(reasonOf(gate(fresh, 'Edit', editFile(PACKAGE_FILE))), /luau-style-guide/);
   });
 
   test('denies editing installed packages, whatever skills are loaded', () => {
@@ -328,12 +328,12 @@ describe('skill-hints', () => {
   test('after compaction, lists skills it cut short or dropped', () => {
     const path = transcript(
       human('go'),
-      own('roblox-lua-style-guide', 'vide', 'game-architecture'),
+      own('luau-style-guide', 'vide', 'game-architecture'),
       boundary(),
-      reattach([['roblox-dev:roblox-lua-style-guide', true], ['roblox-dev:vide', false]]),
+      reattach([['roblox-dev:luau-style-guide', true], ['roblox-dev:vide', false]]),
     );
     const context = hint({ hook_event_name: 'SessionStart', source: 'compact', transcript_path: path });
-    assert.match(context, /`roblox-dev:roblox-lua-style-guide`/);
+    assert.match(context, /`roblox-dev:luau-style-guide`/);
     assert.match(context, /`roblox-dev:game-architecture`/);
     assert.doesNotMatch(context, /`roblox-dev:vide`/);
     assert.equal(hint({ hook_event_name: 'SessionStart', source: 'startup', transcript_path: path }), undefined);
