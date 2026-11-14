@@ -1,27 +1,12 @@
 --!strict
---@author: Crusherfire
---@date: 11/13/26
---[[@description:
-	Builds the message that welcomes a player. The game supplies the wording
-	through SetGreeting, so this package holds no game-specific text.
 
-	ExampleSystem shows the layout every system follows. Replace it with the
-	game's first real system.
-]]
-
-------------------------------
--- VARIABLES --
-------------------------------
 const NAME_PLACEHOLDER = "{name}"
 
 local Module = {}
 Module.__index = Module
 
+-- The game supplies the wording through SetGreeting, so this package holds no game-specific text.
 local greeting = `Welcome, {NAME_PLACEHOLDER}!`
-
-------------------------------
--- PUBLIC FUNCTIONS --
-------------------------------
 
 --[[
 	Sets the welcome message. Every "{name}" in it becomes the player's name.
