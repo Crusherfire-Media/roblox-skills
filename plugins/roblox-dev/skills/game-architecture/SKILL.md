@@ -40,8 +40,8 @@ the relocation check lists no server module, and a playtest logs no `>> Failed` 
 ## Scripts
 
 - Exactly two scripts run game code: `ServerScriptService.Start` (Script) and
-  `StarterPlayer.StarterPlayerScripts.Start` (LocalScript). Each requires the loader and calls
-  `Start()`. Everything else is a ModuleScript.
+  `StarterPlayer.StarterPlayerScripts.Start` (LocalScript). Each requires the loader, turns on
+  `USE_COLLECTION_SERVICE` (off by default), and calls `Start()`. Everything else is a ModuleScript.
 - Allowed exceptions: the loader's own internals; a `ReplicatedFirst` loading screen (it must run
   before the loader); scripts Roblox looks for by name (`Animate`, `RbxCharacterSounds`); and
   templates a system clones at runtime, kept inside that system.
