@@ -368,13 +368,12 @@ differs. The full list, and the `vide.defaults` flag that turns them off, are in
 
 ### Develop with strict mode on
 
-Strict mode runs effects and derives twice per update, errors on yields in reactive scopes, on
-duplicate values in `values()`, and on duplicate properties, and prints clearer stack traces.
-Vide enables it only when not compiled at optimization level O2, which Studio can also use, so
-set it once, right after the project first requires Vide: `Vide.strict = RunService:IsStudio()`.
-Add it when setting up the project's Vide entry point; in other tasks, mention a missing line in
-your reply instead. When something
-misbehaves only with strict mode on, the code is impure: fix the code.
+Strict mode runs effects and derives twice per update, errors on yields in reactive scopes and
+on duplicate `values()` entries or properties, and prints clearer stack traces. Vide enables it
+only when not compiled at O2, which Studio can also use, so set it once, right after Vide is
+first required: `Vide.strict = RunService:IsStudio()`. Add it when setting up the project's Vide
+entry point; in other tasks, mention a missing line in your reply. When something misbehaves
+only under strict mode, the code is impure: fix it.
 
 ## Common problems
 
