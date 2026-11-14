@@ -66,7 +66,8 @@ Scope rules cause most Vide errors:
 
 Components need a scope, so build them only inside a function passed to `mount` or `root`, never
 at module top level or from an event handler. Mount once per UI tree from client code, and keep
-the returned destroy function when the UI can go away.
+the returned destroy function when the UI can go away. That scope's destroy leaves the mounted
+instance parented, so such UI also calls `cleanup(gui)` on its root instance.
 
 ```lua
 const Players = game:GetService("Players")
@@ -271,7 +272,8 @@ end
 ```
 
 Events set through `create` last as long as their instance and need no cleanup. Instances need
-no `Destroy` either: Vide unparents removed UI and the garbage collector frees it. The exception
+no `Destroy` either: a children binding unparents UI it stops returning, and the garbage collector
+frees it (mounted roots excepted, see above). Another exception
 is an event handler that refers to its own instance, which keeps the instance alive; add
 `cleanup(instance)` in that component.
 
