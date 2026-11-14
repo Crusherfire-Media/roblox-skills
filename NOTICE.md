@@ -10,7 +10,7 @@ This repository is licensed under the MIT License (see `LICENSE`), Copyright (c)
 - **Copyright:** Copyright (c) 2026 Roblox Corporation
 - **License:** MIT (full text below)
 - **Used in:** `plugins/roblox-dev/skills/rbx-perf-profiling/`
-  - `references/libmp-guide.md`: upstream `docs/SKILL.md`, unmodified
+  - `references/libmp-guide.md`: upstream `docs/SKILL.md`, with its one Studio MCP tool name replaced by a plain description
   - `references/api-reference.md`: upstream `docs/api-reference.md`, unmodified
   - `references/ALL-SCOPES.md`: upstream `docs/ALL-SCOPES.md`, unmodified
   - `SKILL.md`: the frontmatter description (copied) and the "Essentials from the upstream guide" section (condensed from the guide)
