@@ -1,13 +1,8 @@
 --!strict
---@author: #Author
---@date: #Date
---[[@description:
-	Jest reporter for the Output window: a green or red circle per spec file as it finishes, each
-	failing test and Jest's failure details under a red file, and a summary line at the end.
-]]
------------------------------
--- TYPES --
------------------------------
+
+const PASS = "🟢"
+const FAIL = "🔴"
+
 type TestCaseResult = {
 	title: string,
 	status: string,
@@ -31,18 +26,8 @@ type AggregatedResult = {
 	snapshot: { failure: boolean },
 }
 
------------------------------
--- VARIABLES --
------------------------------
-const PASS = "🟢"
-const FAIL = "🔴"
-
 local Module = {}
 Module.__index = Module
-
------------------------------
--- PUBLIC FUNCTIONS --
------------------------------
 
 --[[
 	Jest builds the reporter with its global config and the reporter's options from jest.config;
@@ -101,7 +86,4 @@ function Module:onRunComplete(_contexts: any, results: AggregatedResult)
 	print(`{status} {table.concat(counts, ", ")} ({results.numTotalTestSuites} files)`)
 end
 
------------------------------
--- MAIN --
------------------------------
 return Module

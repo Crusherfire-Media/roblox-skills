@@ -60,9 +60,10 @@ rojo = "rojo-rbx/rojo@7.7.1"
 2. Import the built `JestPackages.rbxm` into `game.ServerScriptService.Tests` (the MCP's
    import-a-model action, or Studio's **Insert from File**). It lands as `Tests.Packages`.
 3. Create a Folder `Specs` in `Tests`, and in it a ModuleScript named `jest.config` with the
-   standard script header followed by:
+   this source:
 
    ```lua
+   --!strict
    return {
    	testMatch = { "**/*.spec" },
    }
@@ -72,9 +73,10 @@ rojo = "rojo-rbx/rojo@7.7.1"
    in the config as `setupFilesAfterEnv = { script.Parent.StopVideDrivers }`. Jest loads a fresh
    Vide copy for every spec file and again after every `jest.resetModules()`, and each copy
    connects to `RunService.Heartbeat` when required. Without this file those connections keep
-   running in Studio after every run, until it closes. After the standard script header:
+   running in Studio after every run, until it closes. Its source:
 
    ```lua
+   --!strict
    const JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
    const afterEach = JestGlobals.afterEach
 
@@ -97,7 +99,7 @@ rojo = "rojo-rbx/rojo@7.7.1"
    calling `step` themselves. Jest reads `jest.config` once per Studio session, so restart Studio
    after changing it.
 5. Add a ModuleScript `StatusReporter` beside `jest.config` with the source in
-   [StatusReporter.luau](StatusReporter.luau), filling in its author and date, and list it in the
+   [StatusReporter.luau](StatusReporter.luau), and list it in the
    config as `reporters = { script.Parent.StatusReporter }`. It replaces Jest's PASS and FAIL lines
    in the Output window with a green or red circle per spec file, each failing test and its
    failure details under a red file, and a summary line. Restart Studio after adding or changing it.

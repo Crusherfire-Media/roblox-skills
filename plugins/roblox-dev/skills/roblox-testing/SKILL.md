@@ -191,18 +191,10 @@ passes in Studio and fails in CI, read [references/ci.md](references/ci.md).
 
 ## Writing a spec
 
-Specs follow the `roblox-lua-style-guide` skill like any other script, header included:
+Specs follow the `roblox-lua-style-guide` skill like any other script:
 
 ```lua
 --!strict
---@author: #Author
---@date: #Date
---[[@description:
-	Checks the recipe rules FoodCatalog documents.
-]]
------------------------------
--- DEPENDENCIES --
------------------------------
 const JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
 const describe = JestGlobals.describe
 const expect = JestGlobals.expect
@@ -211,9 +203,6 @@ const it = JestGlobals.it
 const FoodCatalog = require("@game/ServerScriptService/Modules/DataCatalogs/FoodCatalog")
 const IngredientCatalog = require("@game/ServerScriptService/Modules/DataCatalogs/IngredientCatalog")
 
------------------------------
--- MAIN --
------------------------------
 describe("FoodCatalog", function()
 	it("builds every recipe from ingredients that exist", function()
 		local missing = {}
