@@ -1,0 +1,3 @@
+I fixed the four luau-lsp errors without changing any code. All four came from a stale `sourcemap.json`: it was generated before `Placement.server.luau` existed, so luau-lsp couldn't resolve its `@game/...` requires. Once the requires failed, the `BlockTypes.BlockType` type couldn't be found either.
+
+I regenerated the sourcemap with `rojo sourcemap default.project.json -o sourcemap.json` and re-ran `luau-lsp analyze` on the script, and it now reports no errors. The sourcemap file is git-ignored, so the only change in the repo is still the new script.

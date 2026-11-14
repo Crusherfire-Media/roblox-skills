@@ -1,0 +1,473 @@
+diff --git a/README.md b/README.md
+index cb3047d..4b28b64 100644
+--- a/README.md
++++ b/README.md
+@@ -22,6 +22,20 @@ are ModuleScripts.
+ pesde installs packages from `pesde.toml`. Vide 0.4.1 is installed:
+ `require(ReplicatedStorage.Packages.Vide)`.
+ 
++## UI
++
++Client UI is built with Vide. Shared pieces live in `StarterPlayerScripts/UI`:
++
++- `Screen` is the root for every screen. It wraps a ScreenGui that stays inside the safe area,
++  survives respawns, and scales its contents with a UIScale.
++- `Responsive` has reactive device state: `viewportSize`, `inputMode` (`"Touch"`, `"Gamepad"`,
++  `"KeyboardMouse"`), `isTouch`, `isPortrait`, `isCompact`, `designSize`, `scale`, and
++  `MIN_TOUCH_TARGET`.
++
++Write sizes in design units (1 unit = 1 px at 1080p, or 1 pt on phones and tablets). Use
++`Responsive` inside property functions when a layout needs to change shape, not just size, for
++example moving out of the way of the touch thumbstick.
++
+ ## Checks
+ 
+ Tools come from Rokit (`rokit.toml`). Run each command on its own from the project root:
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index b45f323..4352fd8 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -1,11 +1,18 @@
+ --[[
+-	The block picker: a column of tiles down the left side of the screen, one per block type, each
+-	with the block's name beside it, under a title naming the selected block.
++	The block picker: one tile per block type under a title naming the selected block.
++
++	With a keyboard and mouse or a gamepad it is a column down the left side of the screen, with each
++	block's name beside its tile. On touch screens the left side belongs to the movement thumbstick
++	and the bottom right to the jump button, so it becomes a row of larger, name-less tiles along the
++	top centre instead. It switches between the two as soon as the player's input changes.
++
++	Sizes are in design units; the Screen it is mounted in scales them to the display.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Responsive = require(script.Parent.UI.Responsive)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
+@@ -14,17 +21,38 @@ type BlockType = BlockTypes.BlockType
+ 
+ local TILE_SIZE = 40
+ local TILE_GAP = 6
++-- Comfortably above the minimum tap target so neighbouring tiles are hard to hit by mistake.
++local TOUCH_TILE_SIZE = Responsive.MIN_TOUCH_TARGET + 4
++local TOUCH_TILE_GAP = 8
+ local TILE_RADIUS = 6
++-- Outline thickness as a fraction of the swatch's size (3 and 1 pixels on a 40-unit tile).
++local SELECTED_STROKE = 3 / TILE_SIZE
++local IDLE_STROKE = 1 / TILE_SIZE
+ local NAME_WIDTH = 96
+-local TITLE_HEIGHT = 30
+-local TITLE_MAX_TEXT_SIZE = 24
++local NAME_TEXT_SIZE = 16
++local TITLE_HEIGHT = 26
++local TITLE_TEXT_SIZE = 22
+ local PANEL_PADDING = 10
+ local PANEL_RADIUS = 10
++local SCREEN_MARGIN = 20
++local TOUCH_SCREEN_MARGIN = 8
+ local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+ local SELECTED_COLOR = Color3.fromRGB(255, 200, 60)
+ local IDLE_STROKE_COLOR = Color3.fromRGB(70, 70, 80)
+ local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
+ 
++local function tileSize(): number
++	return if Responsive.isTouch() then TOUCH_TILE_SIZE else TILE_SIZE
++end
++
++local function tileGap(): number
++	return if Responsive.isTouch() then TOUCH_TILE_GAP else TILE_GAP
++end
++
++local function showsNames(): boolean
++	return not Responsive.isTouch()
++end
++
+ type TileProps = {
+ 	BlockType: BlockType,
+ 	LayoutOrder: number,
+@@ -36,36 +64,52 @@ local function tile(props: TileProps): TextButton
+ 	return create("TextButton")({
+ 		Name = props.BlockType.Name,
+ 		LayoutOrder = props.LayoutOrder,
+-		Size = UDim2.fromOffset(TILE_SIZE + TILE_GAP + NAME_WIDTH, TILE_SIZE),
++		Size = function()
++			local size = tileSize()
++			local width = if showsNames() then size + tileGap() + NAME_WIDTH else size
++			return UDim2.fromOffset(width, size)
++		end,
+ 		BackgroundTransparency = 1,
+ 
+ 		Activated = props.Select,
+ 
+ 		create("Frame")({
+ 			Name = "Swatch",
+-			Size = UDim2.fromOffset(TILE_SIZE, TILE_SIZE),
++			Size = function()
++				local size = tileSize()
++				return UDim2.fromOffset(size, size)
++			end,
+ 			BackgroundColor3 = props.BlockType.Color,
+ 
+ 			create("UICorner")({ CornerRadius = UDim.new(0, TILE_RADIUS) }),
+ 			create("UIStroke")({
++				-- Thickness is a fraction of the swatch, so the outline grows with the tile on
++				-- every display instead of staying a fixed number of pixels.
++				StrokeSizingMode = Enum.StrokeSizingMode.ScaledSize,
+ 				Color = function()
+ 					return if props.IsSelected() then SELECTED_COLOR else IDLE_STROKE_COLOR
+ 				end,
+ 				Thickness = function()
+-					return if props.IsSelected() then 3 else 1
++					return if props.IsSelected() then SELECTED_STROKE else IDLE_STROKE
+ 				end,
+ 			}),
+ 		}),
+ 
+ 		create("TextLabel")({
+ 			Name = "BlockName",
+-			Position = UDim2.fromOffset(TILE_SIZE + TILE_GAP, 0),
+-			Size = UDim2.fromOffset(NAME_WIDTH, TILE_SIZE),
++			Visible = showsNames,
++			Position = function()
++				return UDim2.fromOffset(tileSize() + tileGap(), 0)
++			end,
++			Size = function()
++				return UDim2.fromOffset(NAME_WIDTH, tileSize())
++			end,
+ 			BackgroundTransparency = 1,
+ 			Font = Enum.Font.Gotham,
+-			TextSize = 16,
++			TextSize = NAME_TEXT_SIZE,
+ 			TextColor3 = TEXT_COLOR,
+ 			TextXAlignment = Enum.TextXAlignment.Left,
++			TextTruncate = Enum.TextTruncate.AtEnd,
+ 			Text = props.BlockType.DisplayName,
+ 		}),
+ 	})
+@@ -81,7 +125,7 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 	for index, blockType in BlockTypes.List do
+ 		tiles[index] = tile({
+ 			BlockType = blockType,
+-			LayoutOrder = index + 1,
++			LayoutOrder = index,
+ 			IsSelected = function()
+ 				return props.Selected() == blockType.Name
+ 			end,
+@@ -93,8 +137,14 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 
+ 	return create("Frame")({
+ 		Name = "BlockPicker",
+-		AnchorPoint = Vector2.new(0, 0.5),
+-		Position = UDim2.new(0, 20, 0.5, 0),
++		AnchorPoint = function()
++			return if Responsive.isTouch() then Vector2.new(0.5, 0) else Vector2.new(0, 0.5)
++		end,
++		Position = function()
++			return if Responsive.isTouch()
++				then UDim2.new(0.5, 0, 0, TOUCH_SCREEN_MARGIN)
++				else UDim2.new(0, SCREEN_MARGIN, 0.5, 0)
++		end,
+ 		AutomaticSize = Enum.AutomaticSize.XY,
+ 		BackgroundColor3 = PANEL_COLOR,
+ 		BackgroundTransparency = 0.2,
+@@ -108,26 +158,51 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 		}),
+ 		create("UIListLayout")({
+ 			FillDirection = Enum.FillDirection.Vertical,
+-			Padding = UDim.new(0, TILE_GAP),
++			HorizontalAlignment = Enum.HorizontalAlignment.Center,
++			Padding = function()
++				return UDim.new(0, tileGap())
++			end,
+ 		}),
+ 
+ 		create("TextLabel")({
+ 			Name = "Title",
+ 			LayoutOrder = 1,
+-			Size = UDim2.fromOffset(TILE_SIZE + TILE_GAP + NAME_WIDTH, TITLE_HEIGHT),
++			-- Fills the panel's width, which the tiles decide.
++			Size = UDim2.new(1, 0, 0, TITLE_HEIGHT),
+ 			BackgroundTransparency = 1,
+ 			Font = Enum.Font.GothamBold,
+-			TextScaled = true,
++			TextSize = TITLE_TEXT_SIZE,
+ 			TextColor3 = TEXT_COLOR,
+-			TextXAlignment = Enum.TextXAlignment.Left,
++			TextXAlignment = function()
++				return if Responsive.isTouch()
++					then Enum.TextXAlignment.Center
++					else Enum.TextXAlignment.Left
++			end,
++			TextTruncate = Enum.TextTruncate.AtEnd,
+ 			Text = function()
+ 				return BlockTypes.ByName[props.Selected()].DisplayName
+ 			end,
+-
+-			create("UITextSizeConstraint")({ MaxTextSize = TITLE_MAX_TEXT_SIZE }),
+ 		}),
+ 
+-		tiles,
++		create("Frame")({
++			Name = "Tiles",
++			LayoutOrder = 2,
++			AutomaticSize = Enum.AutomaticSize.XY,
++			BackgroundTransparency = 1,
++
++			create("UIListLayout")({
++				FillDirection = function()
++					return if Responsive.isTouch()
++						then Enum.FillDirection.Horizontal
++						else Enum.FillDirection.Vertical
++				end,
++				Padding = function()
++					return UDim.new(0, tileGap())
++				end,
++			}),
++
++			tiles,
++		}),
+ 	})
+ end
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 04bc27a..1f37db0 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -3,9 +3,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockPicker = require(script.Parent.BlockPicker)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local Screen = require(script.Parent.UI.Screen)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+-local create = Vide.create
+ local mount = Vide.mount
+ local source = Vide.source
+ 
+@@ -18,13 +18,14 @@ BlockPlacer.BlockTypeChanged:Connect(function(name: string)
+ end)
+ 
+ local function app()
+-	return create("ScreenGui")({
++	return Screen({
+ 		Name = "BlockPickerGui",
+-
+-		BlockPicker({
+-			Selected = selected,
+-			Select = BlockPlacer.setBlockType,
+-		}),
++		Children = {
++			BlockPicker({
++				Selected = selected,
++				Select = BlockPlacer.setBlockType,
++			}),
++		},
+ 	})
+ end
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Responsive.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Responsive.luau
+new file mode 100644
+index 0000000..150bce4
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Responsive.luau
+@@ -0,0 +1,149 @@
++--[[
++	Reactive facts about the player's screen and input device, shared by every UI screen.
++
++	Screens are authored in design units: one unit is one pixel on a 1080p monitor, or one point on
++	a phone or tablet. Each Screen root applies `Responsive.scale()` with a UIScale, so sizes written
++	in design units come out at a sensible physical size on every device.
++
++	Everything here is a Vide source or a plain function that reads sources, so reading it inside a
++	property function or effect keeps that UI up to date as the player rotates a device, resizes the
++	window, or switches between touch, keyboard and mouse, and gamepad.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local UserInputService = game:GetService("UserInputService")
++local Workspace = game:GetService("Workspace")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local source = Vide.source
++
++export type InputMode = "Touch" | "Gamepad" | "KeyboardMouse"
++
++-- Smallest comfortable tap target, in design units (Apple and Google both use about 44).
++local MIN_TOUCH_TARGET = 44
++
++-- Desktop viewports are in physical pixels, so a 4K monitor reports 3840 x 2160. Scaling by the
++-- short edge against 1080 keeps UI the same physical size as on the 1080p monitor it was built on.
++local DESKTOP_REFERENCE_SHORT_EDGE = 1080
++local DESKTOP_MAX_SCALE = 4
++
++-- Phone and tablet viewports are in points (a phone's short edge is about 360 to 430, a tablet's
++-- about 740 to 1030). Phones stay at 1; tablets grow a little to use their extra room.
++local TOUCH_REFERENCE_SHORT_EDGE = 720
++local TOUCH_MAX_SCALE = 1.5
++
++-- Gamepad players usually sit further from a TV, so their UI is drawn a bit larger.
++local GAMEPAD_SCALE_BOOST = 1.25
++
++-- Rounding the scale stops UI re-laying out on every pixel while a window is dragged.
++local SCALE_STEP = 0.05
++
++-- A screen whose short edge is under this many design units is treated as compact.
++local COMPACT_SHORT_EDGE = 500
++
++local function readInputMode(): InputMode
++	local preferred = UserInputService.PreferredInput
++	if preferred == Enum.PreferredInput.Touch then
++		return "Touch"
++	elseif
++		preferred == Enum.PreferredInput.Gamepad
++		or preferred == Enum.PreferredInput.MicroGamepad
++	then
++		return "Gamepad"
++	end
++	return "KeyboardMouse"
++end
++
++local viewportSize =
++	source(Vector2.new(DESKTOP_REFERENCE_SHORT_EDGE * 16 / 9, DESKTOP_REFERENCE_SHORT_EDGE))
++local inputMode = source(readInputMode())
++
++local cameraConnection: RBXScriptConnection? = nil
++
++local function watchCamera()
++	if cameraConnection then
++		cameraConnection:Disconnect()
++		cameraConnection = nil
++	end
++
++	local camera = Workspace.CurrentCamera
++	if not camera then
++		return
++	end
++
++	viewportSize(camera.ViewportSize)
++	cameraConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
++		viewportSize(camera.ViewportSize)
++	end)
++end
++
++Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
++watchCamera()
++
++UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(function()
++	inputMode(readInputMode())
++end)
++
++local Responsive = {}
++
++Responsive.MIN_TOUCH_TARGET = MIN_TOUCH_TARGET
++
++--[[
++	The viewport size in physical pixels (desktop) or points (phones and tablets).
++]]
++Responsive.viewportSize = viewportSize :: () -> Vector2
++
++--[[
++	How the player is controlling the game right now. Changes as soon as they touch the screen,
++	press a key, or pick up a gamepad.
++]]
++Responsive.inputMode = inputMode :: () -> InputMode
++
++function Responsive.isTouch(): boolean
++	return inputMode() == "Touch"
++end
++
++function Responsive.isPortrait(): boolean
++	local size = viewportSize()
++	return size.Y > size.X
++end
++
++--[[
++	The factor that turns design units into screen pixels. Screen roots apply it with a UIScale, so
++	most components never need to read it themselves.
++]]
++function Responsive.scale(): number
++	local size = viewportSize()
++	local shortEdge = math.min(size.X, size.Y)
++	local mode = inputMode()
++
++	local scale
++	if mode == "Touch" then
++		scale = math.clamp(shortEdge / TOUCH_REFERENCE_SHORT_EDGE, 1, TOUCH_MAX_SCALE)
++	else
++		scale = math.clamp(shortEdge / DESKTOP_REFERENCE_SHORT_EDGE, 1, DESKTOP_MAX_SCALE)
++		if mode == "Gamepad" then
++			scale *= GAMEPAD_SCALE_BOOST
++		end
++	end
++
++	return math.round(scale / SCALE_STEP) * SCALE_STEP
++end
++
++--[[
++	How much room a screen has, in design units. Use it to decide whether a layout fits.
++]]
++function Responsive.designSize(): Vector2
++	return viewportSize() / Responsive.scale()
++end
++
++--[[
++	True on small screens such as phones and very small windows.
++]]
++function Responsive.isCompact(): boolean
++	local size = Responsive.designSize()
++	return math.min(size.X, size.Y) < COMPACT_SHORT_EDGE
++end
++
++return table.freeze(Responsive)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+new file mode 100644
+index 0000000..03bce7e
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+@@ -0,0 +1,41 @@
++--[[
++	The root of every UI screen: a ScreenGui that stays inside the device's safe area, survives
++	respawns, and scales its contents with `Responsive.scale()`. Write everything inside it in
++	design units (see Responsive).
++
++		Screen({
++			Name = "InventoryGui",
++			Children = { inventoryPanel() },
++		})
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Responsive = require(script.Parent.Responsive)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local create = Vide.create
++
++export type ScreenProps = {
++	Name: string,
++	DisplayOrder: number?,
++	Children: { any },
++}
++
++local function screen(props: ScreenProps): ScreenGui
++	return create("ScreenGui")({
++		Name = props.Name,
++		DisplayOrder = props.DisplayOrder or 0,
++		ResetOnSpawn = false,
++		IgnoreGuiInset = false,
++		-- Keeps content clear of the Roblox topbar, notches, and rounded corners.
++		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
++		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
++
++		create("UIScale")({ Scale = Responsive.scale }),
++
++		props.Children,
++	})
++end
++
++return screen

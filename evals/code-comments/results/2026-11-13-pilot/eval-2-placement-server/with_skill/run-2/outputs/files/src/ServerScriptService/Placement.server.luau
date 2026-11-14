@@ -1,0 +1,129 @@
+--!strict
+--@author: Crusherfire
+--@date: 2026-11-13
+--[[@description:
+	Server side of block placement. Creates the PlaceBlock and RemoveBlock
+	remotes, builds validated blocks in Workspace.PlacedBlocks, and tracks
+	which player owns each block.
+]]
+
+------------------------------
+-- SERVICES --
+------------------------------
+const Players = game:GetService("Players")
+const ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+------------------------------
+-- DEPENDENCIES --
+------------------------------
+const BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+const PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
+
+------------------------------
+-- TYPES --
+------------------------------
+type BlockType = BlockTypes.BlockType
+
+------------------------------
+-- VARIABLES --
+------------------------------
+const MAX_BLOCKS_PER_PLAYER = 150
+const PLACE_COOLDOWN = 0.1 -- seconds
+
+const blocksFolder = Instance.new("Folder")
+blocksFolder.Name = "PlacedBlocks"
+blocksFolder.Parent = workspace
+
+const placeBlockRemote = Instance.new("RemoteEvent")
+placeBlockRemote.Name = "PlaceBlock"
+placeBlockRemote.Parent = ReplicatedStorage
+
+const removeBlockRemote = Instance.new("RemoteEvent")
+removeBlockRemote.Name = "RemoveBlock"
+removeBlockRemote.Parent = ReplicatedStorage
+
+-- The only record of ownership, so a block counts as a player's only if it
+-- is in their list.
+local blocksByPlayer: { [Player]: { BasePart }? } = {}
+local lastPlaceTimes: { [Player]: number? } = {}
+
+------------------------------
+-- PRIVATE FUNCTIONS --
+------------------------------
+
+local function createBlock(blockType: BlockType, center: Vector3): BasePart
+	const style = BlockTypes.STYLES[blockType]
+
+	const block = Instance.new("Part")
+	block.Name = blockType
+	block.Size = Vector3.one * PlacementRules.BLOCK_SIZE
+	block.CFrame = CFrame.new(center)
+	block.Anchored = true
+	block.Color = style.color
+	block.Material = style.material
+	block.Transparency = style.transparency
+	block.Parent = blocksFolder
+
+	return block
+end
+
+local function onPlaceBlock(player: Player, blockType: unknown, position: unknown)
+	const now = os.clock()
+	const lastPlaceTime = lastPlaceTimes[player]
+	if lastPlaceTime and now - lastPlaceTime < PLACE_COOLDOWN then
+		return
+	end
+	lastPlaceTimes[player] = now
+
+	const blocks = blocksByPlayer[player] or {}
+	if #blocks >= MAX_BLOCKS_PER_PLAYER then
+		return
+	end
+
+	const isValid, result = PlacementRules.validate(
+		blockType,
+		position,
+		player.Character,
+		blocksFolder
+	)
+	if not isValid then
+		return
+	end
+
+	table.insert(blocks, createBlock(blockType :: BlockType, result :: Vector3))
+	blocksByPlayer[player] = blocks
+end
+
+local function onRemoveBlock(player: Player, block: unknown)
+	const blocks = blocksByPlayer[player]
+	if not blocks or typeof(block) ~= "Instance" then
+		return
+	end
+
+	const index = table.find(blocks, block :: BasePart)
+	if not index then
+		return
+	end
+
+	table.remove(blocks, index)
+	block:Destroy()
+end
+
+local function onPlayerRemoving(player: Player)
+	const blocks = blocksByPlayer[player]
+	if blocks then
+		for _, block in blocks do
+			block:Destroy()
+		end
+	end
+
+	blocksByPlayer[player] = nil
+	lastPlaceTimes[player] = nil
+end
+
+------------------------------
+-- MAIN --
+------------------------------
+placeBlockRemote.OnServerEvent:Connect(onPlaceBlock)
+removeBlockRemote.OnServerEvent:Connect(onRemoveBlock)
+Players.PlayerRemoving:Connect(onPlayerRemoving)

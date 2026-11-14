@@ -1,0 +1,70 @@
+{
+  "id": 3,
+  "name": "picker-screens",
+  "skill": "vide",
+  "prompt": "I built the block picker on my 1080p monitor and it only really works there. On my phone it sits right where the movement thumbstick is and the tiles are hard to hit, on my 4K monitor everything is tiny, and on an iPad it's somewhere in between.\n\nMake the picker work well on phones, tablets, laptops, and big monitors. Players switch mid-session (rotating a tablet, plugging in a keyboard, resizing the window), so it has to keep up with that. It's the only UI in the game for now, but more screens are coming, so set it up in a way the next ones can use too.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacement.server.luau",
+      "to": "src/ServerScriptService/BlockPlacement.server.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacer.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+    },
+    {
+      "from": "fixtures/picker-screens/BlockPicker.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau"
+    },
+    {
+      "from": "fixtures/picker-screens/Main.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "any_file_matches",
+      "dir": "src",
+      "ext": ".luau",
+      "pattern": "ViewportSize|AbsoluteSize",
+      "text": "The UI reads the screen size"
+    },
+    {
+      "type": "any_file_matches",
+      "dir": "src",
+      "ext": ".luau",
+      "pattern": "GetPropertyChangedSignal\\(\\s*\"(ViewportSize|AbsoluteSize)\"\\s*\\)|changed\\(\\s*\"AbsoluteSize\"",
+      "text": "The UI follows screen size changes live (a ViewportSize or AbsoluteSize change listener)"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\");const re=new RegExp(process.argv[1]);const hits=[];const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(f.endsWith(\".luau\")&&re.test(fs.readFileSync(f,\"utf8\")))hits.push(f.split(p.sep).join(\"/\"))}};walk(\"src\");if(hits.length){console.log(\"matched in \"+hits.join(\", \"));process.exit(1)}console.log(\"no file matched\")",
+        "Instance\\.new\\(\\s*\"ScreenGui\""
+      ],
+      "expect_exit": 0,
+      "text": "No file under src builds a ScreenGui with Instance.new (the UI is built with Vide's create)"
+    }
+  ],
+  "rubric": [
+    "Screen facts (viewport size, primary input, and the topbar inset if used) are kept as live reactive state in one shared module that the next screens can reuse, and update when the window resizes, the device rotates, or the input changes. No layout decision comes from a value read once at startup.",
+    "Large screens: the whole UI grows on screens whose short side is above about 1080 px (for example one UIScale under the ScreenGui bound to the screen size), rather than each component doing its own screen math.",
+    "Small screens: the UI is not shrunk below its authored size on phones. The layout changes instead (position, arrangement, or a compact variant), so tiles stay about 44 px or larger and text stays readable.",
+    "The touch layout is chosen from the primary input (`UserInputService.PreferredInput`) and/or the screen size, not from `TouchEnabled` alone, which is also true on touchscreen laptops used with a mouse.",
+    "On touch layouts the picker stays clear of the thumbstick region (left side, lower two thirds of the screen) and the jump button (lower right), and stays below the topbar.",
+    "Text keeps up with the scale: the title's `UITextSizeConstraint` cap (real pixels, which a UIScale does not change) is multiplied by the UI scale, or the text moves to a fixed `TextSize`, so the title grows on 4K like everything else.",
+    "Correct and in scope: still valid Vide (everything that changes is bound, no reactive scope created inside a binding or effect), selection and placement keep working, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files, such as a preview story, count neither for nor against."
+  ],
+  "timeout_minutes": 20
+}

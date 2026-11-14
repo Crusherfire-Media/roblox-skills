@@ -1,0 +1,270 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index 4719bcf..fdb8682 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -1,6 +1,7 @@
+ --[[
+ 	The block picker shown in build mode: a row of tiles along the bottom of the screen, one per
+-	block type. The selected tile has a yellow outline.
++	block type. It slides up from below the screen while Present is true and back down when it
++	turns false. One yellow highlight glides to the selected tile, and tiles sink while pressed.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+@@ -9,6 +10,8 @@ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
++local source = Vide.source
++local spring = Vide.spring
+ 
+ type BlockType = BlockTypes.BlockType
+ 
+@@ -21,33 +24,113 @@ local BOTTOM_MARGIN = 24
+ local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+ local SELECTED_COLOR = Color3.fromRGB(255, 200, 60)
+ local IDLE_STROKE_COLOR = Color3.fromRGB(70, 70, 80)
++local HIGHLIGHT_THICKNESS = 3
++
++local SLIDE_PERIOD = 0.35
++local GLIDE_PERIOD = 0.25
++local PRESS_PERIOD = 0.2
++local PRESS_DAMPING = 0.45
++local PRESSED_SCALE = 0.88
++-- Keyboard and gamepad activations have no press to hold, so they get a push instead.
++local ACTIVATE_IMPULSE = -2
++
++local PANEL_HEIGHT = TILE_SIZE + PANEL_PADDING * 2
++-- Far enough below the bottom edge that no part of the panel shows.
++local HIDDEN_OFFSET = PANEL_HEIGHT + 8
++
++local indexByName: { [string]: number? } = {}
++for index, blockType in BlockTypes.List do
++	indexByName[blockType.Name] = index
++end
+ 
+ type TileProps = {
+ 	BlockType: BlockType,
+ 	LayoutOrder: number,
+-	IsSelected: () -> boolean,
+ 	Select: () -> (),
+ }
+ 
+-local function tile(props: TileProps): TextButton
+-	return create("TextButton")({
++local function isPointerInput(input: InputObject): boolean
++	return input.UserInputType == Enum.UserInputType.MouseButton1
++		or input.UserInputType == Enum.UserInputType.Touch
++end
++
++local function tile(props: TileProps): Frame
++	local isPressed = source(false)
++	local scale, scaleControl = spring(function()
++		return if isPressed() then PRESSED_SCALE else 1
++	end, PRESS_PERIOD, PRESS_DAMPING)
++
++	-- The button shrinks inside a fixed slot so the row's layout never shifts.
++	return create("Frame")({
+ 		Name = props.BlockType.Name,
+ 		LayoutOrder = props.LayoutOrder,
+ 		Size = UDim2.fromOffset(TILE_SIZE, TILE_SIZE),
+-		BackgroundColor3 = props.BlockType.Color,
++		BackgroundTransparency = 1,
++
++		create("TextButton")({
++			Name = "Button",
++			AnchorPoint = Vector2.new(0.5, 0.5),
++			Position = UDim2.fromScale(0.5, 0.5),
++			Size = function()
++				return UDim2.fromScale(scale(), scale())
++			end,
++			BackgroundColor3 = props.BlockType.Color,
++
++			InputBegan = function(input: InputObject)
++				if isPointerInput(input) then
++					isPressed(true)
++				end
++			end,
++			InputEnded = function(input: InputObject)
++				if isPointerInput(input) then
++					isPressed(false)
++				end
++			end,
++			MouseLeave = function()
++				isPressed(false)
++			end,
++			Activated = function()
++				if not isPressed() then
++					scaleControl({ impulse = ACTIVATE_IMPULSE })
++				end
++				props.Select()
++			end,
++
++			create("UICorner")({ CornerRadius = UDim.new(0, TILE_RADIUS) }),
++			create("UIStroke")({
++				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++				BorderStrokePosition = Enum.BorderStrokePosition.Inner,
++				Color = IDLE_STROKE_COLOR,
++				Thickness = 1,
++			}),
++		}),
++	})
++end
+ 
+-		Activated = props.Select,
++type HighlightProps = {
++	Selected: () -> string,
++}
++
++local function highlight(props: HighlightProps): Frame
++	local position = spring(function()
++		local index = indexByName[props.Selected()] or 1
++		return UDim2.fromOffset((index - 1) * (TILE_SIZE + TILE_GAP), 0)
++	end, GLIDE_PERIOD)
++
++	return create("Frame")({
++		Name = "Highlight",
++		Position = position,
++		Size = UDim2.fromOffset(TILE_SIZE, TILE_SIZE),
++		BackgroundTransparency = 1,
++		ZIndex = 2,
++		Interactable = false,
+ 
+ 		create("UICorner")({ CornerRadius = UDim.new(0, TILE_RADIUS) }),
+ 		create("UIStroke")({
+ 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+ 			BorderStrokePosition = Enum.BorderStrokePosition.Inner,
+-			Color = function()
+-				return if props.IsSelected() then SELECTED_COLOR else IDLE_STROKE_COLOR
+-			end,
+-			Thickness = function()
+-				return if props.IsSelected() then 3 else 1
+-			end,
++			Color = SELECTED_COLOR,
++			Thickness = HIGHLIGHT_THICKNESS,
+ 		}),
+ 	})
+ end
+@@ -55,6 +138,8 @@ end
+ export type BlockPickerProps = {
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
++	-- False slides the picker below the screen. Leave it out to show the picker in place.
++	Present: (() -> boolean)?,
+ }
+ 
+ local function blockPicker(props: BlockPickerProps): Frame
+@@ -63,27 +148,37 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 		tiles[index] = tile({
+ 			BlockType = blockType,
+ 			LayoutOrder = index,
+-			IsSelected = function()
+-				return props.Selected() == blockType.Name
+-			end,
+ 			Select = function()
+ 				props.Select(blockType.Name)
+ 			end,
+ 		})
+ 	end
+ 
++	local present = props.Present
++	local function isShown(): boolean
++		return if present then present() else true
++	end
++
++	local slideOffset = spring(function()
++		return if isShown() then -BOTTOM_MARGIN else HIDDEN_OFFSET
++	end, SLIDE_PERIOD)
++
+ 	local count = #BlockTypes.List
+ 
+ 	return create("Frame")({
+ 		Name = "BlockPicker",
+ 		AnchorPoint = Vector2.new(0.5, 1),
+-		Position = UDim2.new(0.5, 0, 1, -BOTTOM_MARGIN),
++		Position = function()
++			return UDim2.new(0.5, 0, 1, slideOffset())
++		end,
+ 		Size = UDim2.fromOffset(
+ 			count * TILE_SIZE + (count - 1) * TILE_GAP + PANEL_PADDING * 2,
+-			TILE_SIZE + PANEL_PADDING * 2
++			PANEL_HEIGHT
+ 		),
+ 		BackgroundColor3 = PANEL_COLOR,
+ 		BackgroundTransparency = 0.2,
++		-- A picker on its way out takes no more clicks.
++		Interactable = isShown,
+ 
+ 		create("UICorner")({ CornerRadius = UDim.new(0, PANEL_RADIUS) }),
+ 		create("UIPadding")({
+@@ -92,12 +187,21 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 			PaddingTop = UDim.new(0, PANEL_PADDING),
+ 			PaddingBottom = UDim.new(0, PANEL_PADDING),
+ 		}),
+-		create("UIListLayout")({
+-			FillDirection = Enum.FillDirection.Horizontal,
+-			Padding = UDim.new(0, TILE_GAP),
++
++		create("Frame")({
++			Name = "Tiles",
++			Size = UDim2.fromScale(1, 1),
++			BackgroundTransparency = 1,
++
++			create("UIListLayout")({
++				FillDirection = Enum.FillDirection.Horizontal,
++				Padding = UDim.new(0, TILE_GAP),
++			}),
++
++			tiles,
+ 		}),
+ 
+-		tiles,
++		highlight({ Selected = props.Selected }),
+ 	})
+ end
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 0283e30..9792797 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,5 +1,6 @@
+ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
+ local UserInputService = game:GetService("UserInputService")
+ local Workspace = game:GetService("Workspace")
+ 
+@@ -7,6 +8,8 @@ local BlockPicker = require(script.Parent.BlockPicker)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++Vide.strict = RunService:IsStudio()
++
+ local create = Vide.create
+ local mount = Vide.mount
+ local show = Vide.show
+@@ -20,6 +23,8 @@ local BUILD_BUTTON_MARGIN = 16
+ local BUTTON_COLOR = Color3.fromRGB(28, 28, 34)
+ local BUTTON_ACTIVE_COLOR = Color3.fromRGB(255, 200, 60)
+ local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
++-- Must cover BlockPicker's slide-down, or the picker vanishes mid-slide.
++local PICKER_EXIT_SECONDS = 0.4
+ 
+ local localPlayer = Players.LocalPlayer
+ local playerGui = localPlayer:WaitForChild("PlayerGui")
+@@ -97,11 +102,13 @@ local function app()
+ 		create("UIScale")({ Scale = uiScale }),
+ 		buildButton(),
+ 
+-		show(isBuildMode, function()
++		show(isBuildMode, function(_, present)
+ 			return BlockPicker({
+ 				Selected = selected,
+ 				Select = BlockPlacer.setBlockType,
+-			})
++				Present = present,
++			}),
++				PICKER_EXIT_SECONDS
+ 		end),
+ 	})
+ end

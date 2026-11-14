@@ -1,0 +1,95 @@
+--!strict
+--[[
+	Catalog of the block types players can place.
+
+	Shared by server and client: the server uses it to validate placement requests and build
+	parts, the client uses it to draw previews and the block picker. Every table here is frozen,
+	so neither side can change the catalog at runtime.
+
+	Usage:
+		local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+		local brick = BlockTypes.get("Brick") -- BlockType?
+		for _, blockType in BlockTypes.list do ... end -- stable display order
+]]
+
+export type BlockTypeId = "Brick" | "Dirt" | "Grass" | "Window" | "Wood"
+
+export type BlockType = {
+	id: BlockTypeId,
+	displayName: string,
+	color: Color3,
+	material: Enum.Material,
+	-- 0 is fully opaque, 1 is invisible (same meaning as BasePart.Transparency).
+	transparency: number,
+}
+
+local function define(blockType: BlockType): BlockType
+	return table.freeze(blockType)
+end
+
+-- Ordered list; this order is the order the UI should show.
+local list: { BlockType } = table.freeze({
+	define({
+		id = "Brick",
+		displayName = "Brick",
+		color = Color3.fromRGB(163, 75, 60),
+		material = Enum.Material.Brick,
+		transparency = 0,
+	}),
+	define({
+		id = "Dirt",
+		displayName = "Dirt",
+		color = Color3.fromRGB(120, 85, 55),
+		material = Enum.Material.Ground,
+		transparency = 0,
+	}),
+	define({
+		id = "Grass",
+		displayName = "Grass",
+		color = Color3.fromRGB(85, 145, 60),
+		material = Enum.Material.Grass,
+		transparency = 0,
+	}),
+	define({
+		id = "Window",
+		displayName = "Window",
+		color = Color3.fromRGB(170, 215, 240),
+		material = Enum.Material.Glass,
+		transparency = 0.5,
+	}),
+	define({
+		id = "Wood",
+		displayName = "Wood",
+		color = Color3.fromRGB(160, 115, 70),
+		material = Enum.Material.WoodPlanks,
+		transparency = 0,
+	}),
+})
+
+local byId: { [BlockTypeId]: BlockType } = {}
+for _, blockType in list do
+	assert(byId[blockType.id] == nil, `duplicate block type id {blockType.id}`)
+	byId[blockType.id] = blockType
+end
+table.freeze(byId)
+
+local BlockTypes = {}
+
+BlockTypes.list = list
+BlockTypes.byId = byId
+
+-- Looks up a block type by id. Accepts any value so the server can pass untrusted remote
+-- arguments straight in; returns nil for anything that is not a known id.
+function BlockTypes.get(id: unknown): BlockType?
+	if typeof(id) ~= "string" then
+		return nil
+	end
+	-- Unknown strings index to nil; the cast only satisfies the key type.
+	return byId[id :: BlockTypeId]
+end
+
+function BlockTypes.isValidId(id: unknown): boolean
+	return BlockTypes.get(id) ~= nil
+end
+
+return table.freeze(BlockTypes)

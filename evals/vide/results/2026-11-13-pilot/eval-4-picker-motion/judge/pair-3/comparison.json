@@ -1,0 +1,114 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "The two attempts are nearly identical and both correct: Vide springs driven by GuiState, an offset-based highlight, and the exit delay returned through `show` with `present` driving the slide. A wins narrowly because it binds `Interactable` to `Present`, so the leaving picker can't be clicked at all. B blocks only the selection, so its tiles still take clicks and hover during the slide. B also adds an unrelated global `Vide.strict` change and an API change.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Vide springs in component bodies",
+          "score": 5,
+          "note": "All three springs are created in component bodies: `scale` in `tile`, and `position` and `highlightPosition` in `blockPicker`. Each is bound to a property, and none is created inside a binding or an effect."
+        },
+        {
+          "criterion": "Closing slide plays / opening slides panel",
+          "score": 5,
+          "note": "`blockPicker` returns `panel, EXIT_DELAY`. `show`'s builder passes that through with `return BlockPicker({...})`, and the slide is driven by `props.Present`, which moves the panel's Position between SHOWN_POSITION and HIDDEN_POSITION."
+        },
+        {
+          "criterion": "Spam safety",
+          "score": 5,
+          "note": "Reusing the picker through `show` lets the spring reverse mid-slide. `Interactable = props.Present` stops the leaving picker from taking clicks."
+        },
+        {
+          "criterion": "Highlight glides in offset units",
+          "score": 5,
+          "note": "`tileOffset(index)` uses `(index - 1) * (TILE_SIZE + TILE_GAP)` inside the padded panel, so it never reads AbsolutePosition."
+        },
+        {
+          "criterion": "Press feedback",
+          "score": 5,
+          "note": "`changed(\"GuiState\", guiState)` drives a UIScale spring to PRESSED_SCALE on Press, which works for mouse and touch, and the tile springs back on release."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Selection, placement, and the Build button keep working, and all three checks pass. The explicit SortOrder and AutoButtonColor settings are redundant with Vide's defaults but harmless."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Vide springs in component bodies",
+          "score": 5,
+          "note": "The springs in `tile` and `Module.new` are created in component bodies and bound to Position and Scale."
+        },
+        {
+          "criterion": "Closing slide plays / opening slides panel",
+          "score": 5,
+          "note": "The `show` builder returns `BlockPicker.new(...), BlockPicker.ExitDuration`, and `present` drives the panel's Position spring off screen."
+        },
+        {
+          "criterion": "Spam safety",
+          "score": 4,
+          "note": "The slide reverses cleanly, but the leaving picker still takes clicks and shows hover and press motion. Only `Select` is blocked, by the `if not props.Present()` guard."
+        },
+        {
+          "criterion": "Highlight glides in offset units",
+          "score": 5,
+          "note": "`tileOffset` is computed from tile size and gap, and `Visible` hides the highlight when no tile matches."
+        },
+        {
+          "criterion": "Press feedback",
+          "score": 5,
+          "note": "A GuiState-driven UIScale spring shrinks the tile on Press and bounces back on release."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 4,
+          "note": "Everything keeps working and the checks pass, but `Vide.strict = RunService:IsStudio()` is an unrelated global behavior change, and the module's API changed to `Module.new`."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Turning off `Interactable` makes the leaving picker ignore clicks entirely",
+        "The exit delay is returned cleanly through the builder's multiple return values",
+        "Clean slot frame plus scaled button, with a separate highlight frame outside the layout"
+      ],
+      "weaknesses": [
+        "If the selected name matches no tile, the highlight falls back to tile 1",
+        "The comments' claim that the slide starts below the screen depends on `show` creating the picker with present false and flipping it on afterwards"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Hides the highlight when no tile matches the selection",
+        "Hidden position is computed from the panel's height",
+        "Exports a clearly named ExitDuration constant"
+      ],
+      "weaknesses": [
+        "The invisible, leaving picker still takes clicks and hover; only selection is blocked",
+        "Out-of-scope `Vide.strict` change",
+        "Changed the module's API without need"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 9,
+    "with_skill": 8
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

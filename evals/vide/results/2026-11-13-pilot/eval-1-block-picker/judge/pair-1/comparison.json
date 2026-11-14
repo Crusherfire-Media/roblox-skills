@@ -1,0 +1,123 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are correct, pass all checks, and meet nearly every rubric point: they mount after waiting for PlayerGui, bind the highlight, clean up the signal connection, and fit a phone screen. A wins because its tile component takes a select callback, which criterion 4 explicitly asks for, and its hotbar has no direct dependency on BlockPlacer. A's key hints also follow the current input type. B's screen-scaled slot sizes and safe-area insets are good, but its tile calls BlockPlacer directly and it reads KeyboardEnabled only once.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Vide, mounted once from client code",
+          "score": 5,
+          "note": "Main.client calls `Vide.mount(HotbarGui, playerGui)` once, and all `create` calls happen inside the hotbarGui, hotbar, and slot functions."
+        },
+        {
+          "criterion": "Highlight is a binding",
+          "score": 5,
+          "note": "`BackgroundColor3` and the UIStroke `Transparency` are functions that read `props.IsSelected()`, which comes from the `selectedName` source updated by BlockTypeChanged."
+        },
+        {
+          "criterion": "External signal cleaned up",
+          "score": 5,
+          "note": "`cleanup(BlockPlacer.BlockTypeChanged:Connect(...))` inside the mounted component disconnects the connection when the scope is destroyed."
+        },
+        {
+          "criterion": "Reusable tile from BlockTypes.List with props",
+          "score": 5,
+          "note": "One `slot(props)` function takes BlockType, IsSelected, and a Select callback, and a loop over `BlockTypes.List` creates the tiles."
+        },
+        {
+          "criterion": "No yields in scopes",
+          "score": 5,
+          "note": "`localPlayer:WaitForChild(\"PlayerGui\")` runs in Main.client before `Vide.mount`."
+        },
+        {
+          "criterion": "Phone support",
+          "score": 4,
+          "note": "Slots are 64 px (UIScale never goes below 1), so the bar is about 368 px wide and centered at the bottom, leaving room for the thumbstick and jump button on a roughly 667 px landscape phone; it doesn't use safe-area insets."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "All checks pass, the code is strict and typed, the Screen module makes key hints and scale follow the current input, and placement is unchanged; the extra story files neither add nor subtract."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Vide, mounted once from client code",
+          "score": 5,
+          "note": "`Hotbar.mount` wraps `Vide.mount(Hotbar, playerGui)` and is called once from Main.client, with all `create` calls inside components."
+        },
+        {
+          "criterion": "Highlight is a binding",
+          "score": 5,
+          "note": "The stroke's `Color` and `Thickness` and the button's `BackgroundColor3` are functions that read `isSelected()`, which uses the `selected` source."
+        },
+        {
+          "criterion": "External signal cleaned up",
+          "score": 5,
+          "note": "`cleanup(function() connection:Disconnect() end)` runs in the Hotbar scope."
+        },
+        {
+          "criterion": "Reusable tile from BlockTypes.List with props",
+          "score": 4,
+          "note": "A `Slot(props)` component is created in a loop over `BlockTypes.List`, but it has no select callback: it calls `BlockPlacer.setBlockType` directly."
+        },
+        {
+          "criterion": "No yields in scopes",
+          "score": 5,
+          "note": "`WaitForChild(\"PlayerGui\")` is evaluated as the argument before `Hotbar.mount` runs."
+        },
+        {
+          "criterion": "Phone support",
+          "score": 5,
+          "note": "Slot size is clamped between 44 and 68 px from the screen's short side, the bar is about 276 px wide on a phone, and `ScreenInsets = DeviceSafeInsets` is set."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "All checks pass and it works, but `showKeyHint` reads `KeyboardEnabled` only once, and several properties Vide already sets by default are set again by hand."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Hotbar component is cleanly separated from BlockPlacer through the SelectedName and Select props",
+        "Key hints update when the player switches between touch and other input",
+        "Correct cleanup and bindings throughout"
+      ],
+      "weaknesses": [
+        "The Screen module adds module-level connections and more code than the task needs",
+        "Fixed 64 px slots with no safe-area insets handling"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Slot size adapts to the screen with a 44 px minimum",
+        "Respects device safe-area insets",
+        "Short and self-contained"
+      ],
+      "weaknesses": [
+        "The tile calls BlockPlacer directly instead of taking a select callback",
+        "Key-hint visibility is checked once and never updated"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

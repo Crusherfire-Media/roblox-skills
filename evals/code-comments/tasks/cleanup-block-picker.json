@@ -1,0 +1,118 @@
+{
+	"id": 4,
+	"name": "cleanup-block-picker",
+	"skill": "code-comments",
+	"prompt": "The block picker UI in src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau has gotten really noisy with comments. Please tidy them up so only the useful ones are left.",
+	"setup_files": [
+		{
+			"from": "fixtures/BlockPicker.client.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const cp = require('child_process'); const fs = require('fs'); const file = process.argv[1]; const strip = (s) => { let out = ''; let i = 0; const n = s.length; const longOpen = (at) => { const m = /^\\[(=*)\\[/.exec(s.slice(at, at + 64)); return m ? ']' + m[1] + ']' : null; }; while (i < n) { const c = s[i]; if (c === '-' && s[i + 1] === '-') { const close = longOpen(i + 2); if (close) { const e = s.indexOf(close, i + 2); i = e < 0 ? n : e + close.length; } else { const e = s.indexOf('\\n', i); i = e < 0 ? n : e; } continue; } if (c === '\"' || c === \"'\" || c === '`') { let j = i + 1; while (j < n && s[j] !== c) { if (s[j] === '\\\\') j++; j++; } out += s.slice(i, j + 1); i = j + 1; continue; } if (c === '[') { const close = longOpen(i); if (close) { const e = s.indexOf(close, i); const end = e < 0 ? n : e + close.length; out += s.slice(i, end); i = end; continue; } } if (/\\s/.test(c)) { i++; continue; } out += c; i++; } return out.replace(/[,;](?=\\})/g, ''); }; let before; let after; try { before = cp.execFileSync('git', ['show', 'HEAD:' + file], { encoding: 'utf8' }); after = fs.readFileSync(file, 'utf8'); } catch (e) { console.log('cannot read ' + file + ': ' + e.message); process.exit(1); } const a = strip(before); const b = strip(after); if (a === b) { console.log('code outside comments is unchanged (whitespace ignored)'); process.exit(0); } let k = 0; while (k < a.length && a[k] === b[k]) k++; console.log('code changed near: ' + a.slice(Math.max(0, k - 60), k + 60) + ' => ' + b.slice(Math.max(0, k - 60), k + 60)); process.exit(1);",
+				"src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau"
+			],
+			"text": "Only comments changed in src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau: the code with comments and whitespace removed matches the starting commit"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "^--!strict\\r?\\n--# selene: allow\\(mixed_table\\)\\r?\\n",
+			"text": "Kept: --!strict and the --# selene: allow(mixed_table) directive at the top"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "--[^\\n]*(sync|reads this)",
+			"text": "Kept: the note that PlacementController reads the SelectedBlock attribute"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "--[^\\n]*(touch|MouseButton1Click)",
+			"text": "Kept: why Activated is used (touch and gamepad)"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "--[^\\n]*(TextBox|chat)",
+			"text": "Kept: why gameProcessed input is skipped (typing in a TextBox)"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "TODO[^\\n]*gamepad",
+			"text": "Kept: the gamepad TODO"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "Roact|v2\\.1|per code review",
+			"text": "Removed: the changelog, 'per code review', and the commented-out Roact code"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "UI spec|section 2\\.3",
+			"text": "Removed: the UI spec section reference"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "Default selection is Brick",
+			"text": "Removed: the stale 'Default selection is Brick' (the code selects Grass)"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "CHILDREN",
+			"text": "Removed: the banner inside the TextButton's property table"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "^[ \\t]*end\\)?[ \\t]*--",
+			"text": "Removed: block-end markers"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "\\u2014",
+			"text": "Convention: no em dash left in the file"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "--\\[\\[(?!@description:)[ \\t]*\\S",
+			"text": "Convention: no block comment has text on its --[[ line"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau",
+			"pattern": "@param|-- (Get services|Import Vide|Get the local player|Update the source|Rounded corners|Lay the buttons out horizontally|Return the ScreenGui)",
+			"text": "Removed: a sample of narration comments and the @param doc comment"
+		}
+	],
+	"rubric": [
+		"Changes only comments: every line of code is the same as before; the only edits are to comment text and the blank lines that deleted comments leave behind. No new files.",
+		"Keeps the comments that carry information the code can't show, trimmed where they ran long: that PlacementController reads the SelectedBlock attribute (so the name must stay in sync), why Activated is used instead of MouseButton1Click (touch and gamepad), why gameProcessed input is skipped (typing in a TextBox such as chat), and the gamepad TODO.",
+		"Keeps tool directives exactly as they were: --!strict and --# selene: allow(mixed_table) at the top.",
+		"Removes narration that restates the code: 'Get services', 'Import Vide', per-property comments such as 'Rounded corners' or 'don't reset on spawn', block-end markers such as 'end -- for' and 'end) -- InputBegan', and the doc comment that only lists parameter names and types.",
+		"Removes or corrects comments that are wrong: 'Default selection is Brick' (the code selects Grass), and the commented-out Roact lines.",
+		"Removes change history and dangling references: the v2 and v2.1 changelog, 'per code review', and 'per the UI spec, section 2.3'.",
+		"Removes the section banner inside the TextButton's property table, and any header comment that survives is short and describes what the script does now."
+	],
+	"notes": "Cleanup branch, Vide UI. In with-skill trials the plugin's hooks will ask for the vide and vide-ui-labs skills before the first edit, and vide-ui-labs says every component gets a story; adding a story file here is out of scope and the rubric's first criterion penalizes it. Planted KEEP (each has a check): --!strict and --# selene: allow(mixed_table) (directives; selene fails without the second); 'PlacementController reads this attribute; keep the name in sync with it' (cross-file sync); 'Activated also fires for touch and gamepad; MouseButton1Click doesn't' (reason a simpler version breaks); 'Skip keys typed into a TextBox, such as chat' (gotcha); 'TODO: let gamepad players cycle blocks...' (TODO beyond scope). Planted REMOVE: header with text and an em dash on the --[[ line plus a 'v2: migrated from Roact to Vide (per code review)' / 'v2.1' changelog; 'Colors per the UI spec, section 2.3'; stale 'Default selection is Brick' above source(\"Grass\"); commented-out Roact require and Roact.mount; a CHILDREN banner inside the TextButton table; 'end -- for', 'end -- if', 'end) -- InputBegan'; em dashes in two narration comments; the @param/@return doc comment on BlockButton; narration on nearly every line (Get services, Import Vide, Pull the Vide functions..., the size of each button, Update the source, Rounded corners, Return the ScreenGui, Mount the picker...). Judgment calls (not checked): 'Hotkeys, by index into BLOCK_ORDER' (literal meaning, a reasonable keep or a fair delete); 'Set the initial attribute so PlacementController has a value from the start' (a why for the last line, a trimmed keep is best); whether the header shrinks to one or two lines or goes.",
+	"timeout_minutes": 15
+}

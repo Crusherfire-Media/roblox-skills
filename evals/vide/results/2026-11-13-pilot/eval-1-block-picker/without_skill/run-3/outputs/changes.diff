@@ -1,0 +1,261 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Hotbar.luau b/src/StarterPlayer/StarterPlayerScripts/Hotbar.luau
+new file mode 100644
+index 0000000..b2188d7
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/Hotbar.luau
+@@ -0,0 +1,235 @@
++--[[
++	Hotbar for picking a block type. Shows every type in BlockTypes, highlights the selected one,
++	and selects a type when its slot is clicked or tapped. It follows BlockPlacer, so switching with
++	the number keys updates the highlight too.
++
++	Mount it with Vide: `Vide.mount(Hotbar, playerGui)`.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local UserInputService = game:GetService("UserInputService")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local BlockPlacer = require(script.Parent.BlockPlacer)
++
++local create = Vide.create
++local source = Vide.source
++local cleanup = Vide.cleanup
++local changed = Vide.changed
++
++local SLOT_SIZE = 64
++local SLOT_GAP = 8
++local BAR_PADDING = 8
++local LABEL_HEIGHT = 24
++local LABEL_GAP = 6
++local BOTTOM_MARGIN = 16
++
++local SLOT_COUNT = #BlockTypes.List
++local BAR_WIDTH = SLOT_COUNT * SLOT_SIZE + (SLOT_COUNT - 1) * SLOT_GAP + 2 * BAR_PADDING
++local BAR_HEIGHT = SLOT_SIZE + 2 * BAR_PADDING
++
++-- On narrow screens (phones) the hotbar shrinks so it takes at most this share of the screen width,
++-- keeping it clear of the thumbstick and jump button. It never shrinks below MIN_SCALE so slots
++-- stay big enough to tap (64 * 0.7 is about 45 pixels).
++local MAX_WIDTH_FRACTION = 0.5
++local MIN_SCALE = 0.7
++
++local BAR_COLOR = Color3.fromRGB(20, 20, 24)
++local SLOT_COLOR = Color3.fromRGB(45, 45, 52)
++local SLOT_SELECTED_COLOR = Color3.fromRGB(70, 70, 80)
++local STROKE_COLOR = Color3.fromRGB(90, 90, 100)
++local STROKE_SELECTED_COLOR = Color3.fromRGB(255, 255, 255)
++local TEXT_COLOR = Color3.fromRGB(255, 255, 255)
++
++type SlotProps = {
++	blockType: BlockTypes.BlockType,
++	index: number,
++	selected: () -> string,
++	select: (name: string) -> (),
++	showKeyHints: () -> boolean,
++}
++
++local function Slot(props: SlotProps)
++	local blockType = props.blockType
++
++	local function isSelected(): boolean
++		return props.selected() == blockType.Name
++	end
++
++	return create("TextButton")({
++		Name = blockType.Name,
++		LayoutOrder = props.index,
++		Size = UDim2.fromOffset(SLOT_SIZE, SLOT_SIZE),
++		Text = "",
++		AutoButtonColor = false,
++		BorderSizePixel = 0,
++		BackgroundColor3 = function()
++			return if isSelected() then SLOT_SELECTED_COLOR else SLOT_COLOR
++		end,
++
++		-- Activated fires for mouse clicks, touch taps and gamepad presses alike.
++		Activated = function()
++			props.select(blockType.Name)
++		end,
++
++		create("UICorner")({ CornerRadius = UDim.new(0, 8) }),
++
++		create("UIStroke")({
++			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++			Color = function()
++				return if isSelected() then STROKE_SELECTED_COLOR else STROKE_COLOR
++			end,
++			Thickness = function()
++				return if isSelected() then 3 else 1
++			end,
++		}),
++
++		-- Colour swatch for the block. Window blocks are see-through, so the swatch is too.
++		create("Frame")({
++			Name = "Swatch",
++			AnchorPoint = Vector2.new(0.5, 0.5),
++			Position = UDim2.fromScale(0.5, 0.5),
++			Size = UDim2.fromScale(0.6, 0.6),
++			BorderSizePixel = 0,
++			BackgroundColor3 = blockType.Color,
++			BackgroundTransparency = blockType.Transparency,
++
++			create("UICorner")({ CornerRadius = UDim.new(0, 4) }),
++			create("UIStroke")({
++				Color = Color3.new(0, 0, 0),
++				Transparency = 0.6,
++				Thickness = 1,
++			}),
++		}),
++
++		-- Number key that selects this slot. Hidden when there is no keyboard, as on phones.
++		create("TextLabel")({
++			Name = "KeyHint",
++			Position = UDim2.fromOffset(4, 2),
++			Size = UDim2.fromOffset(16, 16),
++			BackgroundTransparency = 1,
++			Text = tostring(props.index),
++			TextColor3 = TEXT_COLOR,
++			TextStrokeTransparency = 0.4,
++			TextSize = 14,
++			Font = Enum.Font.GothamBold,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			TextYAlignment = Enum.TextYAlignment.Top,
++			Visible = props.showKeyHints,
++		}),
++	})
++end
++
++local function Hotbar()
++	local selected = source(BlockPlacer.getBlockType())
++	local screenWidth = source(0)
++	local showKeyHints = source(UserInputService.KeyboardEnabled)
++
++	-- Follow selection changes made anywhere else, such as the number keys.
++	cleanup(BlockPlacer.BlockTypeChanged:Connect(function(name: string)
++		selected(name)
++	end))
++
++	cleanup(UserInputService:GetPropertyChangedSignal("KeyboardEnabled"):Connect(function()
++		showKeyHints(UserInputService.KeyboardEnabled)
++	end))
++
++	local function select(name: string)
++		BlockPlacer.setBlockType(name)
++		-- BlockTypeChanged is deferred, so update now rather than a frame later.
++		selected(name)
++	end
++
++	local function scale(): number
++		local width = screenWidth()
++		if width <= 0 then
++			return 1
++		end
++		return math.clamp(width * MAX_WIDTH_FRACTION / BAR_WIDTH, MIN_SCALE, 1)
++	end
++
++	local slots = {}
++	for index, blockType in BlockTypes.List do
++		table.insert(
++			slots,
++			Slot({
++				blockType = blockType,
++				index = index,
++				selected = selected,
++				select = select,
++				showKeyHints = showKeyHints,
++			})
++		)
++	end
++
++	return create("ScreenGui")({
++		Name = "Hotbar",
++		-- Created by script, so it would be lost on respawn if this were left on.
++		ResetOnSpawn = false,
++		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
++		-- Keep clear of notches and the home indicator on phones.
++		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
++
++		changed("AbsoluteSize", function(size: Vector2)
++			screenWidth(size.X)
++		end),
++
++		create("Frame")({
++			Name = "Container",
++			AnchorPoint = Vector2.new(0.5, 1),
++			Position = UDim2.new(0.5, 0, 1, -BOTTOM_MARGIN),
++			Size = UDim2.fromOffset(BAR_WIDTH, BAR_HEIGHT + LABEL_GAP + LABEL_HEIGHT),
++			BackgroundTransparency = 1,
++
++			create("UIScale")({ Scale = scale }),
++
++			create("TextLabel")({
++				Name = "SelectedName",
++				Size = UDim2.new(1, 0, 0, LABEL_HEIGHT),
++				BackgroundTransparency = 1,
++				Text = function()
++					local blockType = BlockTypes.ByName[selected()]
++					return if blockType then blockType.DisplayName else ""
++				end,
++				TextColor3 = TEXT_COLOR,
++				TextStrokeTransparency = 0.3,
++				TextSize = 20,
++				Font = Enum.Font.GothamBold,
++			}),
++
++			create("Frame")({
++				Name = "Bar",
++				AnchorPoint = Vector2.new(0, 1),
++				Position = UDim2.fromScale(0, 1),
++				Size = UDim2.fromOffset(BAR_WIDTH, BAR_HEIGHT),
++				BackgroundColor3 = BAR_COLOR,
++				BackgroundTransparency = 0.35,
++				BorderSizePixel = 0,
++				-- Sink clicks and taps in the gaps between slots so they don't place a block
++				-- in the world behind the bar.
++				Active = true,
++
++				create("UICorner")({ CornerRadius = UDim.new(0, 12) }),
++				create("UIPadding")({
++					PaddingTop = UDim.new(0, BAR_PADDING),
++					PaddingBottom = UDim.new(0, BAR_PADDING),
++					PaddingLeft = UDim.new(0, BAR_PADDING),
++					PaddingRight = UDim.new(0, BAR_PADDING),
++				}),
++				create("UIListLayout")({
++					FillDirection = Enum.FillDirection.Horizontal,
++					HorizontalAlignment = Enum.HorizontalAlignment.Center,
++					VerticalAlignment = Enum.VerticalAlignment.Center,
++					SortOrder = Enum.SortOrder.LayoutOrder,
++					Padding = UDim.new(0, SLOT_GAP),
++				}),
++
++				slots,
++			}),
++		}),
++	})
++end
++
++return Hotbar
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index d6fde35..f41b8a4 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,8 +1,15 @@
+ local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local Hotbar = require(script.Parent.Hotbar)
+ 
+ local localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
+ 
++-- Mount the UI first: BlockPlacer.start() yields until the server's remote exists.
++Vide.mount(Hotbar, localPlayer:WaitForChild("PlayerGui"))
++
+ BlockPlacer.start()

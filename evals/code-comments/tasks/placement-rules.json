@@ -1,0 +1,49 @@
+{
+	"id": 1,
+	"name": "placement-rules",
+	"skill": "code-comments",
+	"prompt": "I'm adding block placement to this place: players pick a block type (brick, dirt, grass, window, or wood) and click on the Baseplate to place it. Before I wire up the remote and the picker UI, I want the placement rules in one shared module at src/ReplicatedStorage/Shared/PlacementRules.luau, so the client can tint its ghost preview red on a bad spot and the server can reject bad requests with the same logic.\n\nThe rules:\n- the block type has to be one of the five\n- blocks are 4x4x4 and snap to a 4-stud grid that starts at the top of the Baseplate, so a block placed on the ground rests on it. Expose the snapping so the preview and the server agree\n- nothing below the top of the Baseplate or more than 200 studs up\n- within 24 studs of the player's HumanoidRootPart\n- can't overlap a block that's already placed (placed blocks live in a folder the caller passes in). Blocks sitting right next to each other are fine\n- the server will feed it whatever the client sends over the remote, so it has to cope with garbage (wrong types, NaN, huge numbers) without erroring\n\nWhen a request fails, give back a short reason I can log on the server. Just the module for now, no remote or UI yet.",
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "file_exists",
+			"path": "src/ReplicatedStorage/Shared/PlacementRules.luau",
+			"text": "The module is at src/ReplicatedStorage/Shared/PlacementRules.luau"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const fs = require('fs'); const path = require('path'); const mode = process.argv[1]; const files = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\\.luau?$/.test(e.name)) files.push(p); } }; walk('src'); const blank = (l) => l.replace(/\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`/g, (m) => m[0] + ' '.repeat(m.length - 2) + m[0]); const bad = []; for (const f of files) { const lines = fs.readFileSync(f, 'utf8').split(/\\r?\\n/); let inBlock = false; lines.forEach((line, i) => { const where = f.split(path.sep).join('/') + ':' + (i + 1) + ': ' + line.trim().slice(0, 80); let text = ''; if (inBlock) { text = line; if (line.includes(']]')) { inBlock = false; if (mode === 'block' && line.trim() !== ']]') bad.push(where); } } else { const at = blank(line).indexOf('--'); if (at < 0) return; text = line.slice(at + 2); if (/^\\[=*\\[/.test(text)) { const rest = text.replace(/^\\[=*\\[/, ''); if (rest.includes(']]')) { if (mode === 'block') bad.push(where); } else { inBlock = true; if (mode === 'block' && !/^\\s*(@description:\\s*)?$/.test(rest)) bad.push(where); } } } if (mode === 'dash' && (text.includes('\\u2014') || /\\s--\\s+\\S/.test(text))) bad.push(where); }); } if (bad.length) { console.log(bad.slice(0, 10).join('\\n')); process.exit(1); } console.log('no findings in ' + files.length + ' Luau files');",
+				"dash"
+			],
+			"text": "Convention: no comment in a Luau file under src contains an em dash or a double hyphen used as a dash"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const fs = require('fs'); const path = require('path'); const mode = process.argv[1]; const files = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\\.luau?$/.test(e.name)) files.push(p); } }; walk('src'); const blank = (l) => l.replace(/\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`/g, (m) => m[0] + ' '.repeat(m.length - 2) + m[0]); const bad = []; for (const f of files) { const lines = fs.readFileSync(f, 'utf8').split(/\\r?\\n/); let inBlock = false; lines.forEach((line, i) => { const where = f.split(path.sep).join('/') + ':' + (i + 1) + ': ' + line.trim().slice(0, 80); let text = ''; if (inBlock) { text = line; if (line.includes(']]')) { inBlock = false; if (mode === 'block' && line.trim() !== ']]') bad.push(where); } } else { const at = blank(line).indexOf('--'); if (at < 0) return; text = line.slice(at + 2); if (/^\\[=*\\[/.test(text)) { const rest = text.replace(/^\\[=*\\[/, ''); if (rest.includes(']]')) { if (mode === 'block') bad.push(where); } else { inBlock = true; if (mode === 'block' && !/^\\s*(@description:\\s*)?$/.test(rest)) bad.push(where); } } } if (mode === 'dash' && (text.includes('\\u2014') || /\\s--\\s+\\S/.test(text))) bad.push(where); }); } if (bad.length) { console.log(bad.slice(0, 10).join('\\n')); process.exit(1); } console.log('no findings in ' + files.length + ' Luau files');",
+				"block"
+			],
+			"text": "Convention: every Luau block comment under src puts --[[ and ]] on their own lines (the --[[@description: header line excepted)"
+		}
+	],
+	"rubric": [
+		"Implements every rule correctly: the five block types, a 4-stud grid whose cells rest on the Baseplate top (Y = 0), the 0 to 200 stud height range, 24-stud reach from the HumanoidRootPart, no overlap with placed blocks while adjacent blocks are allowed, a short reason on failure, and the snapping exposed for the client.",
+		"Handles untrusted input without erroring: wrong types, NaN, and infinite numbers are rejected before any range check could let them through.",
+		"Comments explain why, not what: each comment carries something the code can't show (a constraint, a gotcha, the units or meaning of a literal, a sync obligation with other code, or why a tempting simpler version breaks), and none restates the next line, narrates steps, or repeats a name or type.",
+		"Comments are minimal: each one is as short as it can be while keeping its point, sits next to the line it governs, and there are no multi-line blocks that could be one line, no section banners inside functions or tables, no block-end markers such as 'end -- if', and no commented-out code.",
+		"Public functions carry a short doc comment that states what the signature can't show (what the return values mean, failure behavior, expectations on the inputs) without listing parameter names and types; private helpers and obvious lines carry none.",
+		"Comment text describes the code as it stands for a reader opening the file fresh: no change history, no references to the request or conversation (such as 'as requested' or 'new'), and no pointers to documents or specs that the reader can't see.",
+		"Stays in scope and is ready to merge: one shared module usable from client and server, no remote or UI, typed and readable Luau that passes the checks."
+	],
+	"notes": "Writing branch. Natural why-comment spots the rubric rewards: NaN slipping past range checks, why the overlap box is shrunk (face-sharing neighbors), the meaning of the grid offset (cell centers half a block above Y = 0), units on reach/height constants. The rubric penalizes narration, multi-line blocks, change or request references. The two command checks are house conventions (em dash / -- as dash, --[[ ]] on their own lines) the baseline has no way to know.",
+	"timeout_minutes": 15
+}
