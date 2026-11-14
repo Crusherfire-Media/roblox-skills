@@ -1,0 +1,7 @@
+I fixed the errors from the stop hook, but I couldn't run StyLua or the type checker myself, because running tools needs approval in this session. So none of these fixes have been checked yet.
+
+- **Unknown require:** the `@game/...` require paths I'd used didn't resolve with this project's luau-lsp setup. I switched to `require(ReplicatedStorage.Shared.BlockTypes)` and `require(ReplicatedStorage.Shared.PlacementRules)`, which resolve through the sourcemap. That also fixes the two `Unknown type 'BlockTypes.BlockType'` errors. I added a `type BlockType = BlockTypes.BlockType` alias so the code refers to it in one place.
+- **`{BasePart}?` at line 92:** `onPlaceBlock` now starts with `const blocks = blocksByPlayer[player] or {}`, so the type is never optional. The list is saved back to `blocksByPlayer` only after a block is actually placed, so a failed request doesn't leave an empty entry behind.
+- **StyLua:** the hook didn't say which lines were wrong, and every line I can check fits your `stylua.toml` (100 columns, tabs). The long `PlacementRules.validate(...)` call stays split across lines because it would be 104 columns on one. My guess is that StyLua is reformatting one of the other changes in the file. Run `stylua src/ServerScriptService/Placement.server.luau` to fix it; nothing in the code's behavior depends on the formatting.
+
+To confirm everything, run the four commands in the README's "Checks" section from the project root.

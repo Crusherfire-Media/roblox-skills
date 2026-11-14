@@ -1,0 +1,409 @@
+diff --git a/src/ServerScriptService/Stories/Game.storybook.luau b/src/ServerScriptService/Stories/Game.storybook.luau
+new file mode 100644
+index 0000000..2819488
+--- /dev/null
++++ b/src/ServerScriptService/Stories/Game.storybook.luau
+@@ -0,0 +1,14 @@
++--!strict
++--@author: Crusherfire
++--@date: 11/13/2026
++--[[@description:
++	UI Labs storybook for the game's UI. Studio-only: nothing in the game
++	requires this folder.
++]]
++
++const ServerScriptService = game:GetService("ServerScriptService")
++
++return {
++	name = "Game UI",
++	storyRoots = { ServerScriptService.Stories },
++}
+diff --git a/src/ServerScriptService/Stories/Hotbar.story.luau b/src/ServerScriptService/Stories/Hotbar.story.luau
+new file mode 100644
+index 0000000..580ec3b
+--- /dev/null
++++ b/src/ServerScriptService/Stories/Hotbar.story.luau
+@@ -0,0 +1,48 @@
++--!strict
++--@author: Crusherfire
++--@date: 11/13/2026
++--[[@description:
++	The block hotbar with every block type. Pressing a slot selects it, as in
++	game.
++]]
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const source = Vide.source
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const Hotbar = require("@game/StarterPlayer/StarterPlayerScripts/Hotbar")
++
++type StoryProps = {
++	controls: {
++		-- Off is how touch players see it.
++		ShowKeyHints: () -> boolean,
++	},
++	target: Frame,
++}
++
++const CONTROLS = {
++	ShowKeyHints = true,
++}
++
++local function story(props: StoryProps)
++	const selectedName = source(BlockTypes.List[1].Name)
++
++	return Hotbar({
++		BlockTypes = BlockTypes.List,
++		SelectedName = selectedName,
++		ShowKeyHints = props.controls.ShowKeyHints,
++		Select = function(name: string)
++			selectedName(name)
++		end,
++		AnchorPoint = Vector2.new(0.5, 0.5),
++		Position = UDim2.fromScale(0.5, 0.5),
++	})
++end
++
++return {
++	summary = "The block hotbar. Press a slot to select it.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Hotbar.luau b/src/StarterPlayer/StarterPlayerScripts/Hotbar.luau
+new file mode 100644
+index 0000000..87e1b98
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/Hotbar.luau
+@@ -0,0 +1,158 @@
++--!strict
++--@author: Crusherfire
++--@date: 11/13/2026
++--[[@description:
++	A row of block slots: each shows the block's color and name, the selected
++	slot is outlined, and clicking or tapping a slot asks to select it.
++]]
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const create = Vide.create
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++export type HotbarProps = {
++	BlockTypes: { BlockTypes.BlockType },
++	SelectedName: () -> string,
++	ShowKeyHints: boolean | () -> boolean,
++	Select: (name: string) -> (),
++	AnchorPoint: Vector2?,
++	Position: UDim2?,
++}
++
++-- 64 keeps every slot well over the 44 a thumb needs.
++const SLOT_SIZE = 64
++const SLOT_GAP = 8
++const SLOT_RADIUS = 10
++const SWATCH_INSET = 6
++const SWATCH_RADIUS = SLOT_RADIUS - SWATCH_INSET
++const SWATCH_HEIGHT = 34
++const NAME_TOP = SWATCH_INSET + SWATCH_HEIGHT + 2
++const NAME_HEIGHT = 18
++const NAME_TEXT_SIZE = 14
++const KEY_HINT_SIZE = 14
++const KEY_HINT_TEXT_SIZE = 13
++-- Outer padding is wider than the stroke, so the outline is never cut off.
++const BAR_PADDING = 8
++const BAR_RADIUS = SLOT_RADIUS + BAR_PADDING
++const SELECTED_STROKE = 3
++
++const BAR_COLOR = Color3.fromRGB(0, 0, 0)
++const BAR_TRANSPARENCY = 0.4
++const SLOT_COLOR = Color3.fromRGB(35, 35, 40)
++const SELECTED_SLOT_COLOR = Color3.fromRGB(75, 75, 85)
++const TEXT_COLOR = Color3.fromRGB(255, 255, 255)
++const FONT = Enum.Font.BuilderSansBold
++
++local function slot(props: {
++	BlockType: BlockTypes.BlockType,
++	KeyNumber: number,
++	IsSelected: () -> boolean,
++	ShowKeyHints: boolean | () -> boolean,
++	Select: (name: string) -> (),
++}): TextButton
++	const blockType = props.BlockType
++
++	return create("TextButton")({
++		Name = blockType.Name,
++		LayoutOrder = props.KeyNumber,
++		Size = UDim2.fromOffset(SLOT_SIZE, SLOT_SIZE),
++		BackgroundColor3 = function()
++			return if props.IsSelected() then SELECTED_SLOT_COLOR else SLOT_COLOR
++		end,
++		Text = "",
++		Activated = function()
++			props.Select(blockType.Name)
++		end,
++
++		create("UICorner")({ CornerRadius = UDim.new(0, SLOT_RADIUS) }),
++		create("UIStroke")({
++			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++			Color = TEXT_COLOR,
++			Thickness = SELECTED_STROKE,
++			Transparency = function()
++				return if props.IsSelected() then 0 else 1
++			end,
++		}),
++
++		create("Frame")({
++			Name = "Swatch",
++			Position = UDim2.fromOffset(SWATCH_INSET, SWATCH_INSET),
++			Size = UDim2.new(1, -2 * SWATCH_INSET, 0, SWATCH_HEIGHT),
++			BackgroundColor3 = blockType.Color,
++			BackgroundTransparency = blockType.Transparency,
++
++			create("UICorner")({ CornerRadius = UDim.new(0, SWATCH_RADIUS) }),
++
++			create("TextLabel")({
++				Name = "KeyHint",
++				Position = UDim2.fromOffset(2, 1),
++				Size = UDim2.fromOffset(KEY_HINT_SIZE, KEY_HINT_SIZE),
++				BackgroundTransparency = 1,
++				Font = FONT,
++				Text = tostring(props.KeyNumber),
++				TextColor3 = TEXT_COLOR,
++				TextSize = KEY_HINT_TEXT_SIZE,
++				TextStrokeTransparency = 0.3,
++				Visible = props.ShowKeyHints,
++			}),
++		}),
++
++		create("TextLabel")({
++			Name = "BlockName",
++			Position = UDim2.fromOffset(0, NAME_TOP),
++			Size = UDim2.new(1, 0, 0, NAME_HEIGHT),
++			BackgroundTransparency = 1,
++			Font = FONT,
++			Text = blockType.DisplayName,
++			TextColor3 = TEXT_COLOR,
++			TextSize = NAME_TEXT_SIZE,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++		}),
++	})
++end
++
++local function hotbar(props: HotbarProps): Frame
++	const slots = {}
++	for index, blockType in props.BlockTypes do
++		table.insert(
++			slots,
++			slot({
++				BlockType = blockType,
++				KeyNumber = index,
++				IsSelected = function()
++					return props.SelectedName() == blockType.Name
++				end,
++				ShowKeyHints = props.ShowKeyHints,
++				Select = props.Select,
++			})
++		)
++	end
++
++	return create("Frame")({
++		Name = "Hotbar",
++		AnchorPoint = props.AnchorPoint,
++		Position = props.Position,
++		Size = UDim2.new(),
++		AutomaticSize = Enum.AutomaticSize.XY,
++		BackgroundColor3 = BAR_COLOR,
++		BackgroundTransparency = BAR_TRANSPARENCY,
++
++		create("UICorner")({ CornerRadius = UDim.new(0, BAR_RADIUS) }),
++		create("UIPadding")({
++			PaddingLeft = UDim.new(0, BAR_PADDING),
++			PaddingRight = UDim.new(0, BAR_PADDING),
++			PaddingTop = UDim.new(0, BAR_PADDING),
++			PaddingBottom = UDim.new(0, BAR_PADDING),
++		}),
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			Padding = UDim.new(0, SLOT_GAP),
++		}),
++
++		slots,
++	})
++end
++
++return hotbar
+diff --git a/src/StarterPlayer/StarterPlayerScripts/HotbarGui.luau b/src/StarterPlayer/StarterPlayerScripts/HotbarGui.luau
+new file mode 100644
+index 0000000..845f997
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/HotbarGui.luau
+@@ -0,0 +1,48 @@
++--!strict
++--@author: Crusherfire
++--@date: 11/13/2026
++--[[@description:
++	The hotbar ScreenGui: connects the hotbar to BlockPlacer, so it shows the
++	selected block type however it was chosen and selects the slot pressed.
++]]
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const cleanup = Vide.cleanup
++const create = Vide.create
++const source = Vide.source
++
++const BlockPlacer = require("./BlockPlacer")
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const Hotbar = require("./Hotbar")
++const Screen = require("./Screen")
++
++const BOTTOM_CENTER = Vector2.new(0.5, 1)
++const HOTBAR_POSITION = UDim2.new(0.5, 0, 1, -16)
++
++local function hotbarGui(): ScreenGui
++	const selectedName = source(BlockPlacer.getBlockType())
++
++	cleanup(BlockPlacer.BlockTypeChanged:Connect(function(name: string)
++		selectedName(name)
++	end))
++
++	return create("ScreenGui")({
++		Name = "Hotbar",
++
++		create("UIScale")({ Scale = Screen.uiScale }),
++
++		Hotbar({
++			BlockTypes = BlockTypes.List,
++			SelectedName = selectedName,
++			ShowKeyHints = function()
++				return not Screen.isTouch()
++			end,
++			Select = BlockPlacer.setBlockType,
++			AnchorPoint = BOTTOM_CENTER,
++			Position = HOTBAR_POSITION,
++		}),
++	})
++end
++
++return hotbarGui
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index d6fde35..ac56752 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,8 +1,17 @@
+-local Players = game:GetService("Players")
++const Players = game:GetService("Players")
++const RunService = game:GetService("RunService")
+ 
+-local BlockPlacer = require(script.Parent.BlockPlacer)
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const BlockPlacer = require("./BlockPlacer")
++const HotbarGui = require("./HotbarGui")
++
++Vide.strict = RunService:IsStudio()
+ 
+ local localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
+ 
++local playerGui = localPlayer:WaitForChild("PlayerGui")
++Vide.mount(HotbarGui, playerGui)
++
+ BlockPlacer.start()
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Screen.luau b/src/StarterPlayer/StarterPlayerScripts/Screen.luau
+new file mode 100644
+index 0000000..b92e758
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/Screen.luau
+@@ -0,0 +1,87 @@
++--!strict
++--@author: Crusherfire
++--@date: 11/13/2026
++--[[@description:
++	Facts about the player's screen, as Vide sources, so UI follows a window
++	resize, a device switch, or a change of primary input while it is up.
++]]
++
++const GuiService = game:GetService("GuiService")
++const RunService = game:GetService("RunService")
++const UserInputService = game:GetService("UserInputService")
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const batch = Vide.batch
++const source = Vide.source
++
++-- UI is authored for a screen 1080 pixels tall and grows on taller ones.
++const REFERENCE_SHORT_SIDE = 1080
++const MINIMUM_SCALE = 1
++const MAXIMUM_SCALE = 3
++const LARGE_DISPLAY_BOOST = 1.25
++const FALLBACK_VIEWPORT = Vector2.new(1920, 1080)
++
++local Module = {}
++
++local realViewport = source(FALLBACK_VIEWPORT)
++local prefersTouch = source(false)
++local isLargeDisplay = source(false)
++local viewportConnection: RBXScriptConnection? = nil
++
++local function refresh()
++	local camera = workspace.CurrentCamera
++	batch(function()
++		-- ViewportSize can read (1, 1) before the first frame, so the fallback
++		-- stays until a real size arrives.
++		if camera and camera.ViewportSize.X > 1 and camera.ViewportSize.Y > 1 then
++			realViewport(camera.ViewportSize)
++		end
++		prefersTouch(UserInputService.PreferredInput == Enum.PreferredInput.Touch)
++		isLargeDisplay(GuiService.ViewportDisplaySize == Enum.DisplaySize.Large)
++	end)
++end
++
++local function watchCamera()
++	if viewportConnection then
++		viewportConnection:Disconnect()
++	end
++	local camera = workspace.CurrentCamera
++	if camera then
++		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(refresh)
++	end
++	refresh()
++end
++
++--[[
++	How much the whole UI grows on this screen. Bind it to a UIScale directly
++	under every ScreenGui the game builds.
++]]
++function Module.uiScale(): number
++	const view = realViewport()
++	const boost = if isLargeDisplay() then LARGE_DISPLAY_BOOST else 1
++	return math.clamp(
++		math.min(view.X, view.Y) / REFERENCE_SHORT_SIDE * boost,
++		MINIMUM_SCALE,
++		MAXIMUM_SCALE
++	)
++end
++
++--[[
++	Whether touch is the primary input, which is when Roblox shows its touch
++	controls.
++]]
++function Module.isTouch(): boolean
++	return prefersTouch()
++end
++
++if RunService:IsRunning() then
++	watchCamera()
++	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
++	GuiService:GetPropertyChangedSignal("ViewportDisplaySize"):Connect(refresh)
++	UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(refresh)
++else
++	refresh()
++end
++
++return Module

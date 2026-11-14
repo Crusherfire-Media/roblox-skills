@@ -1,0 +1,172 @@
+diff --git a/src/ReplicatedStorage/Shared/PlacementRules.luau b/src/ReplicatedStorage/Shared/PlacementRules.luau
+new file mode 100644
+index 0000000..07466bc
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/PlacementRules.luau
+@@ -0,0 +1,166 @@
++--!strict
++--@author: Crusherfire
++--@date: 2026-11-13
++--[[@description:
++	Block placement rules shared by the client's ghost preview and the server's
++	request handler, so both accept and reject exactly the same spots.
++]]
++
++------------------------------
++-- TYPES --
++------------------------------
++export type BlockType = "Brick" | "Dirt" | "Grass" | "Window" | "Wood"
++
++export type FailureReason =
++	"InvalidBlockType"
++	| "InvalidPosition"
++	| "BelowBaseplate"
++	| "TooHigh"
++	| "NoCharacter"
++	| "TooFar"
++	| "Occupied"
++
++export type PlacementResult =
++	{
++		Ok: true,
++		BlockType: BlockType,
++		Position: Vector3,
++	}
++	| {
++		Ok: false,
++		Reason: FailureReason,
++	}
++
++export type PlacementContext = {
++	Baseplate: BasePart,
++	BlocksFolder: Instance,
++	RootPart: BasePart?,
++}
++
++------------------------------
++-- VARIABLES --
++------------------------------
++const BLOCK_SIZE = 4
++const MAX_HEIGHT = 200
++const MAX_REACH = 24
++-- Shrinks the overlap query so blocks that only share a face don't count
++const OVERLAP_INSET = 0.1
++
++const BLOCK_TYPES = table.freeze({ "Brick", "Dirt", "Grass", "Window", "Wood" } :: { BlockType })
++
++local isBlockType: { [string]: boolean? } = {}
++for _, blockType in BLOCK_TYPES do
++	isBlockType[blockType] = true
++end
++
++local Module = {}
++
++Module.BlockSize = BLOCK_SIZE
++Module.BlockTypes = BLOCK_TYPES
++
++------------------------------
++-- PRIVATE FUNCTIONS --
++------------------------------
++
++local function isFiniteNumber(value: number): boolean
++	-- value == value rejects NaN, which passes every range check
++	return value == value and math.abs(value) ~= math.huge
++end
++
++local function getGridOrigin(baseplate: BasePart): Vector3
++	local halfSize = baseplate.Size / 2
++	return baseplate.Position + Vector3.new(-halfSize.X, halfSize.Y, -halfSize.Z)
++end
++
++local function snapAxis(value: number, origin: number): number
++	return origin + (math.floor((value - origin) / BLOCK_SIZE) + 0.5) * BLOCK_SIZE
++end
++
++local function isOccupied(center: Vector3, blocksFolder: Instance): boolean
++	local overlapParams = OverlapParams.new()
++	overlapParams.FilterType = Enum.RaycastFilterType.Include
++	overlapParams.FilterDescendantsInstances = { blocksFolder }
++	overlapParams.MaxParts = 1
++
++	local size = Vector3.one * (BLOCK_SIZE - OVERLAP_INSET)
++	return #workspace:GetPartBoundsInBox(CFrame.new(center), size, overlapParams) > 0
++end
++
++------------------------------
++-- PUBLIC FUNCTIONS --
++------------------------------
++
++--[[
++	Returns the center of the grid cell that contains `position`. The grid's
++	cells are BLOCK_SIZE studs wide and start at the top face of the
++	(unrotated) Baseplate, so a block in the bottom layer rests on it.
++
++	A point exactly on a cell boundary snaps to the cell above or beside it, so
++	for a raycast hit pass `hitPosition + hitNormal * (BlockSize / 2)` to land
++	in the cell next to the clicked face.
++]]
++function Module.snapToGrid(position: Vector3, baseplate: BasePart): Vector3
++	local origin = getGridOrigin(baseplate)
++	return Vector3.new(
++		snapAxis(position.X, origin.X),
++		snapAxis(position.Y, origin.Y),
++		snapAxis(position.Z, origin.Z)
++	)
++end
++
++--[[
++	Checks a placement request. `blockType` and `position` may be anything a
++	client sent over a remote; they are validated rather than trusted, and the
++	function never errors on them. `position` is snapped with snapToGrid
++	before the checks, and on success the result carries the snapped center.
++
++	A missing `context.RootPart` (no character, or a dead one) fails with
++	"NoCharacter".
++]]
++function Module.validate(
++	blockType: unknown,
++	position: unknown,
++	context: PlacementContext
++): PlacementResult
++	if typeof(blockType) ~= "string" or not isBlockType[blockType] then
++		return { Ok = false, Reason = "InvalidBlockType" }
++	end
++
++	if
++		typeof(position) ~= "Vector3"
++		or not isFiniteNumber(position.X)
++		or not isFiniteNumber(position.Y)
++		or not isFiniteNumber(position.Z)
++	then
++		return { Ok = false, Reason = "InvalidPosition" }
++	end
++
++	local center = Module.snapToGrid(position, context.Baseplate)
++	local groundY = getGridOrigin(context.Baseplate).Y
++	local halfBlock = BLOCK_SIZE / 2
++
++	if center.Y - halfBlock < groundY then
++		return { Ok = false, Reason = "BelowBaseplate" }
++	end
++
++	if center.Y + halfBlock > groundY + MAX_HEIGHT then
++		return { Ok = false, Reason = "TooHigh" }
++	end
++
++	local rootPart = context.RootPart
++	if not rootPart then
++		return { Ok = false, Reason = "NoCharacter" }
++	end
++
++	if (center - rootPart.Position).Magnitude > MAX_REACH then
++		return { Ok = false, Reason = "TooFar" }
++	end
++
++	if isOccupied(center, context.BlocksFolder) then
++		return { Ok = false, Reason = "Occupied" }
++	end
++
++	return { Ok = true, BlockType = blockType :: BlockType, Position = center }
++end
++
++return Module
