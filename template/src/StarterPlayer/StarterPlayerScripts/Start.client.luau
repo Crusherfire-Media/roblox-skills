@@ -1,17 +1,7 @@
 --!strict
---@author: Crusherfire
---@date: 11/13/26
---[[@description:
-	Starts the Module Loader on the client. It loads the modules the server
-	relocated to ReplicatedStorage.
-]]
 
-------------------------------
--- DEPENDENCIES --
-------------------------------
 const ModuleLoader = require("@game/ReplicatedStorage/Packages/ModuleLoader")
 
-------------------------------
--- MAIN --
-------------------------------
+-- Systems are found by their LOAD_MODULE tag, and the loader reads tags only with this setting on.
+ModuleLoader.ChangeSettings({ USE_COLLECTION_SERVICE = true })
 ModuleLoader.Start()

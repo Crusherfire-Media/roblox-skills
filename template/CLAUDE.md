@@ -3,7 +3,8 @@
 A Roblox game kept in Git and synced into Studio by Rojo. Game code is the files under `src/`.
 pesde installs packages from `pesde.toml` into `roblox_packages/` (`ReplicatedStorage.Packages`)
 and Jest from `test_packages/pesde.toml` into `ServerScriptService.Tests.Packages`. The Module
-Loader runs every system: the two `Start` scripts start it, and `ExampleSystem` shows the layout a
+Loader runs every system: the two `Start` scripts turn on its tag discovery and start it, the
+`LOAD_MODULE` tag on `Modules/Systems` marks what it loads, and `ExampleSystem` shows the layout a
 system follows.
 
 The `roblox-dev` plugin's skills hold this project's conventions: Luau style, comments,
@@ -20,7 +21,7 @@ Run everything from the repo root.
 A change is done when these all pass:
 
 ```
-rojo build default.project.json -o build/game.rbxl
+rojo build default.project.json -o game.rbxl
 rojo sourcemap default.project.json -o sourcemap.json
 luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json --definitions:@roblox=globalTypes.None.d.luau --ignore="**/roblox_packages/**" src
 selene src
