@@ -150,7 +150,7 @@ describe("claude arguments", () => {
 
 	test("child sessions don't inherit the launching session's state", () => {
 		const env = childEnv({ PATH: "x", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_EFFORT: "max", AI_AGENT: "a", CLAUDE_CONFIG_DIR: "c" });
-		assert.deepEqual(env, { PATH: "x", CLAUDE_CONFIG_DIR: "c", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
+		assert.deepEqual(env, { PATH: "x", CLAUDE_CONFIG_DIR: "c", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.longpaths", GIT_CONFIG_VALUE_0: "true" });
 	});
 });
 

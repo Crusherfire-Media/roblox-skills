@@ -49,8 +49,11 @@ export function ancestorMemoryFiles(dir) {
 	return found;
 }
 
+// Trial folders sit deep in the scratch tree, so Module Loader paths such as
+// src/ServerScriptService/Modules/Systems/... pass Windows' 260-character limit, and git
+// without core.longpaths skips those files silently on `add`.
 export function git(cwd, args) {
-	const res = spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+	const res = spawnSync("git", ["-c", "core.longpaths=true", ...args], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 	if (res.error) throw new Error(`git ${args[0]} failed: ${res.error.message}`);
 	return res;
 }
@@ -69,7 +72,8 @@ export function applySetupFiles(task, projectDir) {
 		cpSync(from, to, { recursive: true });
 	}
 	// Setup files are part of the starting point, so the diff shows only the trial's work.
-	git(projectDir, ["add", "-A"]);
+	const added = git(projectDir, ["add", "-A"]);
+	if (added.status !== 0) throw new Error(`staging setup files failed: ${added.stderr}`);
 	const res = git(projectDir, ["-c", "user.name=eval-harness", "-c", "user.email=eval-harness@localhost", "commit", "-q", "-m", "Task setup files"]);
 	if (res.status !== 0) throw new Error(`committing setup files failed: ${res.stderr}`);
 }
@@ -83,7 +87,8 @@ export function headCommit(projectDir) {
 // Files the trial added or changed since base (ignored files such as sourcemap.json
 // and packages are left out by the sandbox's .gitignore).
 export function changedFiles(projectDir, base) {
-	git(projectDir, ["add", "-A"]);
+	const added = git(projectDir, ["add", "-A"]);
+	if (added.status !== 0) throw new Error(`staging the trial's changes failed: ${added.stderr}`);
 	const res = git(projectDir, ["diff", "--cached", "--name-status", "--no-renames", base]);
 	if (res.status !== 0) throw new Error(`git diff failed: ${res.stderr}`);
 	const changed = [];
