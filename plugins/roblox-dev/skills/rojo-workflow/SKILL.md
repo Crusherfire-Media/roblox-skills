@@ -1,6 +1,6 @@
 ---
 name: rojo-workflow
-description: Working on a Roblox game kept in Git and synced into Studio by Rojo (a repo with a default.project.json) - how files map into the place, editing scripts as files, rojo serve into your own dev place, keeping rojo serve alive after deletes and renames, one worktree and port per agent, writing Studio edits back with syncback, and shared code from pesde packages, Module Loader included. Load it before the first edit, new file, or Studio change in such a repo; before installing or bumping packages or changing a shared package; before running agents in parallel; and when Rojo, pesde, or a sync misbehaves.
+description: Working on a Roblox game kept in Git and synced into Studio by Rojo (a repo with a default.project.json) - how files map into the place, rojo serve into your own dev place and keeping it alive after deletes and renames, one worktree and port per agent, writing Studio edits back with syncback, and shared code from pesde packages, Module Loader included. Load it before choosing where a new file goes in the place; before editing default.project.json, a .meta.json, or a .model.json; before moving, renaming, or deleting files; before installing or bumping pesde packages or changing a shared package; before rojo serve, a syncback, a change made in Studio, or agents in parallel; and when Rojo, pesde, a sync, or a project file errors.
 ---
 
 # Rojo workflow
@@ -47,20 +47,21 @@ Attributes live in `.meta.json` as real JSON values: booleans for flags, numbers
 
 Save every JSON file as UTF-8 without a byte order mark: Rojo can't parse a project or meta file
 that starts with one. Windows PowerShell 5.1's `Set-Content` and `Out-File` add a BOM, so write
-JSON with your file tools.
+JSON with your file tools. After saving one, read its first three bytes
+(`head -c 3 <file> | od -An -tx1`); if they are `ef bb bf`, rewrite the file without them.
 
 `roblox_packages/`, `sourcemap.json`, and build output are generated; keep them in `.gitignore`.
 
 ## Changing code
 
-1. Edit and create files with your file tools. The next sync overwrites a script edited in
-   Studio, and Git never sees that edit.
+1. Edit and create only the files the task needs, with your file tools. The next sync overwrites
+   a script edited in Studio, and Git never sees that edit.
 2. `rojo serve` pushes each saved file into Studio. Confirm the new text arrived (read the
    script's source in the place) before checking it: a check that starts too early runs the old
    code. A failing line number that didn't move with your edit means exactly that.
-3. **After deleting, moving, or renaming any file or folder, confirm `rojo serve` is still
-   running** (see Keeping `rojo serve` alive). Rojo 7.7.x crashes on these, and Studio then
-   silently stops receiving changes.
+3. **When your own work deletes, moves, or renames a file or folder while `rojo serve` runs,
+   confirm it is still running** (see Keeping `rojo serve` alive). Rojo 7.7.x crashes on these,
+   and Studio then silently stops receiving changes.
 4. Check the change in the place: analyze the changed scripts, run the specs the change reaches
    (the `roblox-testing` skill), lint UI, and playtest. Local tools (`luau-lsp analyze`,
    `selene`, `stylua --check`) check files without Studio.
@@ -101,6 +102,7 @@ delete, move, and rename files often, so check after every such step:
   34872): `netstat -ano | findstr :34872` on Windows, `lsof -i :34872` elsewhere.
 - **If it stopped**, restart it (`rojo serve`, or with `--port <port>` for a second server) and
   ask the user to click Connect in the Rojo plugin. Then confirm your last change reached Studio.
+- Mention the crash in a report or pull request only when you saw `rojo serve` stop.
 
 Stop `rojo serve` before a step that deletes or rewrites many watched files at once, and restart
 it afterward: bulk folder deletes, a git command that rewrites the working tree under `src`
