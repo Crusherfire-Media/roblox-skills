@@ -122,7 +122,7 @@ Leave these to playtests and to the user's eyes:
    specs). It must fail on its assertion, for the reason you expect. A spec that failed to load
    is not red: it never ran, so fix the load error first.
 3. **Green.** Write only enough code to pass that spec, and run it again until it passes. Follow
-   the `roblox-lua-style-guide` and `game-architecture` skills for the code.
+   the `luau-style-guide` and `game-architecture` skills for the code.
 4. **Next slice.** Repeat from step 2 with the next behavior. Each spec is a tracer bullet that
    responds to what the last cycle taught you, never a batch written up front.
 5. **Finish.** Sweep the specs of every module you touched, not only the spec files you edited:
@@ -191,7 +191,7 @@ passes in Studio and fails in CI, read [references/ci.md](references/ci.md).
 
 ## Writing a spec
 
-Specs follow the `roblox-lua-style-guide` skill like any other script:
+Specs follow the `luau-style-guide` skill like any other script:
 
 ```lua
 --!strict
