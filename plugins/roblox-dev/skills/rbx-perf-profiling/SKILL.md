@@ -68,12 +68,14 @@ the edit session.
 LibMP drives the one MicroProfiler in the engine. The game's own LibMP code, a capture tool in
 the user's Studio MCP, the on-screen MP, and your snippet all share its state. Five consequences:
 
-1. **Leave the profiler as you found it, or say what changed.** Read the current state before
-   changing the frame limit, enabling capture, or pausing, and restore it at the end. If you leave
-   capture paused or the profiler on, tell the user.
+1. **Leave the profiler as you found it, or say what changed.** `LibMP.Control` has setters only,
+   so the current frame limit, capture state, and profiler state can't be read back. Before
+   changing one, find the value the game or the user set (search the code for `SetFrameLimit`,
+   `EnableCapture`, and `EnableProfiler`), restore that value at the end, and tell the user what
+   you changed and what you couldn't restore.
 2. **The frame limit is sticky.** `LibMP.Control:SetFrameLimit` stays in effect for every later
    reader, and changing it clears counter history. Set it before reading frames (a game may have
-   set a very low one), and put it back afterward. 256 is the maximum.
+   set a very low one), and put back the value you found. 256 is the maximum.
 3. **The first capture after the profiler turns on holds a one-time engine stall** of about 350 ms
    about 12 frames in, seen in Studio playtests. Let about 24 frames pass after
    `EnableProfiler(true)` before the frames you analyze start, and leave the profiler enabled
