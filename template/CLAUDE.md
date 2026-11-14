@@ -23,13 +23,19 @@ A change is done when these all pass:
 rojo build default.project.json -o build/game.rbxl
 rojo sourcemap default.project.json -o sourcemap.json
 luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json --definitions:@roblox=globalTypes.None.d.luau --ignore="**/roblox_packages/**" src
-selene src
-stylua --check src
+selene src tools
+stylua --check src tools
 ```
 
 `luau-lsp analyze` reads Roblox's types from `globalTypes.None.d.luau`. Download it once, and again
 to pick up new engine APIs:
 `curl -L -o globalTypes.None.d.luau https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau`
+
+## CI
+
+`.github/workflows` runs the checks above and every spec (through Open Cloud, in a CI place) on each
+pull request. **Merging to `main` publishes to the staging place**, and publishing a GitHub release
+publishes to production. `tools/ci/README.md` covers the setup and what each failure means.
 
 ## Project specifics
 
