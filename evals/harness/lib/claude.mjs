@@ -49,7 +49,8 @@ export function trialArgs({ model, pluginDir = null, effort = null, maxBudgetUsd
 		"stream-json",
 		"--verbose",
 		"--include-hook-events",
-		"--no-session-persistence",
+		// Sessions are saved: the plugin's skill-gate and verify-gate read the session
+		// transcript to see loaded skills and edited files, and without it they pass silently.
 		"--tools",
 		TRIAL_TOOLS,
 		"--permission-mode",

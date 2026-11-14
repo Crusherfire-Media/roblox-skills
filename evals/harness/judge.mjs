@@ -217,7 +217,10 @@ async function main() {
 	};
 	const maxPairs = intFlag(flags.pairs, "pairs", { max: 100, fallback: 100 });
 	const concurrency = intFlag(flags.concurrency, "concurrency", { max: 20, fallback: 5 });
-	const template = readFileSync(path.join(HERE, "judge-prompt.md"), "utf8");
+	// Library facts are verified against the sandbox's package source, so the judge doesn't
+	// mark code wrong for relying on a library default it doesn't know.
+	const facts = readFileSync(path.join(HERE, "judge-facts.md"), "utf8").trim();
+	const template = readFileSync(path.join(HERE, "judge-prompt.md"), "utf8").replace("{{FACTS}}", () => facts);
 
 	const jobs = [];
 	const owners = [];

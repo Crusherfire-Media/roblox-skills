@@ -7,6 +7,12 @@ analysis, selene lint, StyLua formatting) on its changed Luau files.
 The attempts are labeled A and B in random order. Judge only what is in front of you: don't guess
 how either attempt was produced.
 
+## Library facts
+
+<library_facts>
+{{FACTS}}
+</library_facts>
+
 ## Task given to both attempts
 
 <task>
