@@ -20,6 +20,8 @@ Default to no comment. Code already shows *how*; a comment earns its line only b
 6. **Delete dead code.** Version control keeps the history.
 7. **Document functions by their contract.** A one-line summary on a public function or endpoint is welcome. A doc comment earns more lines only for what the signature can't show: units, valid ranges, side effects, failure behavior, preconditions. A single clear line inside a body stays uncommented.
 8. **TODOs need no issue ID.** A TODO marks work beyond the current task; finish the work that is in scope.
+9. **Write comment text as plain American prose.** Punctuate with commas, colons, parentheses, or a new sentence, and keep em dashes and a bare `--` used as a dash out of the text. Use American spelling (color, center, behavior, canceled, license, initialize), in comments and in the names you write.
+10. **In Luau, put `--[[` and `]]` each on its own line**, with the text on the lines between. The file header's `--[[@description:` line is the one exception.
 
 ### Comments worth their line
 
