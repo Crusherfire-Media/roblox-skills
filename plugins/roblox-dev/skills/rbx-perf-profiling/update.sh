@@ -59,7 +59,7 @@ sed -i \
     -e "s/in \`execute_[l]uau\`/in code run through a Studio MCP/g" \
     -e "s/\`execute_[l]uau\`/a Studio MCP's run-Luau tool/g" \
     "$GUIDE"
-if grep -nE 'mcp__|execute_[l]uau' references/*.md; then
+if grep -nE 'mcp[_]_|execute_[l]uau' references/*.md; then
     echo "warning: MCP tool names remain in references/; extend the sed above" >&2
 fi
 
