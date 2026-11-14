@@ -1,39 +1,21 @@
 --!strict
---@author: Crusherfire
---@date: 11/13/26
---[[@description:
-	The script a Luau Execution task runs in the CI place. It runs every spec
-	in ServerScriptService.Tests.Specs and errors when one fails, because a
-	task only ends FAILED on an unhandled error. tools/ci/run-tests sends it.
-]]
 
-------------------------------
--- SERVICES --
-------------------------------
 local ServerScriptService = game:GetService("ServerScriptService")
 
-------------------------------
--- VARIABLES --
-------------------------------
+local tests = ServerScriptService:WaitForChild("Tests")
+local Jest = require(tests:WaitForChild("Packages"):WaitForChild("Jest")) :: any
+
 local MAX_MESSAGE_LENGTH = 1500
 local MAX_LISTED_FAILURES = 20
 
-local tests = ServerScriptService:WaitForChild("Tests")
 local specs = tests:WaitForChild("Specs")
 
-------------------------------
--- PRIVATE FUNCTIONS --
-------------------------------
 local function clean(message: string): string
 	-- Jest colors its output with ANSI escapes, which the logs show as noise.
 	local plain = string.gsub(message, "\27%[[%d;]*m", "")
 	return string.sub(plain, 1, MAX_MESSAGE_LENGTH)
 end
 
-------------------------------
--- MAIN --
-------------------------------
-local Jest = require(tests:WaitForChild("Packages"):WaitForChild("Jest")) :: any
 local status, result = Jest.runCLI(specs, { ci = true, verbose = false }, { specs }):awaitStatus()
 if status ~= "Resolved" then
 	local reason = if typeof(result) == "table" then result.message else result
@@ -57,6 +39,7 @@ end
 
 local summary =
 	`{results.numTotalTestSuites} spec files, {results.numPassedTests} passed, {results.numFailedTests} failed`
+-- A task ends FAILED only on an unhandled error, so a failing spec has to error.
 if not results.success then
 	local listed = table.concat(failures, "\n\n", 1, math.min(#failures, MAX_LISTED_FAILURES))
 	if #failures == 0 then

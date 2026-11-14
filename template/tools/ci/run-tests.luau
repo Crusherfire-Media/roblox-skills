@@ -1,24 +1,5 @@
 --!strict
---@author: Crusherfire
---@date: 11/13/26
---[[@description:
-	Runs the specs through Open Cloud Luau Execution:
 
-		lune run tools/ci/run-tests <test.rbxl>
-
-	Saves the test place (from tools/ci/prepare-test-place) as an unpublished
-	version of the CI place, then runs the whole suite in one task pinned to
-	that version, so two pull requests never run each other's code. Luau
-	Execution allows 5 task creates per minute per key owner, which is why
-	the suite runs as a single task.
-
-	Reads ROBLOX_API_KEY, ROBLOX_UNIVERSE_ID, and ROBLOX_PLACE_ID. Exits 1
-	when a spec fails or the task doesn't finish.
-]]
-
-------------------------------
--- DEPENDENCIES --
-------------------------------
 local fs = require("@lune/fs")
 local process = require("@lune/process")
 local serde = require("@lune/serde")
@@ -26,9 +7,6 @@ local task = require("@lune/task")
 
 local OpenCloud = require("./open-cloud")
 
-------------------------------
--- VARIABLES --
-------------------------------
 local TASK_SCRIPT_PATH = "tools/ci/run-specs-task.luau"
 local TASK_TIMEOUT = "300s"
 local POLL_INTERVAL = 3
@@ -38,9 +16,6 @@ local TASK_DEADLINE = 12 * 60
 local MAX_TASK_ATTEMPTS = 2
 local RETRYABLE_ERROR = "INTERNAL_ERROR"
 
-------------------------------
--- PRIVATE FUNCTIONS --
-------------------------------
 local function readLogs(taskPath: string): string
 	local ok, logs = pcall(function()
 		return OpenCloud.request("GET", `/cloud/v2/{taskPath}/logs`)
@@ -82,9 +57,6 @@ local function runTask(
 	return state, nil
 end
 
-------------------------------
--- MAIN --
-------------------------------
 local placePath = process.args[1]
 if not placePath or not fs.isFile(placePath) then
 	error("usage: lune run tools/ci/run-tests <test.rbxl>")
@@ -92,9 +64,11 @@ end
 local universeId, placeId = OpenCloud.universeId(), OpenCloud.placeId()
 local source = fs.readFile(TASK_SCRIPT_PATH)
 
+-- Each task is pinned to its own saved version, so two pull requests never run each other's code.
 local version = OpenCloud.uploadPlace(fs.readFile(placePath), false)
 print(`Saved the test place as version {version}`)
 
+-- The whole suite runs as one task, since Luau Execution allows 5 task creates per minute per key owner.
 local finished, reason
 for attempt = 1, MAX_TASK_ATTEMPTS do
 	finished, reason = runTask(universeId, placeId, version, source)

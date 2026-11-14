@@ -1,23 +1,10 @@
 --!strict
---@author: Crusherfire
---@date: 11/13/26
---[[@description:
-	The Open Cloud calls the CI scripts share. Reads ROBLOX_API_KEY and
-	ROBLOX_PLACE_ID from the environment, and ROBLOX_UNIVERSE_ID when a
-	script asks for it, so each workflow job picks its place in one spot.
-]]
 
-------------------------------
--- DEPENDENCIES --
-------------------------------
 local net = require("@lune/net")
 local process = require("@lune/process")
 local serde = require("@lune/serde")
 local task = require("@lune/task")
 
-------------------------------
--- VARIABLES --
-------------------------------
 local API_ROOT = "https://apis.roblox.com"
 local MAX_ATTEMPTS = 5
 local FIRST_RETRY_DELAY = 2
@@ -30,9 +17,6 @@ local OPERATION_DEADLINE = 5 * 60
 
 local Module = {}
 
-------------------------------
--- PRIVATE FUNCTIONS --
-------------------------------
 local function readEnv(name: string): string
 	local value = process.env[name]
 	if not value or value == "" then
@@ -71,10 +55,6 @@ local function makeBoundary(contents: string): string
 		end
 	end
 end
-
-------------------------------
--- PUBLIC FUNCTIONS --
-------------------------------
 
 --[[
 	The place id from ROBLOX_PLACE_ID.
