@@ -1,9 +1,9 @@
 ---
-name: roblox-lua-style-guide
+name: luau-style-guide
 description: Load before writing or editing any Roblox Luau, even a one-line fix - new scripts and modules, edits to existing scripts (as files or through a Studio MCP), and code you review or reformat - and whenever the user asks for clean code or the clean code skill. Load it once per session, before the first edit, alongside game-architecture or vide when those apply. Luau style rules based on Roblox's Lua style guide, written as agent rules, plus typing rules.
 ---
 
-# Roblox Lua Style Guide
+# Luau Style Guide
 
 The rules here are summarized from the Roblox Lua Style Guide
 (https://roblox.github.io/lua-style-guide/) and extended with rules of our own,
