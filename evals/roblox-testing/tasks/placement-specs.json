@@ -1,0 +1,71 @@
+{
+  "id": 1,
+  "name": "placement-specs",
+  "skill": "roblox-testing",
+  "prompt": "src/ReplicatedStorage/Shared/PlacementRules.luau decides whether a block placement is allowed. The server uses it, and the client will use it soon to preview placements. It has no tests yet.\n\nWrite Jest specs for it in src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau. Jest Roblox is installed (see README.md). The specs can't run here, so make sure luau-lsp, selene, and StyLua are happy with them.\n\nOnly add tests in this change: don't edit PlacementRules.luau. If something in it looks wrong, keep the test that shows the problem and put a comment above that test explaining it. I can't answer questions while you work, so make reasonable calls and note any assumptions in a comment or in your write-up.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/placement-specs/PlacementRules.luau",
+      "to": "src/ReplicatedStorage/Shared/PlacementRules.luau"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau",
+      "text": "The spec exists at the requested path"
+    },
+    {
+      "type": "file_matches",
+      "path": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau",
+      "pattern": "JestGlobals",
+      "text": "The spec requires its Jest names from JestGlobals"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau",
+      "pattern": "\\)\\s*:\\s*(to[A-Z]\\w*|never)\\b",
+      "text": "No matcher is called with a colon"
+    },
+    {
+      "type": "command",
+      "run": [
+        "git",
+        "diff",
+        "--quiet",
+        "HEAD",
+        "--",
+        "src/ReplicatedStorage/Shared/PlacementRules.luau"
+      ],
+      "expect_exit": 0,
+      "text": "PlacementRules.luau is unchanged"
+    }
+  ],
+  "rubric": [
+    "Adds the spec at src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau and changes nothing else: PlacementRules.luau and the other game files are untouched. Extra helper files count neither for nor against.",
+    "Uses Jest Roblox correctly: requires describe, it, expect, and any other names it uses from JestGlobals, requires PlacementRules by its path, calls matchers with a dot, and negates with .never (see the judge facts).",
+    "Covers each rule validate's doc comment lists at least once: unknown block type, a position that isn't a Vector3, a non-finite position (NaN or infinity), the height range, a missing character (rootPosition nil), reach, and an occupied cell; plus snapping to cell centers and that validate never changes occupied.",
+    "Tests both sides of each boundary: a cell exactly MaxReach away (in reach, per the doc) and one past it; the lowest cell above Y = 0 and one below it; the highest cell at or under MaxHeight and the next one up. Variations within one case (block types the rule treats alike, several interior points) are kept to one row.",
+    "Catches the planted bug: validate uses >= and so rejects a cell exactly MaxReach away, while its doc says that cell is in reach. Full marks need a test expecting the documented result (accepted), left failing, with a comment saying the code disagrees with its doc. A test that asserts the rejection as correct fails this criterion.",
+    "Expected values are independent of the code: snapped centers are literals worked out by hand (for example (5, 1, -3) snaps to (6, 2, -2)), not computed with the same floor formula or by calling snap. Tests don't share mutable state, so each one passes or fails the same way when run alone.",
+    "luau-lsp, selene, and StyLua pass on the new spec."
+  ],
+  "judge_facts": [
+    "Jest Roblox 3.21.0: spec files don't see describe, it, or expect as globals; each spec requires them from JestGlobals. injectGlobals (default true in jest-config/src/Defaults.lua) only copies them into environment.global (jest-circus/src/circus/legacy-code-todo-rewrite/jestAdapterInit.lua, line 177), and jest-runtime/src/init.lua builds every module's function environment from the chunk's own environment (lines 1940 to 2021) without reading environment.global.",
+    "Jest Roblox 3.21.0 (expect/src/init.lua, expect_): matchers are plain functions called with a dot, and negation is .never (expectation.never[name]). A colon call such as expect(ok):toBe(false) passes the expectation table as the expected value, so the assertion fails.",
+    "Jest Roblox 3.21.0: toBe compares with LuauPolyfill Object.is, which starts with == (luau-polyfill-collections/src/Object/is.lua), and toEqual tries Object.is first (roblox-shared/src/expect.lua, eq). Both compare Vector3 values by value, so expect(Vector3.new(6, 2, -2)).toBe(Vector3.new(6, 2, -2)) passes.",
+    "Jest Roblox 3.21.0: a spec file needs no return value. jest-circus loads it with requireModule(testPath, nil, nil, nil, true), the noModuleReturnRequired flag (jest-circus/src/circus/legacy-code-todo-rewrite/jestAdapter.lua, line 111).",
+    "Jest Roblox 3.21.0 it.each / test.each accept a list of keyed rows, it.each({ { Z = 25, Accepted = true } })(\"name $Z\", function(row) ... end): the callback gets each row table and $Key in the title interpolates (jest-each/src/bind.lua, table/array.lua)."
+  ],
+  "notes": "Planted bug: validate uses `>= MaxReach` while its doc says a cell exactly MaxReach away is in reach. Root (2, 2, 2) and position (2, 2, 25) snap to (2, 2, 26), exactly 24 studs away. The prompt forbids editing the module, so the right outcome is a red test for the documented behavior. Other correct boundary rows: Y = -0.1 snaps to center Y = -2 (rejected), Y = 0 to 2 (accepted), Y = 196 to 198 (accepted), Y = 200 to 202 (rejected).",
+  "timeout_minutes": 20
+}

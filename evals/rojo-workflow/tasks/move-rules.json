@@ -1,0 +1,102 @@
+{
+	"id": 1,
+	"name": "move-rules",
+	"skill": "rojo-workflow",
+	"prompt": "The client needs the placement rules for an upcoming build preview, so PlacementRules has to leave ServerScriptService.\n\nMove src/ServerScriptService/Placement/PlacementRules.luau so that in the place it becomes the ModuleScript ReplicatedStorage.Rules.BlockRules: a new Rules folder directly under ReplicatedStorage, next to Shared and Packages. Update everything that refers to it, docs included. Behavior shouldn't change, including the MaxReach and MaxHeight values designers tune.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/move-rules/PlacementRules.luau",
+			"to": "src/ServerScriptService/Placement/PlacementRules.luau"
+		},
+		{
+			"from": "fixtures/move-rules/PlacementRules.meta.json",
+			"to": "src/ServerScriptService/Placement/PlacementRules.meta.json"
+		},
+		{
+			"from": "fixtures/move-rules/BlockPlacement.server.luau",
+			"to": "src/ServerScriptService/BlockPlacement.server.luau"
+		},
+		{
+			"from": "fixtures/move-rules/ClearBlocks.server.luau",
+			"to": "src/ServerScriptService/ClearBlocks.server.luau"
+		},
+		{
+			"from": "fixtures/move-rules/PlacementRules.spec.luau",
+			"to": "src/ServerScriptService/Tests/Specs/Placement/PlacementRules.spec.luau"
+		},
+		{
+			"from": "fixtures/move-rules/placement.md",
+			"to": "docs/placement.md"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "file_absent",
+			"path": "src/ServerScriptService/Placement/PlacementRules.luau",
+			"text": "The old module file is gone"
+		},
+		{
+			"type": "file_absent",
+			"path": "src/ServerScriptService/Placement/PlacementRules.meta.json",
+			"text": "The old meta file is gone"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const cp = require('child_process'); const fs = require('fs');\nconst fail = (m) => { console.log(m); process.exit(1); };\nlet sm;\ntry { cp.execFileSync('rojo', ['sourcemap', 'default.project.json', '-o', 'sourcemap.json', '--include-non-scripts'], { stdio: 'pipe' }); sm = JSON.parse(fs.readFileSync('sourcemap.json', 'utf8')); } catch (e) { fail('rojo sourcemap failed: ' + String((e.stderr && e.stderr.toString()) || e.message).replace(/[A-Za-z]:[\\\\/][^\\s]*[\\\\/]/g, '').slice(0, 400)); }\nconst kids = (n, name) => (n && n.children ? n.children : []).filter((c) => c.name === name);\nconst child = (n, name) => kids(n, name)[0];\nconst isPkg = (n) => /roblox_packages/.test((n.filePaths || []).join(' ')) || n.name === '.pesde';\nconst walk = (n, fn, p) => { if (!n) return; const here = (p ? p + '.' : '') + n.name; fn(n, here); for (const c of n.children || []) if (!isPkg(c)) walk(c, fn, here); };\nconst rel = (f) => { const s = f.replace(/\\\\/g, '/'); const i = s.indexOf('src/'); return i >= 0 ? s.slice(i) : s; };\nconst rs = child(sm, 'ReplicatedStorage'); const mod = child(child(rs, 'Rules'), 'BlockRules');\nif (!mod) fail('ReplicatedStorage.Rules.BlockRules is not in the place built from default.project.json');\nif (mod.className !== 'ModuleScript') fail('ReplicatedStorage.Rules.BlockRules is a ' + mod.className + ', not a ModuleScript');\nconst meta = (mod.filePaths || []).find((f) => f.endsWith('.meta.json'));\nif (!meta) fail('BlockRules has no .meta.json, so its MaxReach and MaxHeight attributes are gone');\nconst attrs = JSON.parse(fs.readFileSync(meta, 'utf8').replace(/^﻿/, '')).attributes || {};\nif (attrs.MaxReach !== 24 || attrs.MaxHeight !== 200) fail('BlockRules attributes are ' + JSON.stringify(attrs));\nconst left = []; walk(sm, (n, p) => { if (n.name === 'PlacementRules') left.push(p); });\nif (left.length) fail('PlacementRules is still in the place at ' + left.join(', '));\nconsole.log('ReplicatedStorage.Rules.BlockRules is a ModuleScript with MaxReach 24 and MaxHeight 200 from ' + rel(meta) + ', and no PlacementRules instance is left');"
+			],
+			"expect_exit": 0,
+			"timeout_seconds": 120,
+			"text": "The built place has ReplicatedStorage.Rules.BlockRules (a ModuleScript with MaxReach 24 and MaxHeight 200 from a .meta.json) and no PlacementRules"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const fs = require('fs'); const path = require('path'); const hits = [];\nconst scan = (d) => { if (!fs.existsSync(d)) return; for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) scan(p); else if (/\\.(luau|lua|md|json)$/.test(e.name) && /(?<!Specs[.\\/])Placement[.\\/]PlacementRules/.test(fs.readFileSync(p, 'utf8'))) hits.push(p.replace(/\\\\/g, '/')); } };\nscan('src'); scan('docs');\nif (hits.length) { console.log('the old Placement.PlacementRules path is still referenced in ' + hits.join(', ')); process.exit(1); }\nconsole.log('no file under src or docs refers to the old Placement.PlacementRules path (spec paths under Specs/Placement are allowed)');"
+			],
+			"expect_exit": 0,
+			"timeout_seconds": 120,
+			"text": "No file under src or docs still refers to Placement.PlacementRules"
+		},
+		{
+			"type": "command",
+			"run": [
+				"rojo",
+				"build",
+				"default.project.json",
+				"-o",
+				"check-build.rbxl"
+			],
+			"expect_exit": 0,
+			"text": "rojo build succeeds on default.project.json"
+		}
+	],
+	"rubric": [
+		"BlockRules lands at ReplicatedStorage.Rules.BlockRules in the place Rojo builds. The project's ReplicatedStorage node has no $path, so this needs a Rules node in default.project.json (for example \"Rules\": { \"$path\": \"src/ReplicatedStorage/Rules\" }) or an equivalent mapping. A src/ReplicatedStorage/Rules/BlockRules.luau with no mapping fails this criterion: that file isn't part of the place.",
+		"The attributes come along: PlacementRules.meta.json becomes BlockRules.meta.json beside the new file, with MaxReach 24 and MaxHeight 200 as JSON numbers. Leaving it behind silently drops the attributes, and the module's asserts would then fail when it's required.",
+		"Every reference moves to the new path: the require in BlockPlacement.server.luau, both the @game string require and the script.Parent.Placement.PlacementRules:GetAttribute lookup in ClearBlocks.server.luau, the spec's require, and docs/placement.md. Each new require resolves from its file's location.",
+		"The old module and meta files are removed (moved, not copied), so no PlacementRules instance is left in the place. Renaming or moving the spec to match is optional.",
+		"Behavior is unchanged: the logic in the module and the scripts is the same apart from the path changes (renaming local variables to BlockRules is fine), with no unrelated edits, and the rest of default.project.json is unchanged.",
+		"luau-lsp, selene, and StyLua pass on the changed Luau files, and default.project.json stays valid and builds."
+	],
+	"judge_facts": [
+		"Rojo 7.7.1 (built in the sandbox and read back with Lune): Name.meta.json beside Name.luau sets that ModuleScript's attributes ({ \"attributes\": { \"MaxReach\": 24 } } gives MaxReach = 24). A meta file is matched to its script by file name: after renaming Mod.luau to Renamed.luau and leaving Mod.meta.json behind, the build still succeeded and Renamed had no attributes.",
+		"In this project, files directly in src/ReplicatedStorage (outside src/ReplicatedStorage/Shared) are not part of the place: the ReplicatedStorage node in default.project.json has no $path, only the children Shared ($path src/ReplicatedStorage/Shared) and Packages ($path roblox_packages). Verified with rojo sourcemap, Rojo 7.7.1.",
+		"This project's README.md documents string requires such as require(\"@game/ReplicatedStorage/Packages/Vide\"): @game/... is an absolute DataModel path. luau-lsp 1.70.1 with the project's sourcemap resolves it and reports 'Unknown require' for a path that isn't in the place."
+	],
+	"notes": "Mapping branch. The target folder is deliberately one the project doesn't mount yet, so a correct answer edits default.project.json. Planted references: an instance-path require (BlockPlacement), an @game string require plus a script.Parent.Placement.PlacementRules attribute lookup (ClearBlocks), the spec's require, and docs/placement.md. Trials can run mv and rm inside the project under acceptEdits (tested); git mv is denied.",
+	"timeout_minutes": 15
+}

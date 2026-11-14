@@ -1,0 +1,77 @@
+{
+	"id": 4,
+	"name": "fix-project",
+	"skill": "rojo-workflow",
+	"prompt": "Someone resolved a merge conflict in default.project.json and things broke: rojo sourcemap fails, and teammates say Jest can't find its packages. README.md's Layout table is how the place should map. Fix the project file so the place maps exactly that way again.\n\nThen add docs/rojo-workflow.md, a short guide for new teammates on working in this repo day to day with rojo serve and their own dev place in Studio: where changes should be made, what to check while serving, and how to avoid breaking the project file again.",
+	"setup_files": [
+		{
+			"from": "fixtures/fix-project/default.project.json",
+			"to": "default.project.json"
+		},
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/fix-project/BlockTypes.spec.luau",
+			"to": "src/ServerScriptService/Tests/Specs/BlockTypes.spec.luau"
+		}
+	],
+	"auto_checks": [],
+	"checks": [
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const fs = require('fs'); const b = fs.readFileSync('default.project.json');\nif (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) { console.log('default.project.json still starts with a UTF-8 byte order mark'); process.exit(1); }\ntry { JSON.parse(b.toString('utf8')); } catch (e) { console.log('default.project.json is not valid JSON: ' + e.message); process.exit(1); }\nconsole.log('default.project.json has no byte order mark and parses as JSON');"
+			],
+			"expect_exit": 0,
+			"timeout_seconds": 120,
+			"text": "default.project.json has no byte order mark and parses"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const cp = require('child_process'); const fs = require('fs');\nconst fail = (m) => { console.log(m); process.exit(1); };\nlet sm;\ntry { cp.execFileSync('rojo', ['sourcemap', 'default.project.json', '-o', 'sourcemap.json', '--include-non-scripts'], { stdio: 'pipe' }); sm = JSON.parse(fs.readFileSync('sourcemap.json', 'utf8')); } catch (e) { fail('rojo sourcemap failed: ' + String((e.stderr && e.stderr.toString()) || e.message).replace(/[A-Za-z]:[\\\\/][^\\s]*[\\\\/]/g, '').slice(0, 400)); }\nconst kids = (n, name) => (n && n.children ? n.children : []).filter((c) => c.name === name);\nconst child = (n, name) => kids(n, name)[0];\nconst isPkg = (n) => /roblox_packages/.test((n.filePaths || []).join(' ')) || n.name === '.pesde';\nconst walk = (n, fn, p) => { if (!n) return; const here = (p ? p + '.' : '') + n.name; fn(n, here); for (const c of n.children || []) if (!isPkg(c)) walk(c, fn, here); };\nconst rel = (f) => { const s = f.replace(/\\\\/g, '/'); const i = s.indexOf('src/'); return i >= 0 ? s.slice(i) : s; };\nconst sss = child(sm, 'ServerScriptService'); const tests = kids(sss, 'Tests');\nif (tests.length !== 1) fail('ServerScriptService has ' + tests.length + ' children named Tests (expected 1)');\nconst pk = child(tests[0], 'Packages');\nif (!child(pk, 'Jest') || !child(pk, 'JestGlobals')) fail('ServerScriptService.Tests.Packages lacks Jest or JestGlobals');\nif (!child(child(tests[0], 'Specs'), 'jest.config')) fail('ServerScriptService.Tests.Specs.jest.config is missing');\nconst rs = child(sm, 'ReplicatedStorage');\nif (!child(child(rs, 'Packages'), 'Vide')) fail('ReplicatedStorage.Packages.Vide is missing');\nif (!child(rs, 'Shared')) fail('ReplicatedStorage.Shared is missing');\nconst stray = (rs.children || []).filter((c) => c.name !== 'Shared' && c.name !== 'Packages').map((c) => c.name);\nif (stray.length) fail('ReplicatedStorage has unexpected children: ' + stray.join(', '));\nconst sps = child(child(sm, 'StarterPlayer'), 'StarterPlayerScripts'); const main = child(sps, 'Main');\nif (!main || main.className !== 'LocalScript') fail('StarterPlayer.StarterPlayerScripts.Main (LocalScript) is missing');\nconst ws = child(sm, 'Workspace');\nif (!child(ws, 'Baseplate') || !child(ws, 'SpawnLocation')) fail('Workspace.Baseplate or Workspace.SpawnLocation is missing');\nconsole.log('the place maps as README.md describes: one Tests folder with Packages (Jest, JestGlobals) and Specs, ReplicatedStorage with only Shared and Packages, StarterPlayerScripts.Main, Baseplate, and SpawnLocation');"
+			],
+			"expect_exit": 0,
+			"timeout_seconds": 120,
+			"text": "The built place maps as README.md describes (one Tests folder with Jest packages, nothing extra in ReplicatedStorage, StarterPlayerScripts.Main)"
+		},
+		{
+			"type": "command",
+			"run": [
+				"rojo",
+				"build",
+				"default.project.json",
+				"-o",
+				"check-build.rbxl"
+			],
+			"expect_exit": 0,
+			"text": "rojo build succeeds on default.project.json"
+		},
+		{
+			"type": "file_exists",
+			"path": "docs/rojo-workflow.md",
+			"text": "docs/rojo-workflow.md exists"
+		}
+	],
+	"rubric": [
+		"The project parses again: the UTF-8 byte order mark at the start of default.project.json is gone, and every $path exists (StarterPlayerScripts points at src/StarterPlayer/StarterPlayerScripts, not the misspelled StarterPlayerScript).",
+		"The mapping matches README.md: Jest and JestGlobals mount at ServerScriptService.Tests.Packages (the stray ReplicatedStorage.TestPackages node is gone), and Tests appears once, with globIgnorePaths (or an equivalent) keeping src/ServerScriptService/Tests from mapping a second time through src/ServerScriptService.",
+		"Everything else in the project is unchanged: the Workspace parts and properties, ReplicatedStorage.Shared and Packages, StarterGui, the other services, and servePort.",
+		"docs/rojo-workflow.md says to make every change in files: an edit made in Studio to synced content (a script, a property, an attribute, a new instance under a synced folder) is overwritten by the next sync or never reaches Git, and work genuinely built in Studio has to be written back to files (Save to File, or rojo syncback).",
+		"The guide covers the dev place and keeping serve healthy: serve only into your own dev place (servePlaceIds in the project guards this), and after deleting, moving, or renaming files, check that rojo serve is still running and reconnect if it crashed (Rojo 7.7.x).",
+		"The guide covers keeping the project file valid: save JSON as UTF-8 without a byte order mark, and check changes with rojo sourcemap or rojo build before committing. It stays short, specific to this repo, and consistent with README.md."
+	],
+	"judge_facts": [
+		"Rojo 7.7.1 (run in the sandbox): a default.project.json that starts with a UTF-8 byte order mark fails with 'Error parsing Rojo project ... Failed to parse JSONC'; a $path that doesn't exist fails with 'Rojo project referred to a file using $path that could not be turned into a Roblox Instance'; and without globIgnorePaths, src/ServerScriptService/Tests maps twice (through ServerScriptService's $path and as the explicit Tests node), giving two Tests folders.",
+		"Rojo project format (rojo.space/docs/v7/project-format): servePlaceIds is 'a list of place IDs that this project may be live-synced to', which helps prevent overwriting the wrong game; servePort is the port rojo serve listens on (default 34872); globIgnorePaths is a list of globs of paths to ignore.",
+		"Rojo issue rojo-rbx/rojo#1314 ('Crash while running and Claude making changes', open): rojo serve panics in src/change_processor.rs line 179 with a NotFound error while files are being changed, after which Studio stops receiving changes until the server is restarted and the plugin reconnects."
+	],
+	"notes": "Broken-project branch plus the written-guide branch (no Studio here, so the serve-crash and no-edit-mode rules are judged from a doc). Planted: a UTF-8 BOM, a misspelled StarterPlayerScripts $path, Jest packages moved to ReplicatedStorage.TestPackages, and globIgnorePaths removed (two Tests folders). Only rojo sourcemap is pre-approved, so agents can read Rojo's errors one at a time. The guide criteria come from the skill, backed by the Rojo facts above so a neutral judge can check them.",
+	"timeout_minutes": 20
+}
