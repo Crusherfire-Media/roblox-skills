@@ -1,13 +1,13 @@
 ---
 name: code-comments
-description: Code comments - the rules for every comment you write or keep, and a cleanup pass that prunes existing ones. Load before writing or editing code in any language, since every edit decides which comments to add, keep, or delete. Also load when the user asks to clean up, prune, or audit the comments in a file, diff, or PR, says code has too many or too verbose comments, or asks to tidy comments before committing.
+description: Code comments - the rules for each comment you write, keep, or review, and a cleanup pass that prunes existing ones. Load before writing or reviewing comments in Luau or Roblox code. Also load when the user asks to clean up, prune, or audit the comments in a file, diff, or PR in any language, says code has too many or too verbose comments, or asks to tidy comments before committing.
 ---
 
 # Code comments
 
 Default to no comment. Code already shows *how*; a comment earns its line only by carrying a *why* the code cannot show. Two branches use these rules:
 
-- **Writing code** (every edit): apply the writing rules below to each comment you add or touch.
+- **Writing or reviewing code**: apply the writing rules below to each comment you add, touch, or review.
 - **Cleanup pass** (on request: clean up, prune, or audit the comments in a file, diff, or PR): read [references/cleanup-pass.md](references/cleanup-pass.md) and run it.
 
 ## Writing rules
@@ -21,7 +21,9 @@ Default to no comment. Code already shows *how*; a comment earns its line only b
 7. **Document functions by their contract.** A one-line summary on a public function or endpoint is welcome. A doc comment earns more lines only for what the signature can't show: units, valid ranges, side effects, failure behavior, preconditions. A single clear line inside a body stays uncommented.
 8. **TODOs need no issue ID.** A TODO marks work beyond the current task; finish the work that is in scope.
 9. **Write comment text as plain American prose.** Punctuate with commas, colons, parentheses, or a new sentence, and keep em dashes and a bare `--` used as a dash out of the text. Use American spelling (color, center, behavior, canceled, license, initialize), in comments and in the names you write.
-10. **In Luau, put `--[[` and `]]` each on its own line**, with the text on the lines between. The file header's `--[[@description:` line is the one exception.
+10. **In Luau, put `--[[` and `]]` each on its own line**, with the text on the lines between.
+
+A file's existing section banners and file header are the user's convention: keep them through normal edits, and in a cleanup pass keep a set the file uses consistently as structure and delete stray or nested ones.
 
 ### Comments worth their line
 
@@ -45,33 +47,3 @@ These carry a why that is easy to mistake for noise:
 ### Directives are code
 
 Comments that steer a tool stay exactly as they are: Luau's `--!strict` and `--!native`, `-- selene: allow(lint_name)`, `-- stylua: ignore`, and their kin in other languages (`# type: ignore`, `# noqa`, `// eslint-disable-next-line`, shebang lines). A lint suppression may carry a short why when the reason isn't obvious.
-
-## Luau section banners
-
-A Luau script may mark its top-level groups with banners, using exactly these seven titles: `SERVICES`, `DEPENDENCIES`, `TYPES`, `VARIABLES`, `PRIVATE FUNCTIONS`, `PUBLIC FUNCTIONS`, and `MAIN`.
-
-- `TYPES` holds type definitions and any module required only for its types.
-- `VARIABLES` holds constants too, ahead of the variables.
-
-A banner is three lines: a line of dashes, the title in capitals between `--` and `--`, and another line of dashes. Dash lines are 30 characters; if a title line ever runs longer, widen both dash lines to match it.
-
-```lua
-------------------------------
--- SERVICES --
-------------------------------
-```
-
-Under `PRIVATE FUNCTIONS` and `PUBLIC FUNCTIONS`, leave one blank line between the closing dash line and the first function or its doc comment. Editors read the comments directly above a function as its documentation (luau-lsp reads `---` lines, and every dash line starts with `---`), so a banner flush against the first function shows up in its hover text. The other sections hold declarations and statements, so their contents may follow the banner directly.
-
-```lua
-------------------------------
--- PUBLIC FUNCTIONS --
-------------------------------
-
---[[
-	Returns the spawn pad a new player should use.
-]]
-function Module.getSpawnPad(player: Player): BasePart
-```
-
-Banners mark the top level only. Group code below it with blank lines, by placing variables just above the functions that use them, or by describing the group in the doc comment of its first function. A file that seems to need banners inside functions, class bodies, or table constructors, or more groups than the seven, wants to be split: move inner classes and helpers into their own modules, or reuse a library that already does the job.

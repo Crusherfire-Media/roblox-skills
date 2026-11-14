@@ -32,13 +32,6 @@ Apply these steps to every comment, in order. The first step that matches decide
 
 The kinds of why listed under "Comments worth their line" in `SKILL.md` are the ones most often deleted by mistake. Cross-file sync pointers, literal semantics, and format contracts survive this pass.
 
-## Section banners
-
-- **Luau:** apply the banner rule in `SKILL.md`. Keep the seven top-level banners, correct a banner's format when it drifts (dash length, capitals, the blank line under the function banners), and delete banners below the top level or beyond the seven. Flag a file that seems to want deeper sections as a candidate to split.
-- **Other languages:** keep top-level banners that follow the file's house style, and delete banners inside functions, classes, and other nested scopes.
-
-Text in a banner beyond its label is protected like any other why.
-
 ## Directives
 
 Tool directives (`--!strict`, `-- selene: allow(...)`, `-- stylua: ignore`, `# type: ignore`, `// eslint-disable-next-line`, shebang lines) are code. They stay byte-identical.
