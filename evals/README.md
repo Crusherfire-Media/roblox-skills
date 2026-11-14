@@ -158,7 +158,7 @@ timeout", and a trial that breaks before grading still gets a `grading.json` tha
 
 Trials run with `--permission-mode acceptEdits` and `--permission-prompts none`: edits inside the
 project are allowed, read-only commands inside it need no prompt, and these commands are
-pre-approved: `rojo sourcemap`, `luau-lsp analyze`, `selene`, `stylua`, `git status`, `git diff`,
+pre-approved: `rojo sourcemap`, `luau-lsp analyze`, `selene`, `stylua`, `git status`, `git diff`, `git ls-files`, `git log`, `git show`, `git mv`, `git rm`,
 `WebFetch`, and `WebSearch`. Anything else that would ask for approval is denied. Chained shell
 commands (`a && b`, `cd x; y`) count as one command and are usually denied; the sandbox README tells
 the agent to run each check on its own, and in the smoke test agents recovered by doing that.

@@ -18,12 +18,24 @@ export const TRIAL_ALLOWED_TOOLS = [
 	"Bash(stylua *)",
 	"Bash(git status*)",
 	"Bash(git diff*)",
+	"Bash(git ls-files*)",
+	"Bash(git log*)",
+	"Bash(git show*)",
+	// Moving and deleting files inside the project; a user approves these in real use, and
+	// skills that prefer git mv to keep history shouldn't lose to an unanswered prompt.
+	"Bash(git mv *)",
+	"Bash(git rm *)",
 	"PowerShell(rojo sourcemap *)",
 	"PowerShell(luau-lsp analyze *)",
 	"PowerShell(selene *)",
 	"PowerShell(stylua *)",
 	"PowerShell(git status*)",
 	"PowerShell(git diff*)",
+	"PowerShell(git ls-files*)",
+	"PowerShell(git log*)",
+	"PowerShell(git show*)",
+	"PowerShell(git mv *)",
+	"PowerShell(git rm *)",
 ];
 
 // A Claude Code session that launches the harness passes its own session state
