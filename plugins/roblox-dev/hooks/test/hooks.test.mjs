@@ -249,7 +249,7 @@ describe('skill-gate', () => {
     assert.equal(gate(fresh, 'Edit', editFile(README)), undefined);
     assert.equal(gate(fresh, 'Edit', editFile(ELSEWHERE)), undefined);
     assert.equal(gate(fresh, 'Read', { file_path: SHOP }), undefined);
-    assert.equal(gate(fresh, 'mcp__studio__set_script_source', { instancePath: 'game.ServerScriptService.Shop', source: '' }), undefined);
+    assert.equal(gate(fresh, 'NotebookEdit', { notebook_path: SHOP, new_source: '' }), undefined);
     assert.equal(gate(join(DIR, 'missing.jsonl'), 'Edit', editFile(SHOP)), undefined);
   });
 
@@ -265,6 +265,7 @@ describe('skill-gate', () => {
 });
 
 describe('after-edit', () => {
+  const EM_DASH = String.fromCodePoint(0x2014);
   const afterEdit = (toolName, toolInput, response) => runHook('after-edit.mjs', {
     hook_event_name: 'PostToolUse', session_id: randomUUID(), tool_name: toolName, tool_input: toolInput, tool_response: response,
   });
@@ -277,7 +278,7 @@ describe('after-edit', () => {
       new_string: [
         carried,
         'if not player then return end',
-        '-- Waits for the data — then fires',
+        `-- Waits for the data ${EM_DASH} then fires`,
         '--[[ Rebuilds the shop ]]',
         'local function setColour() end',
         '-- SERVICES --',
@@ -310,7 +311,7 @@ describe('after-edit', () => {
   test('says nothing about a clean edit, a non-Luau file, or Luau outside a Rojo repo', () => {
     const clean = '--[[\n    Rebuilds the shop.\n]]\nlocal function rebuild()\n    if not ready then\n        return\n    end\nend';
     assert.equal(afterEdit('Edit', editFile(SHOP, { old_string: '', new_string: clean })), undefined);
-    assert.equal(afterEdit('Edit', editFile(README, { new_string: 'if x then return end -- a — b' })), undefined);
+    assert.equal(afterEdit('Edit', editFile(README, { new_string: `if x then return end -- a ${EM_DASH} b` })), undefined);
     assert.equal(afterEdit('Edit', editFile(ELSEWHERE, { new_string: 'if x then return end' })), undefined);
   });
 
@@ -522,14 +523,17 @@ describe('verify-gate checks (lib)', async () => {
 
   test('turns tool output into findings', () => {
     const { run } = recorder({
-      '/bin/luau-lsp': { status: 1, output: "[WARN] noise\nsrc/A.luau(3,7): TypeError: Unknown global 'x'\n" },
+      '/bin/luau-lsp': {
+        status: 1,
+        output: `[WARN] noise\nsrc/A.luau(3,7): TypeError: Unknown global 'x'\n${join(ready, 'src', 'A.luau')} [game/A](4,1): TypeError: Key 'Nme' not found\n`,
+      },
       '/bin/selene': { status: 1, output: 'src/A.luau:1:7: warning[unused_variable]: a is assigned a value, but never used\nResults:\n0 errors\n1 warnings\n' },
       '/bin/stylua': { status: 1, output: 'Diff in src/A.luau:\n1 |-x\n1 |+ x\n' },
     });
     const { findings, notes } = verify.runChecks({ root: ready, files: ['src/A.luau'], tools: TOOLS, run });
     assert.deepEqual(notes, []);
     assert.deepEqual(findings.map((finding) => finding.tool), ['luau-lsp analyze', 'selene', 'stylua --check']);
-    assert.deepEqual(findings[0].lines, ["src/A.luau(3,7): TypeError: Unknown global 'x'"]);
+    assert.deepEqual(findings[0].lines, ["src/A.luau(3,7): TypeError: Unknown global 'x'", "src/A.luau [game/A](4,1): TypeError: Key 'Nme' not found"]);
     assert.match(findings[2].lines[0], /Not formatted: src\/A\.luau/);
   });
 

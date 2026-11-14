@@ -226,6 +226,14 @@ function matching(output, pattern) {
   return output.split(/\r?\n/).map((line) => line.trimEnd()).filter((line) => pattern.test(line));
 }
 
+// luau-lsp prints some diagnostics with the file's absolute path (and its DataModel path in
+// brackets); this shortens that to the path relative to the root, like the other lines.
+function withoutRoot(line, root) {
+  const prefix = `${forwardSlashes(root).replace(/\/$/, '')}/`.toLowerCase();
+  const normalized = line.replace(/\\/g, '/');
+  return normalized.toLowerCase().startsWith(prefix) ? normalized.slice(prefix.length) : line;
+}
+
 function capped(lines) {
   const shown = lines.slice(0, MAX_LINES_PER_TOOL);
   if (lines.length > MAX_LINES_PER_TOOL) {
@@ -276,7 +284,7 @@ export function runChecks({ root, files, tools, run = defaultRun }) {
         args.push(`--settings=${setup.settingsPath}`);
       }
       const result = run(tools['luau-lsp'], [...args, ...targets], root);
-      const lines = matching(result.output, LUAU_LSP_FINDING);
+      const lines = matching(result.output, LUAU_LSP_FINDING).map((line) => withoutRoot(line, root));
       if (lines.length > 0) {
         findings.push({ tool: 'luau-lsp analyze', lines: capped(lines) });
       } else {
