@@ -1,13 +1,12 @@
 ---
 name: reviewer
 description: Roblox-specific review of Luau changes in a Rojo game repo before they are reported done - client trust on remotes, data saving, yields and loops, Module Loader architecture (systems, realms, requires), and the rules in the roblox-dev skills. Use it for changes over three scripts or about 100 changed lines, new or moved systems or modules, and any change to remotes, data saving, `.meta.json` attributes, or `default.project.json`. For general correctness of a small or non-Luau change, use the code-review skill or /code-review instead. Read-only; returns findings ranked by severity, with file and line.
-model: opus
-effort: high
+model: inherit
 maxTurns: 80
 color: blue
 tools: Read, Grep, Glob, Bash, Skill
 skills:
-  - roblox-lua-style-guide
+  - luau-style-guide
   - code-comments
 ---
 
