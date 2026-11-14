@@ -537,6 +537,18 @@ describe('verify-gate checks (lib)', async () => {
     assert.match(findings[2].lines[0], /Not formatted: src\/A\.luau/);
   });
 
+  test('reports only luau-lsp findings in the edited files, not in modules they require', () => {
+    const { run } = recorder({
+      '/bin/luau-lsp': {
+        status: 1,
+        output: 'roblox_packages/.pesde/vide/src/apply.luau [game/Packages/apply](4,25): TypeError: Unknown require: ./x\n',
+      },
+    });
+    const { findings, notes } = verify.runChecks({ root: ready, files: ['src/A.luau'], tools: TOOLS, run });
+    assert.deepEqual(findings, []);
+    assert.deepEqual(notes, []);
+  });
+
   test('skips a missing tool or setup with a note instead of reporting findings', () => {
     const bare = join(DIR, 'bare-project');
     mkdirSync(bare, { recursive: true });

@@ -234,6 +234,16 @@ function withoutRoot(line, root) {
   return normalized.toLowerCase().startsWith(prefix) ? normalized.slice(prefix.length) : line;
 }
 
+// The file a luau-lsp diagnostic names: `src/A.luau(3,7): ...` or `src/A.luau [game/A](4,1): ...`.
+function diagnosticPath(line) {
+  const match = line.match(/^(.+?)(?: \[[^\]]*\])?\(\d+,\d+\): /);
+  return match ? match[1] : '';
+}
+
+function normalizedPath(path) {
+  return path.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+}
+
 function capped(lines) {
   const shown = lines.slice(0, MAX_LINES_PER_TOOL);
   if (lines.length > MAX_LINES_PER_TOOL) {
@@ -284,10 +294,14 @@ export function runChecks({ root, files, tools, run = defaultRun }) {
         args.push(`--settings=${setup.settingsPath}`);
       }
       const result = run(tools['luau-lsp'], [...args, ...targets], root);
-      const lines = matching(result.output, LUAU_LSP_FINDING).map((line) => withoutRoot(line, root));
+      const all = matching(result.output, LUAU_LSP_FINDING).map((line) => withoutRoot(line, root));
+      // luau-lsp also reports errors in modules the targets require, such as installed packages;
+      // only the edited files are this turn's to fix.
+      const edited = new Set(targets.map(normalizedPath));
+      const lines = all.filter((line) => edited.has(normalizedPath(diagnosticPath(line))));
       if (lines.length > 0) {
         findings.push({ tool: 'luau-lsp analyze', lines: capped(lines) });
-      } else {
+      } else if (all.length === 0) {
         const note = failureNote('luau-lsp analyze', result);
         if (note) {
           notes.push(note);
