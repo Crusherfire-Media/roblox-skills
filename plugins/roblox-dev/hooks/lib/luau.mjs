@@ -213,7 +213,7 @@ export function lintLuau(lines) {
       }
       if (comment.startsWith('[[')) {
         inBlockComment = !comment.includes(']]');
-        if (!/^\[\[\s*(@description:\s*)?$/.test(comment)) {
+        if (!/^\[\[\s*$/.test(comment)) {
           findings.push(`block comment text on the \`--[[\` line; put \`--[[\` and \`]]\` on their own lines: \`${excerpt}\``);
         }
       } else if (comment.includes(EM_DASH)) {

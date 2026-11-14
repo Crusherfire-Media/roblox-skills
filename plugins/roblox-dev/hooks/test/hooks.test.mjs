@@ -281,7 +281,7 @@ describe('after-edit', () => {
         `-- Waits for the data ${EM_DASH} then fires`,
         '--[[ Rebuilds the shop ]]',
         'local function setColour() end',
-        '-- SERVICES --',
+        '--[[@description:',
       ].join('\n'),
     }));
     assert.equal(output.hookSpecificOutput.hookEventName, 'PostToolUse');
@@ -291,7 +291,7 @@ describe('after-edit', () => {
     assert.match(context, /em dash/);
     assert.match(context, /block comment text/);
     assert.match(context, /British spelling "Colour"/);
-    assert.doesNotMatch(context, /SERVICES/);
+    assert.match(context, /block comment text.*@description/);
   });
 
   test('leaves strings, member names, and identifiers that only contain a British word alone', () => {
