@@ -1,0 +1,138 @@
+{
+	"id": 3,
+	"name": "cleanup-placement-server",
+	"skill": "code-comments",
+	"prompt": "Most of src/ServerScriptService/Placement.server.luau was generated and the comments are way too chatty. Can you clean up the comments before I commit it?",
+	"setup_files": [
+		{
+			"from": "fixtures/Placement.server.luau",
+			"to": "src/ServerScriptService/Placement.server.luau"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const cp = require('child_process'); const fs = require('fs'); const file = process.argv[1]; const strip = (s) => { let out = ''; let i = 0; const n = s.length; const longOpen = (at) => { const m = /^\\[(=*)\\[/.exec(s.slice(at, at + 64)); return m ? ']' + m[1] + ']' : null; }; while (i < n) { const c = s[i]; if (c === '-' && s[i + 1] === '-') { const close = longOpen(i + 2); if (close) { const e = s.indexOf(close, i + 2); i = e < 0 ? n : e + close.length; } else { const e = s.indexOf('\\n', i); i = e < 0 ? n : e; } continue; } if (c === '\"' || c === \"'\" || c === '`') { let j = i + 1; while (j < n && s[j] !== c) { if (s[j] === '\\\\') j++; j++; } out += s.slice(i, j + 1); i = j + 1; continue; } if (c === '[') { const close = longOpen(i); if (close) { const e = s.indexOf(close, i); const end = e < 0 ? n : e + close.length; out += s.slice(i, end); i = end; continue; } } if (/\\s/.test(c)) { i++; continue; } out += c; i++; } return out.replace(/[,;](?=\\})/g, ''); }; let before; let after; try { before = cp.execFileSync('git', ['show', 'HEAD:' + file], { encoding: 'utf8' }); after = fs.readFileSync(file, 'utf8'); } catch (e) { console.log('cannot read ' + file + ': ' + e.message); process.exit(1); } const a = strip(before); const b = strip(after); if (a === b) { console.log('code outside comments is unchanged (whitespace ignored)'); process.exit(0); } let k = 0; while (k < a.length && a[k] === b[k]) k++; console.log('code changed near: ' + a.slice(Math.max(0, k - 60), k + 60) + ' => ' + b.slice(Math.max(0, k - 60), k + 60)); process.exit(1);",
+				"src/ServerScriptService/Placement.server.luau"
+			],
+			"text": "Only comments changed in src/ServerScriptService/Placement.server.luau: the code with comments and whitespace removed matches the starting commit"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "^--!strict\\r?\\n[\\s\\S]*^-- stylua: ignore\\r?\\nlocal BLOCK_STYLES",
+			"text": "Kept: --!strict and the -- stylua: ignore directive directly above BLOCK_STYLES"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "--[^\\n]*PlacementClient",
+			"text": "Kept: the note that GRID_SIZE must stay in sync with PlacementClient"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "--[^\\n]*(click|0\\.2\\b)",
+			"text": "Kept: the cooldown's constraint against the client's 0.2 s click repeat"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "--[^\\n]*\\bstuds?\\b",
+			"text": "Kept: the units on MAX_REACH"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "--[^\\n]*NaN",
+			"text": "Kept: why value == value is there (NaN)"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "--[^\\n]*\\bface",
+			"text": "Kept: why the overlap box is shrunk (blocks that share a face)"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "--[^\\n]*\\b(lag|latency)",
+			"text": "Kept: why the reach check has slack (server lag)",
+			"flags": "mi"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "(?:^[ \\t]*--[^\\n]*\\r?\\n){3,}[ \\t]*if \\(root\\.Position",
+			"text": "Trimmed: at most two comment lines remain above the reach check"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "TODO[^\\n]*(save|persist|DataStore)",
+			"text": "Kept: the DataStore TODO (work beyond this file)"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "Changelog|v1\\.[012]|playtest feedback",
+			"text": "Removed: the changelog and other change history"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "design doc|section 4\\.2|docs/placement",
+			"text": "Removed: the design doc reference and the pointer to docs/placement.md"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "100 blocks|Region3|TODO: add a cooldown",
+			"text": "Removed: stale comments (100-block limit, Region3, the TODO for a cooldown that exists)"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "^[ \\t]*--[ \\t]*(print\\(|local region|return #workspace)|^[ \\t]*end\\)?[ \\t]*--",
+			"text": "Removed: commented-out code and block-end markers"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "=====",
+			"text": "Removed: the banners inside onPlaceBlock"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "\\u2014",
+			"text": "Convention: no em dash left in the file"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ServerScriptService/Placement.server.luau",
+			"pattern": "@param|-- (Get the services we need|Create the remote event|Set the size|Increment the block count|Connect the events|Loop through all the blocks)",
+			"text": "Removed: a sample of narration comments and the @param doc comments"
+		}
+	],
+	"rubric": [
+		"Changes only comments: every line of code is the same as before; the only edits are to comment text and the blank lines that deleted comments leave behind.",
+		"Keeps the comments that carry information the code can't show, trimmed where they ran long: the GRID_SIZE sync note with PlacementClient, the cooldown's constraint against the client's click repeat, the units on MAX_REACH, why value == value catches NaN, why the overlap box is shrunk, why the reach check has slack, and the DataStore TODO.",
+		"Keeps tool directives exactly as they were: --!strict at the top and -- stylua: ignore directly above the aligned BLOCK_STYLES table.",
+		"Removes narration that restates the code: comments such as 'Create the part' or 'Set the size', trailing comments that repeat the line, block-end markers such as 'end -- if', and doc comments that only list parameter names and types.",
+		"Removes or corrects comments that are wrong: the '100 blocks' limit (the code allows 200), the Region3 description of isOccupied, the TODO asking for a cooldown that already exists, and the commented-out Region3 and print lines.",
+		"Removes change history and dangling references: the changelog in the header, 'changed after playtest feedback', the design doc section reference, and the pointer to docs/placement.md, which doesn't exist.",
+		"Trims what survives to the fact a reader needs: the five-line reach-slack comment becomes about one line, and the header description says briefly what the script does.",
+		"Section banners: the top-level banners are kept and made consistent with each other (matching dash lines, uppercase titles, the same spacing), and the banners inside onPlaceBlock are removed."
+	],
+	"notes": "Cleanup branch. Planted KEEP (each has a check): --!strict and -- stylua: ignore (directives, byte-identical); 'Keep in sync with GRID_SIZE in PlacementClient' (sync); 'Must stay below the client's 0.2 s click repeat...' (constraint, in a block with a change-history line that must go); 'studs, from the HumanoidRootPart...' on MAX_REACH (units); 'value == value is false only for NaN...' (gotcha); 'Shrink the box so blocks that only share a face...' (gotcha); the five-line reach-slack block (real why, should be trimmed to about one line mentioning lag); 'TODO: save each player's blocks with DataStoreService...' (TODO beyond scope). Planted REMOVE: header changelog v1.0 to v1.2 and the docs/placement.md pointer inside the @description block; 'Changed from 0.5 to 0.15 after playtest feedback'; 'Max height per the design doc, section 4.2'; stale 'Limit is 100 blocks per player' (code: 200); stale 'Uses Region3...' on isOccupied (code uses GetPartBoundsInBox); stale 'TODO: add a cooldown' (cooldown exists); commented-out Region3 and print lines; 'end -- if', 'end -- for', 'end -- onPlaceBlock', 'end -- isFiniteNumber'; '===== Cooldown/Validation/Create the block =====' banners inside onPlaceBlock; three em dashes, all in narration; @param doc comments (one also has text on the --[[ line); narration throughout (Get the services we need, Create the remote event, set the name, Check the block limit, Connect the events, trailing 'connect PlaceBlock', and so on). Banner drift: '-- Private Functions --' is mixed case and has no blank line before the first function; the other banners are correct 30-dash uppercase ones. Expected: fix to '-- PRIVATE FUNCTIONS --' plus the blank line (rubric only, no check). Judgment calls (not checked): 'The client can send any instance, so check it's one of ours and theirs' in onRemoveBlock (a security why; keeping or deleting are both defensible); whether to keep a trimmed @description header.",
+	"timeout_minutes": 15
+}
