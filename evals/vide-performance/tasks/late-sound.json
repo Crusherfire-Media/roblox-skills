@@ -1,0 +1,42 @@
+{
+  "id": 3,
+  "name": "late-sound",
+  "skill": "vide-performance",
+  "prompt": "Our UI sounds play late. Clicking the Build button or a picker tile, the click often comes 0.3 to 0.5 s after the press, and the picker's open sound sometimes plays after the picker is already up. It's worst on phones. When a cue plays I checked the Sound and IsLoaded was false, even though Main.client.luau preloads the sound ids with ContentProvider:PreloadAsync at startup.\n\nMake the UI sounds play on time. Don't keep every sound in the game loaded forever: the picker's sounds only matter around build mode, though more screens will play the same click later. The code is in src/StarterPlayer/StarterPlayerScripts (UiSounds.luau, BlockPicker.luau, Main.client.luau) and the ids are in src/ReplicatedStorage/Shared/SoundIds.luau. Then write a short note in docs/perf/ui-sounds.md: what you changed, and how I can check it in Studio.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/late-sound/SoundIds.luau", "to": "src/ReplicatedStorage/Shared/SoundIds.luau" },
+    { "from": "fixtures/shared/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/late-sound/UiSounds.luau", "to": "src/StarterPlayer/StarterPlayerScripts/UiSounds.luau" },
+    { "from": "fixtures/late-sound/BlockPicker.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau" },
+    { "from": "fixtures/late-sound/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/perf/ui-sounds.md",
+      "text": "The note docs/perf/ui-sounds.md exists"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/UiSounds.luau",
+      "pattern": "Ended:Once\\(function\\(\\)\\s+sound:Destroy\\(\\)\\s+end\\)\\s+sound:Play\\(\\)",
+      "text": "UiSounds no longer creates a fresh Sound for every cue and destroys it after it plays"
+    }
+  ],
+  "rubric": [
+    "Cues play from a Sound that already exists and has loaded: a Sound with that SoundId is created ahead of time and kept for as long as the UI that cues it can play it, instead of a new Sound being created on each cue and destroyed after it plays, which leaves nothing holding the asset between cues (the reason the startup preload did not help).",
+    "The picker's sounds are kept only around build mode and released after: the open sound is already held before the picker opens (by something that exists before it, such as the always-visible Build button or the code that toggles build mode), and the close sound and the picker's own sounds are released when build mode can no longer play them.",
+    "A sound several UIs play (the click, used by the Build button and the tiles, and later by other screens) has one cached copy whose holds are counted, so one UI releasing it does not unload it while another still needs it, and the last release frees it.",
+    "Rapid cues still each play (for example by cloning the cached Sound or playing it through `SoundService:PlayLocalSound`), and played copies don't pile up as Sound instances that never go away.",
+    "docs/perf/ui-sounds.md says what changed and how to confirm it: `IsLoaded` is true on the Sound at the moment each cue plays, the picker's sounds are cached while build mode is on and released after, and what to listen for, ideally on a phone.",
+    "Correct and in scope: every existing cue (Build button click, tile click, picker open and close) still plays at the same moment, build mode and selection keep working, the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files, such as a preview story, count neither for nor against."
+  ],
+  "judge_facts": [
+    "Vide 0.4.1 `cleanup(value)` (vide/src/cleanup.luau) registers a cleanup on the running scope: a function is called and an Instance destroyed when the scope is destroyed. Vide 0.4.1 `show` (vide/src/show.luau) builds its component in a new scope each time the condition turns true and destroys that scope when it turns false.",
+    "Vide 0.4.1 (vide/src/graph.luau): a `derive` reruns its readers only when its new value `~=` the old one, and an `effect` reruns whenever a source it read changes, running the cleanups it registered first."
+  ],
+  "timeout_minutes": 20
+}

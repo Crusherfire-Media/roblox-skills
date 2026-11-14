@@ -1,0 +1,50 @@
+{
+  "id": 4,
+  "name": "hud-story",
+  "skill": "vide-ui-labs",
+  "prompt": "I want a UI Labs story for the build mode HUD (src/StarterPlayer/StarterPlayerScripts/BuildModeHud.luau) so I can design it without playtesting. Put it under src/ServerScriptService/Stories; the UI Labs utility package is in ReplicatedStorage.Packages.UILabs.\n\nIn the controls I want the selected block, the player's name (I need to check long names), and the placed count. In game, opening build mode blurs the world, zooms the camera in, and plays a sound. None of that should happen when I open the story, and the story mustn't leave anything behind in my place or mess with my Studio camera. In game the HUD has to keep doing everything it does now. Main.client.luau shows the HUD when B is pressed.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/hud-story/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/hud-story/BuildModeHud.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BuildModeHud.luau" },
+    { "from": "fixtures/hud-story/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "any_file_matches",
+      "dir": "src/ServerScriptService/Stories",
+      "ext": ".story.luau",
+      "pattern": "\\bvide\\s*=",
+      "text": "A .story module under src/ServerScriptService/Stories hands UI Labs its Vide library"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\");const re=new RegExp(process.argv[1]);const hits=[];const walk=(d)=>{if(!fs.existsSync(d))return;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(f.endsWith(\".story.luau\")&&re.test(fs.readFileSync(f,\"utf8\")))hits.push(f.split(p.sep).join(\"/\"))}};walk(\"src\");if(hits.length){console.log(\"matched in \"+hits.join(\", \"));process.exit(1)}console.log(\"no story matched\")",
+        "require\\([^)]*BlockPlacer|Players\\.LocalPlayer\\b|:WaitForChild\\(|task\\.wait\\("
+      ],
+      "expect_exit": 0,
+      "text": "No story requires BlockPlacer, reads LocalPlayer, or waits"
+    }
+  ],
+  "rubric": [
+    "The story is a valid UI Labs Vide story under src/ServerScriptService/Stories (a `*.story` module returning `vide` set to ReplicatedStorage.Packages.Vide and a `story` function) with controls for the selected block (built from `BlockTypes.List`), the player's name (with an easy way to try a long one), and the placed count, each driving the preview live.",
+    "The HUD's data arrives through props: the player's name, the selection, and the count reach the view as values or sources the story can supply, so the view no longer reads `Players.LocalPlayer`, BlockPlacer, or the BlockPlaced remote itself. The game side (Main.client.luau or a thin wrapper) connects those to the real game state and passes them in.",
+    "No yield inside a Vide scope: the HUD's body called `ReplicatedStorage:WaitForChild(\"BlockPlaced\")`, which would wait forever in edit mode where no server creates the remote. After the fix that wait happens outside any component body (for example before mounting, or in game-only wiring).",
+    "The blur in Lighting, the camera zoom, and the open sound do not run when the story mounts: they sit behind a prop the story leaves off, in game-only wiring, or behind `RunService:IsRunning()`. When they run in game they are still undone when the HUD closes (the blur is destroyed and the field of view restored).",
+    "In game nothing changes: opening build mode still blurs, zooms, and plays the sound, closing it undoes the blur and zoom, and the name, selected block, and placed count still show and update.",
+    "The story never yields, creates nothing outside its preview frame, requires nothing that needs a running game, and the code is typed and readable; luau-lsp, selene, and StyLua pass on the changed files. A storybook module is optional and counts neither for nor against."
+  ],
+  "judge_facts": [
+    "UI Labs utilities 2.4.2 typings (ui-labs/src/Typing/Vide.d.ts, Typing.d.ts): a Vide story's `props.controls` holds one Vide source per control, carrying that control's value, a `ControlGroup` becomes a nested table of sources, and `props.target` is the preview Frame.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Controls/ControlConversion.luau, PrimitiveControls.luau): a plain string, number, boolean, or Color3 in a story's controls table is turned into a String, Number, Boolean, or Color3 control; `Ordered(control, n)` accepts those plain values too.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Controls/PrimitiveControls.luau, AdvancedControls.luau): `Number(default, min?, max?, step?, dragger?, sensitivity?)` defaults `dragger` to true and sensitivity to `default * 10`; `Slider` errors when max <= min; `Choose` errors on an empty list.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Environment.luau): every `Environment` member has a harmless fallback outside UI Labs: `IsStory()` returns false, `Unmount` and `Reload` do nothing, `UserInput` falls back to `UserInputService`, and `PluginWidget` is nil.",
+    "Vide 0.4.1 `cleanup(value)` (vide/src/cleanup.luau) registers a cleanup on the running scope: a function is called, an Instance is destroyed, and a connection is disconnected when the scope is destroyed. Vide 0.4.1 `show` (vide/src/show.luau) builds its component in a new scope each time the condition turns true and destroys it when it turns false."
+  ],
+  "timeout_minutes": 25
+}

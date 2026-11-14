@@ -1,0 +1,50 @@
+{
+  "id": 1,
+  "name": "picker-story",
+  "skill": "vide-ui-labs",
+  "prompt": "I want to work on the block picker (src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau) in UI Labs instead of playtesting every change. The plugin is installed in Studio and the UI Labs utility package is in ReplicatedStorage.Packages.UILabs.\n\nAdd a story for the picker under src/ServerScriptService/Stories. From the controls panel I want to choose which block is selected and edit the title text, including trying a really long title. Clicking a tile in the preview should select it, the way it does in game. Keep the picker working in game.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/shared/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/picker-story/BlockPicker.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau" },
+    { "from": "fixtures/picker-story/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "any_file_matches",
+      "dir": "src/ServerScriptService/Stories",
+      "ext": ".story.luau",
+      "pattern": "\\bvide\\s*=",
+      "text": "A .story module under src/ServerScriptService/Stories hands UI Labs its Vide library"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\");const re=new RegExp(process.argv[1]);const hits=[];const walk=(d)=>{if(!fs.existsSync(d))return;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(f.endsWith(\".story.luau\")&&re.test(fs.readFileSync(f,\"utf8\")))hits.push(f.split(p.sep).join(\"/\"))}};walk(\"src\");if(hits.length){console.log(\"matched in \"+hits.join(\", \"));process.exit(1)}console.log(\"no story matched\")",
+        "require\\([^)]*BlockPlacer|Players\\.LocalPlayer\\b|:WaitForChild\\(|task\\.wait\\("
+      ],
+      "expect_exit": 0,
+      "text": "No story requires BlockPlacer, reads LocalPlayer, or waits"
+    }
+  ],
+  "rubric": [
+    "The story is a valid UI Labs Vide story: a ModuleScript named `*.story` under src/ServerScriptService/Stories that returns a table with `vide` set to the same Vide module the picker requires (ReplicatedStorage.Packages.Vide) and a `story` function that returns the picker or parents it to `props.target`.",
+    "The selected-block control lists the block types from `BlockTypes.List` (for example a `Choose` over their names) rather than a hard-coded copy, and the title is a text control; there is an easy way to see a very long title (a default, a second control, or a preset).",
+    "Changing the title control updates the preview live. BlockPicker read `Title` once as a plain string, so the attempt makes the prop accept a source (for example `string | () -> string`, bound to the label) or otherwise rebuilds the picker when the control changes, and the game's caller keeps working.",
+    "Both the selected-block control and clicking a tile in the preview move the highlight: the story keeps its own Vide state for the selection, which the picker's `Select` callback updates, and the control drives it too.",
+    "The story is safe to open in edit mode: it requires only the picker, BlockTypes, Vide, and the UI Labs utilities (not BlockPlacer or anything that needs a running game or `Players.LocalPlayer`), never yields, and creates nothing outside its preview frame.",
+    "Correct and in scope: the picker looks and works the same in game, the story's code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. A storybook module is optional and counts neither for nor against."
+  ],
+  "judge_facts": [
+    "UI Labs utilities 2.4.2 typings (ui-labs/src/Typing/Vide.d.ts, Typing.d.ts): a Vide story's `props.controls` holds one Vide source per control, carrying that control's value, a `ControlGroup` becomes a nested table of sources, and `props.target` is the preview Frame. The story table's `vide` key carries the Vide library.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Controls/ControlConversion.luau, PrimitiveControls.luau): a plain string, number, boolean, or Color3 in a story's controls table is turned into a String, Number, Boolean, or Color3 control. `Ordered(control, n)` accepts those plain values too and sets the control's `Order`.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Controls/AdvancedControls.luau): `Choose(list, defaultIndex?)` errors on an empty list and its value is one of the list's entries; `Slider(default, min, max, step?)` errors when max <= min.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/StoryCreators.luau): `CreateVideStory(info, story)` returns `info` plus `use = \"Vide\"` and `story`; a plain table with `vide` and `story` keys is the same story.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Environment.luau): every `Environment` member has a harmless fallback outside UI Labs: `IsStory()` returns false, `Unmount` and `Reload` do nothing, `UserInput` falls back to `UserInputService`, and `PluginWidget` is nil."
+  ],
+  "timeout_minutes": 20
+}
