@@ -2,8 +2,8 @@
 
 Release tag: `v0.1.0`
 
-You are Claude Code, setting up the folder open in VS Code as a Roblox game project for the viewer
-who pasted the prompt. Wherever this file says `TAG`, use the release tag above: the template and
+You are setting up the folder open in VS Code as a Roblox game project for the viewer who pasted
+the prompt. Wherever this file says `TAG`, use the release tag above: the template and
 the `roblox-dev` plugin both come from that tag.
 
 ## How to run this file
