@@ -40,9 +40,11 @@ publishes to production. `tools/ci/README.md` covers the setup and what each fai
 
 ## Project specifics
 
-- Rojo is pinned to 7.6.1, in `rokit.toml` and in the `rojo` dev dependency in `pesde.toml`.
-  Change both together, then run `rojo plugin install` so the Studio plugin matches.
-- Write `IconTint` in a `.meta.json` with its type, `"IconTint": { "Color3": [1, 0, 0] }`, since
-  Rojo 7.6.1 rejects the short form.
+- Rojo is pinned in `rokit.toml` (7.7.1) and in the `rojo` dev dependency in `pesde.toml` (7.7.0,
+  the newest on pesde's registry). Change both together.
+- Rojo 7.7.x can crash `rojo serve` when a folder is deleted or a folder module becomes a file
+  module. Check that `rojo serve` is still running after those changes, and restart it if not.
+- Write `IconTint` in a `.meta.json` with its type, `"IconTint": { "Color3": [1, 0, 0] }`. Every
+  Rojo version accepts that form; 7.6.1 rejects the short one.
 - `src/ServerScriptService/Tests/Packages/default.project.json` mounts
   `test_packages/roblox_packages` at `Tests.Packages`. Keep it in place.
