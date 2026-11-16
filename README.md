@@ -48,9 +48,9 @@ install.
 
 `template/` is a game project ready to sync: Rojo 7.7.1, pesde with Module Loader, Jest Roblox
 specs, StyLua, selene, luau-lsp, VS Code settings, a `CLAUDE.md`, and GitHub Actions workflows.
-Every pull request runs the checks and the specs (in a CI place, through Open Cloud), a merge to
-`main` publishes to staging, and a GitHub release publishes to production.
-`template/tools/ci/README.md` covers the CI setup.
+Every pull request runs the lint and type checks. After the optional CI setup in
+`template/tools/ci/README.md`, pull requests also run the specs (in a CI place, through Open
+Cloud), a merge to `main` publishes to staging, and a GitHub release publishes to production.
 
 ### Evals
 
@@ -60,12 +60,12 @@ has the numbers.
 
 ## One-prompt setup
 
-First install [Git](https://git-scm.com/downloads/win), [VS Code](https://code.visualstudio.com),
-[Claude Code](https://code.claude.com/docs/en/setup), and
+The setup runs on Windows. First install [Git](https://git-scm.com/downloads/win),
+[VS Code](https://code.visualstudio.com), [Claude Code](https://code.claude.com/docs/en/setup), and
 [Roblox Studio](https://create.roblox.com/landing), and sign in to Studio once. You also need a
-GitHub account and a Claude plan that includes Claude Code. The setup runs on Windows.
+GitHub account and a Claude plan that includes Claude Code.
 
-Open an empty folder in VS Code, open Claude Code, and paste:
+Open an empty folder in VS Code, open the Claude Code panel, and paste:
 
 ```
 Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download `https://raw.githubusercontent.com/Crusherfire-Media/roblox-skills/v0.1.0/SETUP.md` with `curl.exe` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
