@@ -8,8 +8,8 @@ description: Architecture rules for Roblox game code run by Module Loader (crush
 Game code runs from two scripts. Everything else is a ModuleScript that the Module Loader
 finds, requires, and then runs `Init` and `Start` on.
 
-**Fit the existing project.** Make the smallest change that fits its structure, keeping working
-code paths and module shapes unless the task needs them changed. The rules below apply to a
+**Fit the existing project.** Make the smallest change that fits its structure: every changed line
+traces to the task. Systems and modules the task doesn't reach keep their code and shape. The rules below apply to a
 project that uses the loader (a `Start` script that requires it, or `LOAD_MODULE` tags); in a
 project without it, follow the patterns of its existing scripts.
 

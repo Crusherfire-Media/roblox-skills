@@ -34,6 +34,10 @@ exact mounts before creating a file.
 | `Name.model.json` | Instances in readable JSON (values, configurations) |
 | `Name.rbxm` | A binary model: Models, Parts, GUIs |
 
+Turn `Name.luau` into `Name/init.luau` only when the task gives the module a child. The
+ModuleScript `Name` keeps its name and place, so the requires inside it stay as they were: `./`
+still names its siblings, and only its new children take `@self/`.
+
 Attributes live in `.meta.json` as real JSON values: booleans for flags, numbers for numbers.
 
 ```json
