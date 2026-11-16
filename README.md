@@ -102,10 +102,13 @@ In a Claude Code session that's already open, run `/reload-plugins` to load new 
 server loads in the next conversation you start. Restart Studio after the first MCP run so it loads
 the MCP's Studio plugin.
 
-For the template, copy `template/` from the release into an empty folder, install
-[Rokit](https://github.com/rojo-rbx/rokit#installation) and
+For the template, download
+[`roblox-game-template.zip`](https://github.com/Crusherfire-Media/roblox-skills/releases/latest/download/roblox-game-template.zip)
+from the latest release. It holds only `template/`, with no history. Unzip it, rename the folder,
+install [Rokit](https://github.com/rojo-rbx/rokit#installation) and
 [pesde](https://docs.pesde.dev/installation/), and run `rokit install` and `pesde install` in that
-folder. The template's `CLAUDE.md` lists the checks.
+folder. The template's `CLAUDE.md` lists the checks. From a terminal with Node.js,
+`npx tiged Crusherfire-Media/roblox-skills/template#v0.1.0 my-game` copies the same files.
 
 ## Develop
 
@@ -113,8 +116,11 @@ folder. The template's `CLAUDE.md` lists the checks.
 - Check the manifests with `claude plugin validate .` and `claude plugin validate plugins/roblox-dev`.
 - Bump `version` in `plugins/roblox-dev/.claude-plugin/plugin.json` when you publish, so installs pick up the change.
 - To release, replace the old tag in `SETUP.md` (its "Release tag" line), in this README (the
-  prompt and the marketplace command), and in `template/.claude/settings.json` (the marketplace's
-  `ref`), commit that to `main`, then create the tag on that commit.
+  prompt, the marketplace command, and the `tiged` command), and in
+  `template/.claude/settings.json` (the marketplace's `ref`), commit that to `main`, then publish a
+  GitHub release with a new tag on that commit. The Release workflow attaches
+  `roblox-game-template.zip` to it; for a release without the zip, run the workflow by hand with
+  its tag.
 
 ## Contributing
 

@@ -1,0 +1,36 @@
+name: Release
+
+# Attaches roblox-game-template.zip (template/ at the release tag, no history)
+# to each release, so people can start a game without cloning this repo.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to attach the template zip to
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  template-zip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # Passed through env, never interpolated into scripts.
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      - name: Build the zip
+        run: |
+          git archive --format=zip --prefix=roblox-game-template/ -o roblox-game-template.zip HEAD:template
+          unzip -l roblox-game-template.zip | grep -q ' roblox-game-template/default.project.json$'
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" roblox-game-template.zip --clobber

@@ -177,9 +177,12 @@ Done when the check passes and you have the repo's name and visibility.
 Check: `default.project.json` exists in the project folder. Otherwise:
 
 ```powershell
-$src = "$env:TEMP\roblox-setup\roblox-skills-TAG"
-if (-not (Test-Path $src)) { git clone --depth 1 --branch TAG https://github.com/Crusherfire-Media/roblox-skills.git $src }
-Copy-Item -Path "$src\template\*" -Destination . -Recurse -Force
+$src = "$env:TEMP\roblox-setup\template-TAG"
+if (-not (Test-Path "$src\roblox-game-template")) {
+  curl.exe -fsSL -o "$src.zip" https://github.com/Crusherfire-Media/roblox-skills/releases/download/TAG/roblox-game-template.zip
+  Expand-Archive -Path "$src.zip" -DestinationPath $src -Force
+}
+Copy-Item -Path "$src\roblox-game-template\*" -Destination . -Recurse -Force
 ```
 
 The template's `pesde.toml` takes the place of `pesde init`, which needs a person typing answers.
