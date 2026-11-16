@@ -1,30 +1,124 @@
 # roblox-skills
 
-Claude Code plugins for Roblox game development from [Crusherfire Media](https://github.com/Crusherfire-Media).
-
-> **Work in progress.** The skills, hooks, starter template, and one-prompt setup are still being built. The install steps below work, but the plugin is empty until the first release.
+Claude Code plugins and a starter project for Roblox game development, from
+[Crusherfire Media](https://github.com/Crusherfire-Media). The workflow keeps your game in Git,
+syncs it into Studio with Rojo, and gives Claude Code the skills, checks, and Studio access to work
+on it.
 
 ## What's here
 
-- **`plugins/roblox-dev`:** skills for Luau style, code comments, Rojo, testing, performance, and Vide UI, plus hooks that load the right skills before Claude edits Luau files.
-- **`template/`:** a starter Roblox game project (Rojo, pesde, StyLua, selene, luau-lsp, and CI workflows).
+### The `roblox-dev` plugin
 
-## Install
+In `plugins/roblox-dev`. Skills load as `roblox-dev:<skill>`.
 
-In a terminal:
+| Skill | What it covers |
+|---|---|
+| `luau-style-guide` | Luau style and typing, based on Roblox's style guide |
+| `code-comments` | Which comments to write and keep, plus a cleanup pass |
+| `game-architecture` | Systems run by [Module Loader](https://github.com/ActualFire-Games/module-loader): layout, realms, lifecycle, and requires |
+| `rojo-workflow` | How files map into the place, `rojo serve`, syncback, pesde packages, and one worktree per agent |
+| `roblox-testing` | Jest Roblox specs, in Studio and in CI |
+| `roblox-performance` | Designing systems that scale, and finding and fixing lag |
+| `rbx-perf-profiling` | Reading MicroProfiler data through LibMP |
+| `game-ui-design` | Player-facing UI for phones, tablets, PCs, consoles, and VR |
+| `figma-to-roblox` | Porting a Figma design into Roblox UI |
+| `vide` | Vide, the reactive UI library |
+| `vide-charm` | Charm state in Vide UI |
+| `vide-performance` | Keeping Vide UI fast |
+| `vide-ui-labs` | UI Labs stories for Vide components |
+
+**Hooks** (details in `plugins/roblox-dev/hooks/README.md`):
+
+- `skill-gate` holds back a Luau edit until the skills it needs are loaded.
+- `after-edit` flags new lines that break Luau conventions.
+- `skill-hints` suggests skills from your prompt and the files Claude reads.
+- `verify-gate` runs `luau-lsp analyze`, selene, and StyLua on the Luau files Claude edited before
+  it finishes a turn.
+
+**Reviewer:** the `reviewer` subagent checks larger Luau changes for Roblox-specific problems
+(remotes, data saving, yields, architecture) and returns ranked findings. For general correctness,
+use `/code-review`.
+
+The skills work with any Studio MCP. The setup below adds
+[Chrrxs/robloxstudio-mcp](https://github.com/Chrrxs/robloxstudio-mcp); Roblox's
+[built-in Studio MCP](https://create.roblox.com/docs/studio/mcp) is the option with nothing to
+install.
+
+### The starter template
+
+`template/` is a game project ready to sync: Rojo 7.7.1, pesde with Module Loader, Jest Roblox
+specs, StyLua, selene, luau-lsp, VS Code settings, a `CLAUDE.md`, and GitHub Actions workflows.
+Every pull request runs the lint and type checks. After the optional CI setup in
+`template/tools/ci/README.md`, pull requests also run the specs (in a CI place, through Open
+Cloud), a merge to `main` publishes to staging, and a GitHub release publishes to production.
+
+### Evals
+
+`evals/` measures each skill against runs without it, with a blind judge. Twelve of the 13 skills
+beat the baseline and `game-architecture` comes out even; [`evals/RESULTS.md`](evals/RESULTS.md)
+has the numbers.
+
+## One-prompt setup
+
+The setup runs on Windows. First install [Git](https://git-scm.com/downloads/win),
+[VS Code](https://code.visualstudio.com), [Claude Code](https://code.claude.com/docs/en/setup), and
+[Roblox Studio](https://create.roblox.com/landing), and sign in to Studio once. You also need a
+GitHub account and a Claude plan that includes Claude Code.
+
+Open an empty folder in VS Code, open the Claude Code panel, and paste:
 
 ```
-claude plugin marketplace add Crusherfire-Media/roblox-skills
+Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download `https://raw.githubusercontent.com/Crusherfire-Media/roblox-skills/v0.1.0/SETUP.md` with `curl.exe` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
+```
+
+Claude follows [`SETUP.md`](SETUP.md) from that release. Along the way you click **Yes** on a few
+Windows admin prompts, sign in to GitHub, choose a name and visibility for your repo, and restart
+VS Code and Studio once. CI setup is a separate, optional step: ask Claude for it when you're
+ready.
+
+## Manual install
+
+The plugin, in a terminal:
+
+```
+claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.0
 claude plugin install roblox-dev@crusherfire
 ```
 
-Then run `/reload-plugins` in Claude Code.
+The Studio MCP, which needs Node.js 22 or later:
+
+```
+claude mcp add --scope user robloxstudio -- npx -y @chrrxs/robloxstudio-mcp@latest --auto-install-plugin
+```
+
+[Matt Pocock's skills](https://github.com/mattpocock/skills), which the template's settings also
+turn on:
+
+```
+claude plugin install mattpocock-skills@claude-plugins-official
+```
+
+In a Claude Code session that's already open, run `/reload-plugins` to load new plugins. The MCP
+server loads in the next conversation you start. Restart Studio after the first MCP run so it loads
+the MCP's Studio plugin.
+
+For the template, copy `template/` from the release into an empty folder, install
+[Rokit](https://github.com/rojo-rbx/rokit#installation) and
+[pesde](https://docs.pesde.dev/installation/), and run `rokit install` and `pesde install` in that
+folder. The template's `CLAUDE.md` lists the checks.
 
 ## Develop
 
 - Run the hook tests with `npm test` (Node.js 22 or later).
 - Check the manifests with `claude plugin validate .` and `claude plugin validate plugins/roblox-dev`.
 - Bump `version` in `plugins/roblox-dev/.claude-plugin/plugin.json` when you publish, so installs pick up the change.
+- To release, replace the old tag in `SETUP.md` (its "Release tag" line), in this README (the
+  prompt and the marketplace command), and in `template/.claude/settings.json` (the marketplace's
+  `ref`), commit that to `main`, then create the tag on that commit.
+
+## Contributing
+
+This repo doesn't accept pull requests. Fork it and make it your own. The MIT license allows it.
 
 ## License
 
