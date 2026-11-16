@@ -46,5 +46,8 @@ publishes to production. `tools/ci/README.md` covers the setup and what each fai
   module. Check that `rojo serve` is still running after those changes, and restart it if not.
 - Write `IconTint` in a `.meta.json` with its type, `"IconTint": { "Color3": [1, 0, 0] }`. Every
   Rojo version accepts that form; 7.6.1 rejects the short one.
+- `Workspace` sets `$ignoreUnknownInstances`, so Rojo syncs `src/Workspace` but leaves anything
+  else in the place's Workspace alone. Things built in Studio stay out of Git until they're saved
+  as files.
 - `src/ServerScriptService/Tests/Packages/default.project.json` mounts
   `test_packages/roblox_packages` at `Tests.Packages`. Keep it in place.
