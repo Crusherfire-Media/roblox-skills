@@ -1,0 +1,392 @@
+# Roblox AI workflow setup
+
+Release tag: `v0.1.0`
+
+You are Claude Code, setting up the folder open in VS Code as a Roblox game project for the viewer
+who pasted the prompt. Wherever this file says `TAG`, use the release tag above: the template and
+the `roblox-dev` plugin both come from that tag.
+
+## How to run this file
+
+- Save this file as `$env:TEMP\roblox-setup\SETUP.md`, moving it there if you saved it in the
+  project folder. That keeps it out of the game repo, and you re-read it from there after the
+  restart.
+- Work through the steps in order. Each step opens with its check: when the check passes, say so in
+  one line and go to the next step. That way a second run, or the run after the restart, changes
+  nothing that's already done.
+- Every command is Windows PowerShell 5.1. Run it with your PowerShell tool. With only a Bash tool,
+  save the block as a `.ps1` file in `$env:TEMP\roblox-setup` and run
+  `powershell -NoProfile -ExecutionPolicy Bypass -File <file>`.
+- Run commands in the project folder unless a step names another one.
+- Start every command block with this **PATH prelude**. Tools installed during this run reach your
+  PATH only after the restart, and the prelude lets you call them by name before then:
+
+  ```powershell
+  $env:Path = "$env:USERPROFILE\.rokit\bin;$env:USERPROFILE\.pesde\bin;$env:USERPROFILE\.local\bin;$env:ProgramFiles\nodejs;$env:ProgramFiles\GitHub CLI;$env:ProgramFiles\Git\cmd;$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin;$env:Path"
+  ```
+
+- Call `npx.cmd`, never `npx`: PowerShell's execution policy can block `npx.ps1`.
+- **Viewer:** marks something only the viewer can do. Tell them exactly what to click or type, then
+  wait until they say it's done.
+- **Stop and ask:** marks a decision that needs the viewer's accounts or choices. Ask, then wait for
+  the answer.
+- When a command fails, find the symptom in [Common problems](#common-problems), apply its fix, and
+  run the step again. When nothing there matches, show the viewer the error and stop.
+- Secrets stay out of the chat. Keys and tokens go only into the hidden-input script in
+  [CI setup](#ci-setup-optional), never into a message or a command line, and you never print one.
+
+## 1. Check the prerequisites
+
+Check each item:
+
+- `Get-Command winget` finds winget.
+- `Get-Command git` finds Git. When it's missing, install it. A UAC prompt appears.
+  **Viewer:** click **Yes** on the UAC prompt.
+
+  ```powershell
+  winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+  ```
+
+  Keep working through PowerShell for the rest of this run, whether or not a Bash tool shows up.
+- `Get-Command code` finds VS Code's command. When it's missing: **Viewer:** install VS Code from
+  <https://code.visualstudio.com> and reopen this folder in it.
+- Roblox Studio is installed. This prints a folder path when it is:
+
+  ```powershell
+  (Get-ItemProperty -Path 'HKCU:\Software\Roblox\RobloxStudio' -Name ContentFolder -ErrorAction SilentlyContinue).ContentFolder
+  ```
+
+  When it prints nothing: **Viewer:** install Studio with **Download Studio** at
+  <https://create.roblox.com/landing>, launch it once, and sign in.
+- The project folder is new: it holds only `.claude`, `.vscode`, or nothing, or it already holds
+  the template (a `default.project.json`). When it holds anything else: **Stop and ask** whether
+  this is the right folder.
+
+Done when every item passes.
+
+## 2. Install the GitHub CLI and Node.js
+
+Node.js runs the Studio MCP server and the plugin's hooks, which need Node 22 or later.
+
+Check: `gh --version` runs, and `node --version` prints `v22` or higher.
+
+Install whichever is missing. Each install shows a UAC prompt. **Viewer:** click **Yes** on each.
+
+```powershell
+winget install --id GitHub.cli --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+winget install --id OpenJS.NodeJS.LTS --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+```
+
+When Node is installed but older than 22: **Stop and ask** before upgrading it, since other projects
+may use it. On a yes, run the Node line above with `upgrade` in place of `install`.
+
+Done when the check passes.
+
+## 3. Install Rokit and pesde
+
+Both install for the current user without admin rights. These blocks fetch the tested releases and
+verify their hashes.
+
+Check: `Test-Path "$env:USERPROFILE\.rokit\bin\rokit.exe"` is `True`. Otherwise, install Rokit:
+
+```powershell
+$ProgressPreference = 'SilentlyContinue'
+$dir = Join-Path $env:TEMP ("rokit-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $dir | Out-Null
+$zip = Join-Path $dir 'rokit.zip'
+Invoke-WebRequest -Uri 'https://github.com/rojo-rbx/rokit/releases/download/v1.2.0/rokit-1.2.0-windows-x86_64.zip' -OutFile $zip -UseBasicParsing
+if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne 'F9BA1704014FF67D51E8005F605955C7C26D2429A5312A9419DC477FC310E96D') { throw 'Rokit download hash mismatch' }
+Expand-Archive -Path $zip -DestinationPath $dir
+& (Join-Path $dir 'rokit.exe') self-install
+Remove-Item -Recurse -Force $dir
+```
+
+Check: `Test-Path "$env:USERPROFILE\.pesde\bin\pesde.exe"` is `True`. Otherwise, install pesde:
+
+```powershell
+$ProgressPreference = 'SilentlyContinue'
+$dir = Join-Path $env:TEMP ("pesde-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $dir | Out-Null
+$zip = Join-Path $dir 'pesde.zip'
+Invoke-WebRequest -Uri 'https://github.com/pesde-pkg/pesde/releases/download/v0.7.4%2Bregistry.0.2.3/pesde-0.7.4-windows-x86_64.zip' -OutFile $zip -UseBasicParsing
+if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne 'D0FF842217FD4FF462253E7F82653EB9B9FE9BFCAC3E7AA1EDF97078F127C3C1') { throw 'pesde download hash mismatch' }
+Expand-Archive -Path $zip -DestinationPath $dir
+& (Join-Path $dir 'pesde.exe') self-install
+Remove-Item -Recurse -Force $dir
+```
+
+Done when `rokit --version` and `& "$env:USERPROFILE\.pesde\bin\pesde.exe" --version` both print a
+version.
+
+## 4. Get the `claude` command
+
+The VS Code extension runs its own private copy of Claude Code, so the `claude` command the next
+steps use may be missing.
+
+Check: `claude --version` runs. Otherwise, install the standalone CLI:
+
+```powershell
+irm https://claude.ai/install.ps1 | iex
+$p = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($p -notlike "*$env:USERPROFILE\.local\bin*") { [Environment]::SetEnvironmentVariable('Path', "$p;$env:USERPROFILE\.local\bin", 'User') }
+```
+
+The last two lines put the CLI's folder on the viewer's PATH when the installer leaves it off.
+
+Done when `claude --version` runs.
+
+## 5. Sign in to GitHub
+
+Check: this prints `success` and a scope list that includes `workflow`:
+
+```powershell
+$a = (gh auth status --json hosts | ConvertFrom-Json).hosts.'github.com' | Where-Object active
+"$($a.state) $($a.scopes)"
+```
+
+When it prints no `success`: **Viewer:** open a terminal in VS Code (**Terminal > New Terminal**), run
+this, and finish the sign-in in the browser:
+
+```powershell
+& "$env:ProgramFiles\GitHub CLI\gh.exe" auth login --hostname github.com --git-protocol https --web --scopes workflow
+```
+
+When it prints `success` without `workflow`: **Viewer:** run the same command with
+`auth refresh --hostname github.com --scopes workflow` in place of everything after `gh.exe`.
+The `workflow` scope lets the template's CI files push.
+
+Once the check passes, make gh the credential helper Git pushes with:
+
+```powershell
+gh auth setup-git
+```
+
+In the same message that asks for the sign-in, **Stop and ask** what the GitHub repo should be
+called (suggest the folder name, with spaces as hyphens) and whether it's public or private, unless
+the viewer already said.
+
+Done when the check passes and you have the repo's name and visibility.
+
+## 6. Copy the template
+
+Check: `default.project.json` exists in the project folder. Otherwise:
+
+```powershell
+$src = "$env:TEMP\roblox-setup\roblox-skills-TAG"
+if (-not (Test-Path $src)) { git clone --depth 1 --branch TAG https://github.com/Crusherfire-Media/roblox-skills.git $src }
+Copy-Item -Path "$src\template\*" -Destination . -Recurse -Force
+```
+
+The template's `pesde.toml` stands in for `pesde init`, which only runs with a person typing
+answers.
+
+Done when `default.project.json`, `rokit.toml`, and `pesde.toml` exist in the project folder.
+
+## 7. Install the VS Code extensions
+
+The template's `.vscode/extensions.json` lists them.
+
+```powershell
+$want = (Get-Content .vscode\extensions.json -Raw | ConvertFrom-Json).recommendations
+$have = code --list-extensions
+$want | Where-Object { $have -notcontains $_ } | ForEach-Object { code --install-extension $_ }
+```
+
+**Viewer:** if VS Code asks whether to trust an extension's publisher, click **Trust**.
+
+Done when `code --list-extensions` lists every ID in `extensions.json`. When one stays missing:
+**Viewer:** open the Extensions view, search `@recommended`, and install it there.
+
+## 8. Install the Roblox tools and run the checks
+
+Each of these commands skips what's already done, so run them every time:
+
+```powershell
+rokit trust rojo-rbx/rojo lune-org/lune JohnnyMorganz/StyLua Kampfkarren/selene JohnnyMorganz/luau-lsp
+rokit install
+& "$env:USERPROFILE\.pesde\bin\pesde.exe" install
+if (-not (Test-Path globalTypes.None.d.luau)) { curl.exe -fsSL -o globalTypes.None.d.luau https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau }
+```
+
+`rokit trust` comes first because Rokit's trust question fails in your shell. When `pesde install`
+stops at a question: **Viewer:** run `& "$env:USERPROFILE\.pesde\bin\pesde.exe" install` in the VS
+Code terminal and answer it.
+
+Then run the five commands under "A change is done when these all pass" in the project's
+`CLAUDE.md`.
+
+Done when all five exit with code 0.
+
+## 9. Install the Studio plugins, the Claude Code plugins, and the MCP
+
+Run each block every time; each one skips or harmlessly repeats what's done.
+
+The Rojo and MCP plugins for Studio (each overwrites its plugin file with the same version):
+
+```powershell
+rojo plugin install
+npx.cmd -y @chrrxs/robloxstudio-mcp@latest --install-plugin
+```
+
+The marketplaces and plugins, all at user scope:
+
+```powershell
+$m = claude plugin marketplace list --json | ConvertFrom-Json
+if (-not ($m | Where-Object name -eq 'claude-plugins-official')) { claude plugin marketplace add anthropics/claude-plugins-official }
+$cf = $m | Where-Object name -eq 'crusherfire'
+if ($cf -and $cf.ref -ne 'TAG') { claude plugin marketplace remove crusherfire; $cf = $null }
+if (-not $cf) { claude plugin marketplace add 'Crusherfire-Media/roblox-skills#TAG' }
+$installed = claude plugin list --json | ConvertFrom-Json | Where-Object scope -eq 'user' | ForEach-Object { $_.id }
+foreach ($id in 'roblox-dev@crusherfire', 'mattpocock-skills@claude-plugins-official') { if ($installed -notcontains $id) { claude plugin install $id } }
+```
+
+The `#TAG` pins the marketplace, and with it `roblox-dev`, to this release. When the block removes
+an older `crusherfire` marketplace, tell the viewer it was replaced with this release's.
+
+The Studio MCP, at user scope so it works in every folder. An "already exists" error means it's
+done:
+
+```powershell
+claude mcp add --scope user robloxstudio -- npx -y @chrrxs/robloxstudio-mcp@latest --auto-install-plugin
+```
+
+Done when `claude plugin list --json` shows `roblox-dev@crusherfire` and
+`mattpocock-skills@claude-plugins-official` at user scope, `claude plugin marketplace list --json`
+shows `crusherfire` with `ref` set to the tag, and the MCP add succeeded or said it already exists.
+
+## 10. Create the GitHub repo
+
+Set the Git identity only where it's missing, from the viewer's GitHub account:
+
+```powershell
+if (-not (git config --global --get user.name) -or -not (git config --global --get user.email)) {
+  $u = gh api user | ConvertFrom-Json
+  if (-not (git config --global --get user.name)) { git config --global user.name $(if ($u.name) { $u.name } else { $u.login }) }
+  if (-not (git config --global --get user.email)) { git config --global user.email "$($u.id)+$($u.login)@users.noreply.github.com" }
+}
+```
+
+When it set anything, tell the viewer: commits use their GitHub name and private GitHub noreply
+address, and `git config --global user.name` or `user.email` changes them.
+
+Then commit and push, replacing `<name>` and `<public-or-private>` with the answers from step 5:
+
+```powershell
+if (-not (Test-Path .git)) { git init -b main }
+git rev-parse --verify --quiet HEAD | Out-Null
+if ($LASTEXITCODE -ne 0) { git add -A; git commit -m "Start from the roblox-skills template (TAG)" }
+if (-not (git remote)) { gh repo create <name> --<public-or-private> --source . --push } else { git push -u origin main }
+```
+
+Done when `git status -sb` starts with `## main...origin/main` and shows nothing ahead.
+
+## 11. Restart VS Code and Studio, once
+
+A new Claude session is what loads the plugins and the MCP, and a fresh VS Code start is what loads
+the new PATH. Studio loads plugins only at startup.
+
+Check: this session lists `roblox-dev:` skills, has the `robloxstudio` MCP server's tools, and
+finds `rokit` with `Get-Command rokit` in a block without the prelude. When all three hold, the
+restart is done.
+
+Otherwise, give the viewer these steps and stop until they're back:
+
+1. Quit VS Code completely with **File > Exit**, closing every window.
+2. Close every Roblox Studio window.
+3. Reopen VS Code on this folder. In the Claude Code panel, click **Session history**, pick this
+   conversation, and type `continue`. In a terminal, `claude --continue` does the same. If Claude
+   Code asks whether to trust this folder or install the plugins its settings name, accept.
+4. Open Roblox Studio and start a new **Baseplate**.
+
+When the viewer resumes, re-read `$env:TEMP\roblox-setup\SETUP.md` and start again at step 1.
+
+## 12. Finish in the new session
+
+1. **Viewer:** type `/setup-matt-pocock-skills` in the chat and answer its questions. Check: the
+   project's `CLAUDE.md` has an `## Agent skills` section. Then commit what it wrote and push:
+   `git add -A; git commit -m "Configure Matt Pocock's skills"; git push`.
+2. Check that the `robloxstudio` MCP server reports a connected Studio place. When it reports none:
+   **Viewer:** in Studio's **Plugins** tab, open the MCP plugin and confirm it shows **Connected**.
+3. **Viewer:** in the VS Code terminal, run `rojo serve`. Then, in the Baseplate, open
+   **Plugins > Rojo** and click **Connect**. Check through the MCP server that `ServerScriptService`
+   now holds the `Start` script.
+
+Done when all three checks pass. Tell the viewer the setup is finished, list anything that still
+needs them, and mention that CI setup is optional and can happen any time they ask for it.
+
+## CI setup (optional)
+
+Run this section only when the viewer asks for it, after step 12. Pull requests already run the
+lint and type checks; this adds the specs in a CI place, publishing to staging on each merge to
+`main`, and publishing to production on each GitHub release. `tools/ci/README.md` explains each
+part; walk the viewer through its Setup section like this:
+
+1. **Viewer:** create three places in the Creator Dashboard: a CI place in an experience of its own,
+   a staging place, and the production place.
+2. **Viewer:** create an Open Cloud API key under **API Keys** in the Creator Dashboard, with exactly
+   these permissions:
+   - **assets**: **Read** and **Write**, on the CI, staging, and production experiences.
+   - **luau-execution-sessions**: **Write**, on the CI experience only.
+
+   Keep **Restrict by Experience** on, leave **Restrict IP addresses** off, and set an expiration
+   date. A key acts as the account that created it, so Roblox recommends a dedicated account for CI;
+   `tools/ci/README.md` says what that account needs.
+3. **Viewer:** store the key by running this in the VS Code terminal at the project root, and paste
+   the key only into its hidden prompt:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File tools/set-api-key.ps1
+   ```
+
+   Check: `gh secret list` shows `ROBLOX_API_KEY`.
+4. Ask the viewer for the CI experience's universe ID and the three place IDs, or the Creator
+   Dashboard URLs they appear in (`.../experiences/<universe id>/places/<place id>/...`). IDs aren't
+   secret. Set each variable that `gh variable list` doesn't already show with that value:
+
+   ```powershell
+   gh variable set CI_UNIVERSE_ID --body <id>
+   gh variable set CI_PLACE_ID --body <id>
+   gh variable set STAGING_PLACE_ID --body <id>
+   gh variable set PRODUCTION_PLACE_ID --body <id>
+   ```
+
+5. Tell the viewer how to retire the key, for example after trying CI with their own account: delete
+   the secret with `gh secret delete ROBLOX_API_KEY` **and** revoke the key in the Creator Dashboard.
+   Deleting the secret alone leaves the key working.
+
+Done when `gh secret list` shows `ROBLOX_API_KEY` and `gh variable list` shows all four variables.
+
+## Common problems
+
+| Symptom | Fix |
+|---|---|
+| `winget` "is not recognized" | Run `Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe`, then retry. |
+| A winget install fails right after the UAC prompt | The prompt was declined or timed out. Run the install again and have the viewer click **Yes**. |
+| A tool "is not recognized" before the restart | Start the block with the PATH prelude. |
+| A tool "is not recognized" after the restart | **Viewer:** close every VS Code window and terminal and reopen. If that fails, sign out of Windows and back in, or restart Windows. |
+| "running scripts is disabled on this system" | Use `npx.cmd` or `npm.cmd`. For the viewer's own terminal, `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` fixes it; **Stop and ask** first, since it changes a security setting. |
+| Rokit: "has not been marked as trusted" | Run `rokit trust <tool>` with the tool the error names, then `rokit install`. |
+| Rokit: "Failed to find tool ... in any project manifest" | Run the command in the project folder. For `pesde`, a Rokit copy is in the way: call `& "$env:USERPROFILE\.pesde\bin\pesde.exe"`. |
+| Rokit: "os error 2" or "os error 3" | Run `rokit install`. |
+| Rokit or pesde: "GitHub API" or "403" while downloading | GitHub's rate limit for anonymous downloads. Wait a few minutes and retry. |
+| `pesde install` stops at a question | **Viewer:** run `& "$env:USERPROFILE\.pesde\bin\pesde.exe" install` in the VS Code terminal and answer it. |
+| `rojo plugin install`: "Couldn't find registry keys" | Studio isn't installed or hasn't run yet. **Viewer:** launch Studio once and sign in. |
+| A JSON file fails with "Unexpected token on line 1 column 1" | It was saved with a byte order mark. Re-save it as UTF-8 without one; Windows PowerShell's `Set-Content -Encoding utf8` adds one. |
+| "Author identity unknown" on commit | Run the identity block in step 10. |
+| Push rejected: "without `workflow` scope" | **Viewer:** run the `auth refresh` command from step 5, then push again. |
+| `gh repo create`: the name already exists | **Stop and ask** for another name. |
+| "Unable to create ... index.lock: File exists" | Retry once the other Git command finishes. When none is running, delete `.git\index.lock`. |
+| `stylua --check` reports a diff in every file | Files were checked out with CRLF line endings. Confirm `.gitattributes` holds `* text=auto eol=lf`, run `stylua src tools`, and commit. |
+| selene flags `game`, `workspace`, and other Roblox globals | `selene.toml` needs `std = "roblox"`. The template's has it, so run selene from the project root. |
+| `claude plugin marketplace add`: "source doesn't match its extraKnownMarketplaces entry" | An older `crusherfire` marketplace is registered. Run `claude plugin marketplace remove crusherfire`, then step 9 again. |
+| A marketplace add or plugin install fails while cloning over SSH | Put `$env:CLAUDE_CODE_PLUGIN_PREFER_HTTPS = '1'` at the start of the block and retry. |
+| `roblox-dev:` skills are missing after the restart | Check `claude plugin list` shows the plugin enabled. **Viewer:** type `/reload-plugins`, or start a new conversation. |
+| The `robloxstudio` MCP server is missing after the restart | Run `claude mcp list`. When it's listed, the session started before it was added: **Viewer:** start a new conversation. When the saved command contains `cmd` or `C:/`, run `claude mcp remove robloxstudio` and add it again as in step 9. |
+| The Studio MCP plugin never shows **Connected**, or reports a version mismatch | **Viewer:** quit every Claude Code session and every Studio window, then reopen both. If the plugin is missing, run `npx.cmd -y @chrrxs/robloxstudio-mcp@latest --install-plugin` first. |
+| Rojo plugin: "different protocol version" | Run `rojo --version` in the project folder and expect 7.7.x, then `rojo plugin install` and restart Studio. When Studio also has the Creator Store Rojo plugin, uninstall that copy. |
+| `rojo serve`: port 34872 already in use | Another `rojo serve` is running. Close it, or run `rojo serve --port 34873` and enter that port in the Rojo plugin. |
+| `rojo serve` crashes after a folder is deleted or a folder module becomes a file | A known Rojo 7.7.x bug. Run `rojo serve` again and click **Connect**. Rojo 7.6.1 avoids it, but it needs `rojo plugin install` in place of the Creator Store plugin, has no syncback, and lacks 7.7's protection against malicious web pages. |
+| luau-lsp shows no Roblox types or requires in the editor | Open VS Code on the project root, restart VS Code so Rojo is on its PATH, then run **Luau: Regenerate Sourcemap**. |
+| A CI run fails | Find it under "When a run fails" in `tools/ci/README.md`. |
+</content>
+</invoke>
