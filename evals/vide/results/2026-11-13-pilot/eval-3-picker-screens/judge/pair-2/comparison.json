@@ -1,0 +1,125 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both have solid shared reactive screen state, a single UIScale, a PreferredInput-driven touch layout and safe placement. A keeps the title's UITextSizeConstraint at 24 real px without scaling it, so the title stays small on 4K. B switches to a fixed TextSize that scales with the UIScale. B also keeps its screen facts in one global module with a more robust refresh, so B wins.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Shared live screen facts",
+          "score": 4,
+          "note": "Responsive.luau holds a global PreferredInput source, and each Screen derives Size/Scale/SizeClass from a live AbsoluteSize `changed` listener and passes them through a Vide context. It is reusable, but size state lives per Screen rather than in one module."
+        },
+        {
+          "criterion": "Large screens scale as a whole",
+          "score": 5,
+          "note": "One UIScale on the Root frame, bound to computeScale(shortSide/1020), with Root sized at 1/scale so it exactly fills the ScreenGui."
+        },
+        {
+          "criterion": "Small screens change layout, not shrink",
+          "score": 5,
+          "note": "Scale is clamped to at least 1. Compact screens and touch switch to the Bar layout with 48 px tiles."
+        },
+        {
+          "criterion": "Touch layout from PreferredInput/size",
+          "score": 5,
+          "note": "isBar = isTouch (from PreferredInput) or Compact or the column doesn't fit."
+        },
+        {
+          "criterion": "Clear of thumbstick/jump/topbar",
+          "score": 5,
+          "note": "The bar sits at the top centre with an 8 px margin, inside CoreUISafeInsets."
+        },
+        {
+          "criterion": "Title text scales",
+          "score": 1,
+          "note": "Keeps TextScaled with UITextSizeConstraint MaxTextSize = 24, not multiplied by scale, so the title stays capped at 24 real px on 4K."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Valid Vide bindings, context used correctly, selection preserved, all checks pass. The ring is rebuilt with padding so it scales."
+        }
+      ],
+      "overall_score": 7
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Shared live screen facts",
+          "score": 5,
+          "note": "A global Screen module holds viewport, inset, prefersTouch and isLargeDisplay sources, refreshed on ViewportSize, CurrentCamera, TopbarInset and PreferredInput changes, with a guard against the 1x1 startup viewport."
+        },
+        {
+          "criterion": "Large screens scale as a whole",
+          "score": 5,
+          "note": "gameScreenGui adds one UIScale bound to Screen.uiScale (short side/1080, clamped 1-3)."
+        },
+        {
+          "criterion": "Small screens change layout, not shrink",
+          "score": 5,
+          "note": "Minimum scale is 1. isPhone triggers the Row layout with 52 px tiles."
+        },
+        {
+          "criterion": "Touch layout from PreferredInput/size",
+          "score": 5,
+          "note": "isTouchLayout = PreferredInput == Touch or a phone-sized short side."
+        },
+        {
+          "criterion": "Clear of thumbstick/jump/topbar",
+          "score": 4,
+          "note": "The row is anchored top-right at (1,-12,0,12) under the default safe insets. The computed inset fact (usableSize) is never used."
+        },
+        {
+          "criterion": "Title text scales",
+          "score": 5,
+          "note": "Removes UITextSizeConstraint and uses a fixed TextSize from metrics, so UIScale grows it."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Valid Vide (derive/read, bound props), selection intact, all checks pass. The story files are neutral."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7,
+      "strengths": [
+        "Clean Screen + Responsive context pattern for future screens",
+        "Safe insets plus a single UIScale",
+        "Uses PreferredInput together with fit-based layout switching",
+        "Number-key hints for keyboard players"
+      ],
+      "weaknesses": [
+        "Title UITextSizeConstraint cap is not scaled, so the title stays small on 4K",
+        "Size facts are per Screen rather than in one global module"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Single global reactive screen-facts module with a robust refresh",
+        "Title moved to a fixed TextSize so it scales on 4K",
+        "A reusable gameScreenGui helper guarantees the UIScale",
+        "Thumb-sized row placed clear of the touch controls"
+      ],
+      "weaknesses": [
+        "The inset/usableSize fact is computed but unused",
+        "Placement logic lives in Main rather than in the component"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 7,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

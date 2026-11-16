@@ -1,0 +1,114 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts pass every check and get the springs, the offset-based highlight glide and the mouse/touch press feedback right. B creates its slide spring outside the show, so it starts at the hidden offset and the slide-up is certain; reopening during the closing slide retargets the same mounted panel. A uses the show removal-delay and present pattern, but its slide spring starts at whatever present() returns when the picker is created, which risks no slide-up. Its fixed 0.4 s delay is also tight for the slide. B's dependence on the spring settling exactly is a smaller risk, since an unremoved panel is off screen and takes no clicks. B wins narrowly.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Vide springs in component bodies",
+          "score": 5,
+          "note": "The `slideOffset`, highlight `position` and tile `scale` springs are all created in component bodies and bound to Position or Size; nothing is created inside a binding."
+        },
+        {
+          "criterion": "Closing slide plays / opening slides panel",
+          "score": 4,
+          "note": "`show(isBuildMode, function(_, present) ... , PICKER_EXIT_SECONDS)` keeps the picker in the tree until the slide-down ends and moves the panel's Position, not UIScale. But the spring starts at whatever `present()` returns when it is created, so the slide-up only plays if `present` starts false, and the 0.4 s delay is tight for a 0.35 s spring."
+        },
+        {
+          "criterion": "Spam robustness",
+          "score": 4,
+          "note": "`Interactable = isShown` blocks clicks while closing, and show's delay or `present` pattern should reverse cleanly when reopened. This rests on show's internal handling rather than state the attempt controls itself."
+        },
+        {
+          "criterion": "Highlight glide in offset units",
+          "score": 5,
+          "note": "The highlight sits in the padded panel at `UDim2.fromOffset((index - 1) * (TILE_SIZE + TILE_GAP), 0)`, all in offset units with no AbsolutePosition."
+        },
+        {
+          "criterion": "Press feedback",
+          "score": 5,
+          "note": "InputBegan/InputEnded for MouseButton1 and Touch drive `isPressed`, MouseLeave resets it, and keyboard activation gets an extra impulse."
+        },
+        {
+          "criterion": "Correctness and scope",
+          "score": 4,
+          "note": "All checks pass and selection, placement and scaling are kept. Adding `Vide.strict = RunService:IsStudio()` is an unrequested global change."
+        }
+      ],
+      "overall_score": 7.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Vide springs in component bodies",
+          "score": 5,
+          "note": "The `offset` spring is in the blockPicker body, and the ring and tile springs are made in the show builder or component bodies. No spring is created inside an effect or binding."
+        },
+        {
+          "criterion": "Closing slide plays / opening slides panel",
+          "score": 5,
+          "note": "The spring starts hidden because Open is false at startup and retargets to `SHOWN_OFFSET`. `isMounted = Open() or offset() ~= hiddenOffset` keeps the panel until it is off screen, and the slide moves Position."
+        },
+        {
+          "criterion": "Spam robustness",
+          "score": 4,
+          "note": "Reopening mid-slide keeps the panel mounted and retargets the same spring, and `Interactable = props.Open` blocks clicks while closing. Removal depends on the spring settling exactly on `hiddenOffset`; if it never does, an invisible panel lingers, which is harmless."
+        },
+        {
+          "criterion": "Highlight glide in offset units",
+          "score": 5,
+          "note": "`PANEL_PADDING - RING_OUTSET + (selectedIndex() - 1) * TILE_STRIDE` uses only offset units."
+        },
+        {
+          "criterion": "Press feedback",
+          "score": 5,
+          "note": "MouseButton1 and Touch set `isPressed` on InputBegan and clear it on InputEnded or MouseLeave, and a UIScale spring squashes the button."
+        },
+        {
+          "criterion": "Correctness and scope",
+          "score": 5,
+          "note": "All checks pass, and replacing UIPadding with an inset Tiles frame keeps the layout matched to the ring math."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7.5,
+      "strengths": [
+        "Uses Vide's intended show removal-delay and present pattern",
+        "Clean offset math for the highlight",
+        "Press feedback for mouse and touch, plus an impulse for keyboard activation"
+      ],
+      "weaknesses": [
+        "The slide-up depends on `present` starting false; otherwise the panel pops in",
+        "The fixed 0.4 s exit delay is only loosely tied to the spring's settle time",
+        "Sets Vide.strict, which is out of scope"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "The slide-up is guaranteed because the spring lives outside show and starts hidden",
+        "Reopening mid-close retargets the same panel with no remount",
+        "The ring sits slightly outside the tile, so a squashed tile still reads as selected"
+      ],
+      "weaknesses": [
+        "Removal relies on the spring exactly equalling its target",
+        "Changes the BlockPicker API so the component handles its own show, a bit more coupling"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 7.5,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

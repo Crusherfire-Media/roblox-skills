@@ -1,0 +1,111 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts fix the outline, the info card, the stacking Q/E handler, the leftover pickers and the unreported misuses in essentially the same way, and all checks pass for both. A's switch to `mount` is slightly more idiomatic. However, A also adds a global `Vide.strict` setting that the task didn't ask for, which goes against the instruction to keep everything else unchanged. B stays tightly within scope, so it wins narrowly.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Fixes the outline",
+          "score": 5,
+          "note": "`isSelected` is now `derive(function() return props.Selected() == props.BlockType.Name end)`, and the UIStroke `Color` and `Thickness` are functions that read `isSelected()`, so the outline follows the selection."
+        },
+        {
+          "criterion": "Fixes the info card error",
+          "score": 5,
+          "note": "`show(isHovered, function() return infoCard({...}) end)` builds the card in a stable scope instead of inside a children binding."
+        },
+        {
+          "criterion": "Fixes the stacking Q/E handler",
+          "score": 5,
+          "note": "`cleanup(UserInputService.InputBegan:Connect(onInputBegan))` ties the connection to the picker's scope, so handlers don't pile up and Q and E stop working outside build mode."
+        },
+        {
+          "criterion": "Fixes the leftover pickers",
+          "score": 5,
+          "note": "`pickerGui` calls `cleanup(gui)` and is mounted with `mount(pickerGui, playerGui)`, with an `if destroyPicker then return end` guard, so destroying the mount removes the ScreenGui."
+        },
+        {
+          "criterion": "Fixes the unreported misuses",
+          "score": 5,
+          "note": "`WaitForChild(\"PlayerGui\")` now runs at module level outside any scope, and `selectedDisplayName` is a plain function instead of an effect writing a source."
+        },
+        {
+          "criterion": "Keeps look and behavior, scope, checks",
+          "score": 4,
+          "note": "All checks pass and the look is unchanged, but it adds `Vide.strict = RunService:IsStudio()`, a global setting change that wasn't asked for."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Fixes the outline",
+          "score": 5,
+          "note": "`isSelected` is now a function, and the UIStroke `Color` and `Thickness` are bound to functions that read `isSelected()`."
+        },
+        {
+          "criterion": "Fixes the info card error",
+          "score": 5,
+          "note": "`show(isHovered, function() return infoCard({...}) end)` builds the card in a stable scope, and a comment explains why."
+        },
+        {
+          "criterion": "Fixes the stacking Q/E handler",
+          "score": 5,
+          "note": "The InputBegan connection is stored in `connection` and passed to `cleanup(connection)`, so it is disconnected when the picker's scope is destroyed."
+        },
+        {
+          "criterion": "Fixes the leftover pickers",
+          "score": 5,
+          "note": "The root now calls `cleanup(gui)` on the ScreenGui it parents to PlayerGui, and `openPicker` calls `closePicker()` first, so no old pickers are left."
+        },
+        {
+          "criterion": "Fixes the unreported misuses",
+          "score": 5,
+          "note": "`WaitForChild` moves to module level, and `selectedDisplayName` becomes a typed plain function."
+        },
+        {
+          "criterion": "Keeps look and behavior, scope, checks",
+          "score": 5,
+          "note": "The changes are minimal and stay in the two files, all checks pass, and the look and behavior are unchanged."
+        }
+      ],
+      "overall_score": 9
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Uses `mount` and `cleanup(gui)` in the idiomatic Vide way, with a guard against opening twice.",
+        "Uses `derive` for `isSelected` and reuses it for the info card.",
+        "All checks pass."
+      ],
+      "weaknesses": [
+        "Adds a `Vide.strict` setting outside the task's scope, which changes how Vide runs in Studio."
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "The smallest set of changes that fixes every bug.",
+        "Comments explain each Vide fix.",
+        "Opening the picker always closes the previous one first."
+      ],
+      "weaknesses": [
+        "Keeps `root` with `Parent =` instead of the more idiomatic `mount`, though the result works the same."
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 9
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

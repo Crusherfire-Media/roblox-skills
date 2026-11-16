@@ -1,0 +1,142 @@
+diff --git a/src/ServerScriptService/Placement.server.luau b/src/ServerScriptService/Placement.server.luau
+new file mode 100644
+index 0000000..2381eec
+--- /dev/null
++++ b/src/ServerScriptService/Placement.server.luau
+@@ -0,0 +1,136 @@
++--!strict
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Shared = ReplicatedStorage:WaitForChild("Shared")
++local BlockTypes = require(Shared:WaitForChild("BlockTypes"))
++local PlacementRules = require(Shared:WaitForChild("PlacementRules"))
++
++local MAX_BLOCKS_PER_PLAYER = 150
++local PLACE_COOLDOWN = 0.1 -- seconds between accepted PlaceBlock requests from one player
++
++local placeBlock = Instance.new("RemoteEvent")
++placeBlock.Name = "PlaceBlock"
++placeBlock.Parent = ReplicatedStorage
++
++local removeBlock = Instance.new("RemoteEvent")
++removeBlock.Name = "RemoveBlock"
++removeBlock.Parent = ReplicatedStorage
++
++local blocksFolder = Instance.new("Folder")
++blocksFolder.Name = "PlacedBlocks"
++blocksFolder.Parent = workspace
++
++-- Ownership lives on the server only. The OwnerUserId attribute on each part is for clients
++-- to read (e.g. to highlight their own blocks) and is never trusted here.
++local ownerOf: { [BasePart]: Player } = {}
++local blocksOf: { [Player]: { [BasePart]: true } } = {}
++local blockCount: { [Player]: number } = {}
++local lastPlaceTime: { [Player]: number } = {}
++
++local function forgetBlock(part: BasePart)
++	local owner = ownerOf[part]
++	if not owner then
++		return
++	end
++	ownerOf[part] = nil
++	local owned = blocksOf[owner]
++	if owned and owned[part] then
++		owned[part] = nil
++		blockCount[owner] -= 1
++	end
++end
++
++local function createBlock(blockType: BlockTypes.BlockType, center: Vector3, owner: Player): BasePart
++	local style = BlockTypes.STYLES[blockType]
++	local size = PlacementRules.BLOCK_SIZE
++
++	local part = Instance.new("Part")
++	part.Name = blockType
++	part.Size = Vector3.one * size
++	part.CFrame = CFrame.new(center)
++	part.Anchored = true
++	part.TopSurface = Enum.SurfaceType.Smooth
++	part.BottomSurface = Enum.SurfaceType.Smooth
++	part.Color = style.color
++	part.Material = style.material
++	part.Transparency = style.transparency
++	part:SetAttribute("BlockType", blockType)
++	part:SetAttribute("OwnerUserId", owner.UserId)
++
++	ownerOf[part] = owner
++	blocksOf[owner][part] = true
++	blockCount[owner] += 1
++
++	-- Covers the part being destroyed by anything other than RemoveBlock
++	part.Destroying:Connect(function()
++		forgetBlock(part)
++	end)
++
++	part.Parent = blocksFolder
++	return part
++end
++
++local function trackPlayer(player: Player)
++	if blocksOf[player] then
++		return -- already picked up by the GetPlayers loop
++	end
++	blocksOf[player] = {}
++	blockCount[player] = 0
++end
++
++placeBlock.OnServerEvent:Connect(function(player: Player, blockType: unknown, position: unknown)
++	local owned = blocksOf[player]
++	if not owned then
++		return -- player is leaving
++	end
++
++	local now = os.clock()
++	local last = lastPlaceTime[player]
++	if last and now - last < PLACE_COOLDOWN then
++		return
++	end
++	lastPlaceTime[player] = now
++
++	if blockCount[player] >= MAX_BLOCKS_PER_PLAYER then
++		return
++	end
++
++	local ok, result = PlacementRules.validate(blockType, position, player.Character, blocksFolder)
++	if not ok then
++		warn(`Rejected placement from {player.Name}: {result}`)
++		return
++	end
++
++	createBlock(blockType :: BlockTypes.BlockType, result :: Vector3, player)
++end)
++
++removeBlock.OnServerEvent:Connect(function(player: Player, part: unknown)
++	if typeof(part) ~= "Instance" or not part:IsA("BasePart") then
++		return
++	end
++	if ownerOf[part] ~= player then
++		return
++	end
++	forgetBlock(part)
++	part:Destroy()
++end)
++
++Players.PlayerAdded:Connect(trackPlayer)
++for _, player in Players:GetPlayers() do
++	trackPlayer(player)
++end
++
++Players.PlayerRemoving:Connect(function(player: Player)
++	local owned = blocksOf[player]
++	-- Drop the tables first so the Destroying handlers below have nothing to update
++	blocksOf[player] = nil
++	blockCount[player] = nil
++	lastPlaceTime[player] = nil
++	if owned then
++		for part in owned do
++			ownerOf[part] = nil
++			part:Destroy()
++		end
++	end
++end)

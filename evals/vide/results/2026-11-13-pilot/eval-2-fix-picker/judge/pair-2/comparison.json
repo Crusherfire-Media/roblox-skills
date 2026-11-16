@@ -1,0 +1,114 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts make the same correct fixes. Each binds the stroke's properties to the selection, builds the info card with `show`, wraps the Q/E connection in `cleanup`, removes the ScreenGui with `cleanup(gui)`, moves `WaitForChild` out of the Vide scope, and replaces the effect with a plain function. The deciding difference is that A's own code fails `stylua --check`, while B passes every check. B's one extra line, `Vide.strict` in Studio, is minor and harmless, so B is the cleaner change to merge.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Fixes the outline",
+          "score": 5,
+          "note": "`isSelected` is now a `derive`, and the UIStroke's `Color` and `Thickness` are functions that read `isSelected()`."
+        },
+        {
+          "criterion": "Fixes the info card error",
+          "score": 5,
+          "note": "The function child is replaced with `show(isHovered, function() return infoCard(...) end)`."
+        },
+        {
+          "criterion": "Fixes the stacking Q/E handler",
+          "score": 5,
+          "note": "The InputBegan connection is wrapped in `cleanup(...)`, so it disconnects when the picker scope is destroyed."
+        },
+        {
+          "criterion": "Fixes the leftover pickers",
+          "score": 5,
+          "note": "Inside `root`, the ScreenGui is registered with `cleanup(gui)` and then parented; `openPicker` also returns early if a picker already exists."
+        },
+        {
+          "criterion": "Fixes the unreported misuses",
+          "score": 5,
+          "note": "`WaitForChild(\"PlayerGui\")` moves to the top level of the script, and `selectedDisplayName` becomes a plain function instead of an effect writing a source."
+        },
+        {
+          "criterion": "Keeps look/behavior, minimal changes, checks pass",
+          "score": 3,
+          "note": "The changes are minimal and luau-lsp and selene pass, but `stylua --check` fails on the reformatted `cleanup(InputBegan:Connect(...))` block; `ResetOnSpawn = false` is redundant with Vide's defaults but harmless."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Fixes the outline",
+          "score": 5,
+          "note": "`isSelected` is a plain function, and the stroke's `Color` and `Thickness` are bound to functions that call it."
+        },
+        {
+          "criterion": "Fixes the info card error",
+          "score": 5,
+          "note": "Uses `show(isHovered, function() return infoCard(...) end)` and passes `IsSelected = isSelected`."
+        },
+        {
+          "criterion": "Fixes the stacking Q/E handler",
+          "score": 5,
+          "note": "The InputBegan connection is wrapped in `cleanup(...)` inside `blockPicker`."
+        },
+        {
+          "criterion": "Fixes the leftover pickers",
+          "score": 5,
+          "note": "`mount(fn, playerGui)` with `cleanup(gui)` inside, so `destroyPicker` destroys the ScreenGui; `openPicker` calls `closePicker()` first."
+        },
+        {
+          "criterion": "Fixes the unreported misuses",
+          "score": 5,
+          "note": "`playerGui` is fetched at the top level of the script, and `selectedDisplayName` is a plain function."
+        },
+        {
+          "criterion": "Keeps look/behavior, minimal changes, checks pass",
+          "score": 5,
+          "note": "All checks pass, including StyLua; the added `Vide.strict = RunService:IsStudio()` is extra but only affects Studio debugging."
+        }
+      ],
+      "overall_score": 9
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Correct fixes for all four reported bugs",
+        "Moves the yield out of the root scope and removes the effect that writes a source",
+        "The guard in openPicker prevents creating a second picker",
+        "Helpful comments explaining why"
+      ],
+      "weaknesses": [
+        "Fails the StyLua formatting check because of its own code",
+        "Redundant `ResetOnSpawn` property"
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "Correct fixes for all four reported bugs and both unreported misuses",
+        "Clean use of `mount` plus `cleanup`",
+        "Passes luau-lsp, selene, and StyLua"
+      ],
+      "weaknesses": [
+        "Adds `Vide.strict`, a small change the task didn't ask for",
+        "Recreates the picker rather than returning early if it is already open (harmless)"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8,
+    "with_skill": 9
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

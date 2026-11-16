@@ -1,0 +1,484 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index b45f323..9a616e9 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -1,33 +1,55 @@
+ --[[
+-	The block picker: a column of tiles down the left side of the screen, one per block type, each
+-	with the block's name beside it, under a title naming the selected block.
++	The block picker: one tile per block type plus a title naming the selected block. Sizes are in
++	design units (see UI/Responsive); put it inside a UI/Screen so it's scaled for the device.
++
++	It switches layout live as the device changes:
++	- "Column", for keyboard and mouse or gamepad with room to spare: a column down the left side,
++	  each tile with the block's name beside it and, with a keyboard, its number key.
++	- "Bar", for touch or a compact screen: a row of tiles along the top centre, with the title
++	  underneath. That keeps it clear of the thumbstick (bottom left) and jump button (bottom
++	  right), and makes the tiles finger-sized.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Responsive = require(script.Parent.UI.Responsive)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
++local derive = Vide.derive
+ 
+ type BlockType = BlockTypes.BlockType
++type Layout = "Column" | "Bar"
+ 
+ local TILE_SIZE = 40
+ local TILE_GAP = 6
+ local TILE_RADIUS = 6
+ local NAME_WIDTH = 96
+-local TITLE_HEIGHT = 30
++local NAME_TEXT_SIZE = 16
++local HINT_SIZE = 16
++local HINT_TEXT_SIZE = 12
++local COLUMN_TITLE_HEIGHT = 30
++local BAR_TITLE_HEIGHT = 22
+ local TITLE_MAX_TEXT_SIZE = 24
+ local PANEL_PADDING = 10
+ local PANEL_RADIUS = 10
++local SCREEN_MARGIN = 20
+ local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+ local SELECTED_COLOR = Color3.fromRGB(255, 200, 60)
+ local IDLE_STROKE_COLOR = Color3.fromRGB(70, 70, 80)
+ local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
++local HINT_COLOR = Color3.fromRGB(0, 0, 0)
++
++local COLUMN_WIDTH = TILE_SIZE + TILE_GAP + NAME_WIDTH
++local BAR_WIDTH = #BlockTypes.List * TILE_SIZE + (#BlockTypes.List - 1) * TILE_GAP
+ 
+ type TileProps = {
+ 	BlockType: BlockType,
+ 	LayoutOrder: number,
++	Hotkey: string?,
++	Layout: () -> Layout,
++	ShowHotkey: () -> boolean,
+ 	IsSelected: () -> boolean,
+ 	Select: () -> (),
+ }
+@@ -36,8 +58,12 @@ local function tile(props: TileProps): TextButton
+ 	return create("TextButton")({
+ 		Name = props.BlockType.Name,
+ 		LayoutOrder = props.LayoutOrder,
+-		Size = UDim2.fromOffset(TILE_SIZE + TILE_GAP + NAME_WIDTH, TILE_SIZE),
++		Size = function()
++			local width = if props.Layout() == "Column" then COLUMN_WIDTH else TILE_SIZE
++			return UDim2.fromOffset(width, TILE_SIZE)
++		end,
+ 		BackgroundTransparency = 1,
++		Text = "",
+ 
+ 		Activated = props.Select,
+ 
+@@ -55,17 +81,38 @@ local function tile(props: TileProps): TextButton
+ 					return if props.IsSelected() then 3 else 1
+ 				end,
+ 			}),
++
++			create("TextLabel")({
++				Name = "Hotkey",
++				Visible = function()
++					return props.Hotkey ~= nil and props.ShowHotkey()
++				end,
++				Position = UDim2.fromOffset(2, 2),
++				Size = UDim2.fromOffset(HINT_SIZE, HINT_SIZE),
++				BackgroundColor3 = HINT_COLOR,
++				BackgroundTransparency = 0.45,
++				Font = Enum.Font.GothamBold,
++				TextSize = HINT_TEXT_SIZE,
++				TextColor3 = TEXT_COLOR,
++				Text = props.Hotkey or "",
++
++				create("UICorner")({ CornerRadius = UDim.new(0, 4) }),
++			}),
+ 		}),
+ 
+ 		create("TextLabel")({
+ 			Name = "BlockName",
++			Visible = function()
++				return props.Layout() == "Column"
++			end,
+ 			Position = UDim2.fromOffset(TILE_SIZE + TILE_GAP, 0),
+ 			Size = UDim2.fromOffset(NAME_WIDTH, TILE_SIZE),
+ 			BackgroundTransparency = 1,
+ 			Font = Enum.Font.Gotham,
+-			TextSize = 16,
++			TextSize = NAME_TEXT_SIZE,
+ 			TextColor3 = TEXT_COLOR,
+ 			TextXAlignment = Enum.TextXAlignment.Left,
++			TextTruncate = Enum.TextTruncate.AtEnd,
+ 			Text = props.BlockType.DisplayName,
+ 		}),
+ 	})
+@@ -74,14 +121,32 @@ end
+ export type BlockPickerProps = {
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
++	-- Key labels by block index, shown on the tiles while the player uses a keyboard.
++	Hotkeys: { string }?,
+ }
+ 
+ local function blockPicker(props: BlockPickerProps): Frame
++	local layout = derive(function(): Layout
++		if Responsive.inputKind() == "Touch" or Responsive.sizeClass() == "Compact" then
++			return "Bar"
++		end
++		return "Column"
++	end)
++	local isColumn = derive(function()
++		return layout() == "Column"
++	end)
++	local showHotkeys = derive(function()
++		return Responsive.inputKind() == "KeyboardMouse"
++	end)
++
+ 	local tiles = {}
+ 	for index, blockType in BlockTypes.List do
+ 		tiles[index] = tile({
+ 			BlockType = blockType,
+-			LayoutOrder = index + 1,
++			LayoutOrder = index,
++			Hotkey = if props.Hotkeys then props.Hotkeys[index] else nil,
++			Layout = layout,
++			ShowHotkey = showHotkeys,
+ 			IsSelected = function()
+ 				return props.Selected() == blockType.Name
+ 			end,
+@@ -93,8 +158,14 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 
+ 	return create("Frame")({
+ 		Name = "BlockPicker",
+-		AnchorPoint = Vector2.new(0, 0.5),
+-		Position = UDim2.new(0, 20, 0.5, 0),
++		AnchorPoint = function()
++			return if isColumn() then Vector2.new(0, 0.5) else Vector2.new(0.5, 0)
++		end,
++		Position = function()
++			return if isColumn()
++				then UDim2.new(0, SCREEN_MARGIN, 0.5, 0)
++				else UDim2.new(0.5, 0, 0, SCREEN_MARGIN)
++		end,
+ 		AutomaticSize = Enum.AutomaticSize.XY,
+ 		BackgroundColor3 = PANEL_COLOR,
+ 		BackgroundTransparency = 0.2,
+@@ -108,18 +179,28 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 		}),
+ 		create("UIListLayout")({
+ 			FillDirection = Enum.FillDirection.Vertical,
++			SortOrder = Enum.SortOrder.LayoutOrder,
+ 			Padding = UDim.new(0, TILE_GAP),
+ 		}),
+ 
+ 		create("TextLabel")({
+ 			Name = "Title",
+-			LayoutOrder = 1,
+-			Size = UDim2.fromOffset(TILE_SIZE + TILE_GAP + NAME_WIDTH, TITLE_HEIGHT),
++			-- Above the tiles in a column, below them in a bar.
++			LayoutOrder = function()
++				return if isColumn() then 1 else 3
++			end,
++			Size = function()
++				return if isColumn()
++					then UDim2.fromOffset(COLUMN_WIDTH, COLUMN_TITLE_HEIGHT)
++					else UDim2.fromOffset(BAR_WIDTH, BAR_TITLE_HEIGHT)
++			end,
+ 			BackgroundTransparency = 1,
+ 			Font = Enum.Font.GothamBold,
+ 			TextScaled = true,
+ 			TextColor3 = TEXT_COLOR,
+-			TextXAlignment = Enum.TextXAlignment.Left,
++			TextXAlignment = function()
++				return if isColumn() then Enum.TextXAlignment.Left else Enum.TextXAlignment.Center
++			end,
+ 			Text = function()
+ 				return BlockTypes.ByName[props.Selected()].DisplayName
+ 			end,
+@@ -127,7 +208,24 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 			create("UITextSizeConstraint")({ MaxTextSize = TITLE_MAX_TEXT_SIZE }),
+ 		}),
+ 
+-		tiles,
++		create("Frame")({
++			Name = "Tiles",
++			LayoutOrder = 2,
++			AutomaticSize = Enum.AutomaticSize.XY,
++			BackgroundTransparency = 1,
++
++			create("UIListLayout")({
++				FillDirection = function()
++					return if isColumn()
++						then Enum.FillDirection.Vertical
++						else Enum.FillDirection.Horizontal
++				end,
++				SortOrder = Enum.SortOrder.LayoutOrder,
++				Padding = UDim.new(0, TILE_GAP),
++			}),
++
++			tiles,
++		}),
+ 	})
+ end
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+index e8d33eb..54a2a0c 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+@@ -32,6 +32,15 @@ local blockTypeChanged = Instance.new("BindableEvent")
+ ]]
+ BlockPlacer.BlockTypeChanged = blockTypeChanged.Event
+ 
++--[[
++	The key that selects each block type, by index into BlockTypes.List, as shown to players.
++]]
++local hotkeyLabels = {}
++for index in NUMBER_KEYS do
++	hotkeyLabels[index] = tostring(index)
++end
++BlockPlacer.HotkeyLabels = table.freeze(hotkeyLabels) :: { string }
++
+ function BlockPlacer.getBlockType(): string
+ 	return selectedName
+ end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 04bc27a..8b61283 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -3,9 +3,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockPicker = require(script.Parent.BlockPicker)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local Screen = require(script.Parent.UI.Screen)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+-local create = Vide.create
+ local mount = Vide.mount
+ local source = Vide.source
+ 
+@@ -18,13 +18,15 @@ BlockPlacer.BlockTypeChanged:Connect(function(name: string)
+ end)
+ 
+ local function app()
+-	return create("ScreenGui")({
++	return Screen({
+ 		Name = "BlockPickerGui",
+-
+-		BlockPicker({
+-			Selected = selected,
+-			Select = BlockPlacer.setBlockType,
+-		}),
++		Children = {
++			BlockPicker({
++				Selected = selected,
++				Select = BlockPlacer.setBlockType,
++				Hotkeys = BlockPlacer.HotkeyLabels,
++			}),
++		},
+ 	})
+ end
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Responsive.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Responsive.luau
+new file mode 100644
+index 0000000..fc53e91
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Responsive.luau
+@@ -0,0 +1,139 @@
++--[[
++	Live facts about the player's screen and input device, as Vide sources, for every UI screen to
++	build on. Each one updates when the player resizes the window, rotates a device, or switches
++	between touch, keyboard and mouse, and gamepad, and only notifies when its value actually
++	changes.
++
++	UI is designed in "design units": the size things should be on a 1080p monitor with a mouse.
++	`scale()` turns design units into screen pixels for the current device, and `Screen` applies it
++	with a UIScale, so components write fixed design-unit sizes and never read `scale()`
++	themselves.
++
++	- `inputKind()`: "KeyboardMouse", "Touch" or "Gamepad", following the same signal Roblox's
++	  own controls use (for example, the touch thumbstick hides when a keyboard is used).
++	- `scale()`: screen pixels per design unit.
++	- `canvasSize()`: the screen's size in design units, which is the space components lay out in.
++	- `sizeClass()`: "Compact" (phones, tiny windows), "Medium" (tablets, small laptop windows) or
++	  "Large" (laptops and monitors), from `canvasSize()`.
++	- `viewportSize()`: the raw viewport size in screen pixels.
++]]
++
++local UserInputService = game:GetService("UserInputService")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local Workspace = game:GetService("Workspace")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local source = Vide.source
++
++export type InputKind = "KeyboardMouse" | "Touch" | "Gamepad"
++export type SizeClass = "Compact" | "Medium" | "Large"
++
++-- Pointer devices scale with the screen's short side, relative to a 1080p screen. Desktop clients
++-- report the viewport in physical pixels, so a 4K monitor gets 2x and a 768p laptop gets the
++-- minimum.
++local POINTER_REFERENCE = 1080
++local POINTER_MIN_SCALE = 0.8
++local POINTER_MAX_SCALE = 3
++
++-- Touch clients report the viewport in points (a phone is around 390 tall). The minimum keeps a
++-- 40-unit tile at 48 points, a comfortable finger target; tablets grow up to the maximum.
++local TOUCH_REFERENCE = 600
++local TOUCH_MIN_SCALE = 1.2
++local TOUCH_MAX_SCALE = 1.6
++
++-- Gamepad players usually sit further from the screen.
++local GAMEPAD_BOOST = 1.25
++
++-- Canvas thresholds, in design units, for the size classes.
++local COMPACT_MAX_HEIGHT = 480
++local COMPACT_MAX_WIDTH = 600
++local MEDIUM_MAX_HEIGHT = 800
++
++local function readInputKind(): InputKind
++	local preferred = UserInputService.PreferredInput
++	if preferred == Enum.PreferredInput.Touch then
++		return "Touch"
++	elseif
++		preferred == Enum.PreferredInput.Gamepad
++		or preferred == Enum.PreferredInput.MicroGamepad
++	then
++		return "Gamepad"
++	end
++	return "KeyboardMouse"
++end
++
++local function computeScale(viewport: Vector2, kind: InputKind): number
++	local shortSide = math.max(math.min(viewport.X, viewport.Y), 1)
++	if kind == "Touch" then
++		return math.clamp(shortSide / TOUCH_REFERENCE, TOUCH_MIN_SCALE, TOUCH_MAX_SCALE)
++	end
++	local scale = math.clamp(shortSide / POINTER_REFERENCE, POINTER_MIN_SCALE, POINTER_MAX_SCALE)
++	if kind == "Gamepad" then
++		scale *= GAMEPAD_BOOST
++	end
++	return scale
++end
++
++local function computeSizeClass(canvas: Vector2): SizeClass
++	if canvas.Y < COMPACT_MAX_HEIGHT or canvas.X < COMPACT_MAX_WIDTH then
++		return "Compact"
++	elseif canvas.Y < MEDIUM_MAX_HEIGHT then
++		return "Medium"
++	end
++	return "Large"
++end
++
++local viewportSize = source(Vector2.new(1920, 1080))
++local inputKind = source(readInputKind())
++local scale = source(1)
++local canvasSize = source(Vector2.new(1920, 1080))
++local sizeClass = source("Large" :: SizeClass)
++
++local function recompute()
++	local viewport = viewportSize()
++	local newScale = computeScale(viewport, inputKind())
++	local canvas = viewport / newScale
++	scale(newScale)
++	canvasSize(canvas)
++	sizeClass(computeSizeClass(canvas))
++end
++
++local cameraConnection: RBXScriptConnection? = nil
++
++local function watchCamera()
++	if cameraConnection then
++		cameraConnection:Disconnect()
++		cameraConnection = nil
++	end
++
++	local camera = Workspace.CurrentCamera
++	if not camera then
++		return
++	end
++
++	local function update()
++		viewportSize(camera.ViewportSize)
++		recompute()
++	end
++	cameraConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(update)
++	update()
++end
++
++Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
++UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(function()
++	inputKind(readInputKind())
++	recompute()
++end)
++watchCamera()
++recompute()
++
++local Responsive = {
++	viewportSize = viewportSize :: () -> Vector2,
++	inputKind = inputKind :: () -> InputKind,
++	scale = scale :: () -> number,
++	canvasSize = canvasSize :: () -> Vector2,
++	sizeClass = sizeClass :: () -> SizeClass,
++}
++
++return table.freeze(Responsive)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+new file mode 100644
+index 0000000..3973e28
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+@@ -0,0 +1,50 @@
++--[[
++	A ScreenGui for one UI screen, set up so its contents are laid out in design units (see
++	Responsive) and scaled to suit the current device.
++
++	Children go inside a full-screen "Root" frame carrying a UIScale. Root is sized at 1 / scale
++	of the screen so that, once scaled, it exactly covers the safe area: scale-based positions
++	(like `UDim2.fromScale(0.5, 0)`) still mean "middle of the screen", and offsets are design
++	units. Root doesn't take input, so taps and clicks on empty space still reach the world.
++
++	The ScreenGui stays inside the safe area (clear of the topbar and any notch) and survives the
++	character respawning, since screens are mounted once from PlayerScripts.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Responsive = require(script.Parent.Responsive)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local create = Vide.create
++
++export type ScreenProps = {
++	Name: string,
++	DisplayOrder: number?,
++	Children: { any },
++}
++
++local function screen(props: ScreenProps): ScreenGui
++	return create("ScreenGui")({
++		Name = props.Name,
++		DisplayOrder = props.DisplayOrder or 0,
++		ResetOnSpawn = false,
++		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
++		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
++
++		create("Frame")({
++			Name = "Root",
++			BackgroundTransparency = 1,
++			Size = function()
++				local scale = Responsive.scale()
++				return UDim2.fromScale(1 / scale, 1 / scale)
++			end,
++
++			create("UIScale")({ Scale = Responsive.scale }),
++
++			props.Children,
++		}),
++	})
++end
++
++return screen

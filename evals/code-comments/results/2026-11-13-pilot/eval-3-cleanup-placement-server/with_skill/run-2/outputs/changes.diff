@@ -1,0 +1,263 @@
+diff --git a/src/ServerScriptService/Placement.server.luau b/src/ServerScriptService/Placement.server.luau
+index d672283..93568c9 100644
+--- a/src/ServerScriptService/Placement.server.luau
++++ b/src/ServerScriptService/Placement.server.luau
+@@ -1,28 +1,18 @@
+ --!strict
+ --[[@description:
+-	Placement.server.luau
+-
+-	This script handles block placement on the server. It creates the PlaceBlock and
+-	RemoveBlock remote events, listens for requests from clients, validates them, and
+-	creates or destroys the blocks. See docs/placement.md for how placement works.
+-
+-	Changelog:
+-	v1.0 - initial version
+-	v1.1 - added RemoveBlock and the per-player block limit
+-	v1.2 - switched the overlap check to OverlapParams
++	Server side of block placement: creates the PlaceBlock and RemoveBlock
++	remotes, validates client requests, and creates or destroys the blocks.
+ ]]
+ 
+ ------------------------------
+ -- SERVICES --
+ ------------------------------
+--- Get the services we need
+-local Players = game:GetService("Players") -- the Players service
+-local ReplicatedStorage = game:GetService("ReplicatedStorage") -- for the remotes
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ ------------------------------
+ -- TYPES --
+ ------------------------------
+--- The style for a block type — color, material, and transparency
+ type BlockStyle = {
+ 	color: Color3,
+ 	material: Enum.Material,
+@@ -35,19 +25,15 @@ type BlockStyle = {
+ -- Keep in sync with GRID_SIZE in PlacementClient
+ local GRID_SIZE = 4
+ 
+--- Max height per the design doc, section 4.2
+ local MAX_HEIGHT = 200
+ 
+ local MAX_REACH = 24 -- studs, from the HumanoidRootPart to the block's center
+ 
+--- Limit is 100 blocks per player
+ local MAX_BLOCKS_PER_PLAYER = 200
+ 
+--- Changed from 0.5 to 0.15 after playtest feedback
+ -- Must stay below the client's 0.2 s click repeat, or held clicks drop blocks
+ local PLACE_COOLDOWN = 0.15
+ 
+--- Table of block styles, one entry per block type
+ -- stylua: ignore
+ local BLOCK_STYLES: { [string]: BlockStyle } = {
+ 	Brick  = { color = Color3.fromRGB(151, 63, 46),   material = Enum.Material.Brick,       transparency = 0 },
+@@ -57,40 +43,31 @@ local BLOCK_STYLES: { [string]: BlockStyle } = {
+ 	Wood   = { color = Color3.fromRGB(150, 110, 70),  material = Enum.Material.WoodPlanks,  transparency = 0 },
+ }
+ 
+--- Create the remote event for placing blocks
+ local placeBlock = Instance.new("RemoteEvent")
+-placeBlock.Name = "PlaceBlock" -- set the name
+-placeBlock.Parent = ReplicatedStorage -- parent it to ReplicatedStorage
++placeBlock.Name = "PlaceBlock"
++placeBlock.Parent = ReplicatedStorage
+ 
+--- Create the remote event for removing blocks
+ local removeBlock = Instance.new("RemoteEvent")
+ removeBlock.Name = "RemoveBlock"
+ removeBlock.Parent = ReplicatedStorage
+ 
+--- Create a folder to hold all the placed blocks
+ local blocksFolder = Instance.new("Folder")
+ blocksFolder.Name = "PlacedBlocks"
+ blocksFolder.Parent = workspace
+ 
+-local lastPlaceTimes: { [Player]: number } = {} -- maps each player to the last time they placed
+-local blockCounts: { [Player]: number } = {} -- maps each player to their block count
++local lastPlaceTimes: { [Player]: number } = {}
++local blockCounts: { [Player]: number } = {}
+ 
+ ------------------------------
+--- Private Functions --
++-- PRIVATE FUNCTIONS --
+ ------------------------------
+---[[ isFiniteNumber
+-	Checks if a number is finite.
+-	@param value number - the number to check
+-	@return boolean - true if the number is finite
+-]]
++
+ local function isFiniteNumber(value: number): boolean
+ 	-- value == value is false only for NaN, which passes every range check
+ 	return value == value and math.abs(value) ~= math.huge
+-end -- isFiniteNumber
++end
+ 
+--- Snaps a position to the grid
+ local function snapToGrid(position: Vector3): Vector3
+-	-- Calculate the snapped position on each axis
+ 	return Vector3.new(
+ 		(math.floor(position.X / GRID_SIZE) + 0.5) * GRID_SIZE,
+ 		(math.floor(position.Y / GRID_SIZE) + 0.5) * GRID_SIZE,
+@@ -98,48 +75,31 @@ local function snapToGrid(position: Vector3): Vector3
+ 	)
+ end
+ 
+--- Uses Region3 to find any parts already in the cell and returns true if the cell is taken
+ local function isOccupied(center: Vector3): boolean
+-	-- Set up the overlap params so only placed blocks are checked
+ 	local params = OverlapParams.new()
+ 	params.FilterType = Enum.RaycastFilterType.Include
+ 	params.FilterDescendantsInstances = { blocksFolder }
+ 
+-	-- Shrink the box so blocks that only share a face don't count as overlapping
++	-- Shrink the box so blocks sharing only a face don't count as overlapping
+ 	local size = Vector3.one * (GRID_SIZE - 0.1)
+-	-- local region = Region3.new(center - size / 2, center + size / 2)
+-	-- return #workspace:FindPartsInRegion3(region, nil, 1) > 0
+ 	return #workspace:GetPartBoundsInBox(CFrame.new(center), size, params) > 0
+ end
+ 
+---[[
+-	onPlaceBlock
+-	Handles the PlaceBlock remote event.
+-	@param player Player - the player who fired the remote
+-	@param blockType unknown - the block type the client sent
+-	@param position unknown - the position the client sent
+-]]
+ local function onPlaceBlock(player: Player, blockType: unknown, position: unknown)
+-	-- ===== Cooldown =====
+-	-- TODO: add a cooldown so players can't spam the remote
+ 	local now = os.clock()
+ 	if now - (lastPlaceTimes[player] or 0) < PLACE_COOLDOWN then
+ 		return
+-	end -- if
++	end
+ 	lastPlaceTimes[player] = now
+ 
+-	-- ===== Validation =====
+-	-- Check if the block type is a string
+ 	if type(blockType) ~= "string" then
+ 		return
+ 	end
+-	-- Look up the style for this block type
+ 	local style = BLOCK_STYLES[blockType]
+ 	if not style then
+ 		return
+ 	end
+ 
+-	-- Make sure the position is a Vector3 with finite components
+ 	if typeof(position) ~= "Vector3" then
+ 		return
+ 	end
+@@ -153,85 +113,66 @@ local function onPlaceBlock(player: Player, blockType: unknown, position: unknow
+ 		return
+ 	end
+ 
+-	-- Snap the position to the grid and check the height
+ 	local center = snapToGrid(position)
+ 	if center.Y < 0 or center.Y > MAX_HEIGHT then
+ 		return
+ 	end
+ 
+-	-- Get the character — bail if it doesn't exist
+ 	local character = player.Character
+ 	local root = character and character:FindFirstChild("HumanoidRootPart")
+ 	if not root or not root:IsA("BasePart") then
+ 		return
+ 	end
+ 
+-	-- We add one extra grid cell of tolerance to the reach check here. This is
+-	-- because the server's copy of the character's position lags behind what the
+-	-- client sees by a few frames due to network latency, which means a player who
+-	-- is moving and placing at max range would otherwise get rejected unfairly.
+-	-- This value was tuned during playtesting.
++	-- One cell of slack: the server's character position lags the client's
+ 	if (root.Position - center).Magnitude > MAX_REACH + GRID_SIZE then
+ 		return
+ 	end
+ 
+-	-- Check the block limit
+ 	if (blockCounts[player] or 0) >= MAX_BLOCKS_PER_PLAYER then
+ 		return
+ 	end
+ 
+-	-- Check if the cell is occupied
+ 	if isOccupied(center) then
+ 		return
+ 	end
+ 
+-	-- ===== Create the block =====
+-	-- Create the part
+ 	local block = Instance.new("Part")
+-	block.Name = blockType -- name it after the block type
+-	block.Anchored = true -- anchor it so it doesn't fall
+-	-- Set the size
++	block.Name = blockType
++	block.Anchored = true
+ 	block.Size = Vector3.one * GRID_SIZE
+ 	block.Position = center
+-	-- Apply the style — color, material, and transparency
+ 	block.Color = style.color
+ 	block.Material = style.material
+ 	block.Transparency = style.transparency
+-	block:SetAttribute("OwnerId", player.UserId) -- store the owner's UserId
++	block:SetAttribute("OwnerId", player.UserId)
+ 	block.Parent = blocksFolder
+ 
+-	-- Increment the block count
+ 	blockCounts[player] = (blockCounts[player] or 0) + 1
+-	-- print("placed", blockType, center)
+-end -- onPlaceBlock
++end
+ 
+--- Handles the RemoveBlock remote event
+ local function onRemoveBlock(player: Player, block: unknown)
+-	-- Make sure the client sent a part
+ 	if typeof(block) ~= "Instance" or not block:IsA("BasePart") then
+ 		return
+ 	end
+-	-- The client can send any instance, so check it's one of ours and theirs
++	-- The client can send any instance, so check it's a placed block they own
+ 	if block.Parent ~= blocksFolder or block:GetAttribute("OwnerId") ~= player.UserId then
+ 		return
+ 	end
+ 
+-	-- Destroy the block and decrement the count
+ 	block:Destroy()
+ 	blockCounts[player] = math.max((blockCounts[player] or 1) - 1, 0)
+ end
+ 
+--- Clean up when a player leaves
+ local function onPlayerRemoving(player: Player)
+-	-- TODO: save each player's blocks with DataStoreService so they persist between sessions
+-	-- Loop through all the blocks and destroy the ones this player owns
++	-- TODO: save each player's blocks with DataStoreService so they persist
++	-- between sessions
+ 	for _, block in blocksFolder:GetChildren() do
+ 		if block:GetAttribute("OwnerId") == player.UserId then
+ 			block:Destroy()
+-		end -- if
+-	end -- for
++		end
++	end
+ 
+-	-- Clear the player's data
+ 	lastPlaceTimes[player] = nil
+ 	blockCounts[player] = nil
+ end
+@@ -239,7 +180,6 @@ end
+ ------------------------------
+ -- MAIN --
+ ------------------------------
+--- Connect the events
+-placeBlock.OnServerEvent:Connect(onPlaceBlock) -- connect PlaceBlock
+-removeBlock.OnServerEvent:Connect(onRemoveBlock) -- connect RemoveBlock
+-Players.PlayerRemoving:Connect(onPlayerRemoving) -- connect PlayerRemoving
++placeBlock.OnServerEvent:Connect(onPlaceBlock)
++removeBlock.OnServerEvent:Connect(onRemoveBlock)
++Players.PlayerRemoving:Connect(onPlayerRemoving)

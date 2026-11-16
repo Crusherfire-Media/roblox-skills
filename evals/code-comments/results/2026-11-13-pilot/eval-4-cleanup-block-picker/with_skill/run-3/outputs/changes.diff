@@ -1,0 +1,157 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau
+index a2a3a39..d0be2dc 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.client.luau
+@@ -1,35 +1,26 @@
+ --!strict
+ --# selene: allow(mixed_table)
+---[[ BlockPicker.client.luau — the block picker UI, built with Vide.
+-	Shows one button per block type along the bottom of the screen and lets the player
+-	pick with a click, a tap, or the number keys 1 to 5.
+-
+-	v2: migrated from Roact to Vide (per code review)
+-	v2.1: added number key hotkeys
++--[[@description:
++	The block picker: one button per block type along the bottom of the screen.
++	The player picks with a click, a tap, or the number keys 1 to 5.
+ ]]
+ 
+--- Get services
+ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local UserInputService = game:GetService("UserInputService")
+ 
+--- Import Vide
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+--- local Roact = require(ReplicatedStorage.Packages.Roact)
+ 
+--- Pull the Vide functions we use into locals
+ local create = Vide.create
+ local source = Vide.source
+ local mount = Vide.mount
+ 
+--- The block types in the order they appear in the picker
+ local BLOCK_ORDER = { "Brick", "Dirt", "Grass", "Window", "Wood" }
+ 
+--- Hotkeys, by index into BLOCK_ORDER
++-- By index into BLOCK_ORDER
+ local HOTKEYS =
+ 	{ Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five }
+ 
+--- Colors per the UI spec, section 2.3
+ local BLOCK_COLORS: { [string]: Color3 } = {
+ 	Brick = Color3.fromRGB(151, 63, 46),
+ 	Dirt = Color3.fromRGB(110, 76, 48),
+@@ -38,35 +29,24 @@ local BLOCK_COLORS: { [string]: Color3 } = {
+ 	Wood = Color3.fromRGB(150, 110, 70),
+ }
+ 
+-local BUTTON_SIZE = 72 -- the size of each button
+-local BUTTON_GAP = 8 -- the gap between buttons
++local BUTTON_SIZE = 72
++local BUTTON_GAP = 8
+ 
+--- Get the local player
+ local localPlayer = Players.LocalPlayer
+ 
+--- Default selection is Brick
+ local selected = source("Grass")
+ 
+--- Selects a block type
+ local function selectBlock(name: string)
+-	-- Update the source
+ 	selected(name)
+ 	-- PlacementController reads this attribute; keep the name in sync with it
+ 	localPlayer:SetAttribute("SelectedBlock", name)
+ end
+ 
+---[[
+-	Creates a button for a block type.
+-	@param name string - the name of the block type
+-	@param order number - the layout order
+-	@return TextButton - the button
+-]]
+ local function BlockButton(name: string, order: number)
+ 	return create("TextButton")({
+ 		Name = name,
+ 		LayoutOrder = order,
+ 		Size = UDim2.fromOffset(BUTTON_SIZE, BUTTON_SIZE),
+-		-- Set the background color from the table
+ 		BackgroundColor3 = BLOCK_COLORS[name],
+ 		Text = tostring(order), -- show the hotkey number
+ 		TextColor3 = Color3.new(1, 1, 1),
+@@ -78,14 +58,9 @@ local function BlockButton(name: string, order: number)
+ 			selectBlock(name)
+ 		end,
+ 
+-		------------------------------
+-		-- CHILDREN --
+-		------------------------------
+-		-- Rounded corners
+ 		create("UICorner")({
+ 			CornerRadius = UDim.new(0, 8),
+ 		}),
+-		-- White outline — only shows on the selected button
+ 		create("UIStroke")({
+ 			Color = Color3.new(1, 1, 1),
+ 			Thickness = function()
+@@ -95,20 +70,16 @@ local function BlockButton(name: string, order: number)
+ 	})
+ end
+ 
+--- The main picker component
+ local function BlockPicker()
+-	-- Build the list of buttons
+ 	local buttons = {}
+ 	for index, name in BLOCK_ORDER do
+ 		table.insert(buttons, BlockButton(name, index))
+-	end -- for
++	end
+ 
+-	-- Return the ScreenGui
+ 	return create("ScreenGui")({
+ 		Name = "BlockPicker",
+-		ResetOnSpawn = false, -- don't reset on spawn
++		ResetOnSpawn = false,
+ 
+-		-- The bar that holds the buttons — anchored to the bottom center
+ 		create("Frame")({
+ 			AnchorPoint = Vector2.new(0.5, 1),
+ 			Position = UDim2.new(0.5, 0, 1, -24),
+@@ -116,7 +87,6 @@ local function BlockPicker()
+ 			AutomaticSize = Enum.AutomaticSize.X,
+ 			BackgroundTransparency = 1,
+ 
+-			-- Lay the buttons out horizontally
+ 			create("UIListLayout")({
+ 				FillDirection = Enum.FillDirection.Horizontal,
+ 				Padding = UDim.new(0, BUTTON_GAP),
+@@ -128,24 +98,21 @@ local function BlockPicker()
+ 	})
+ end
+ 
+--- Handle the number key hotkeys
+ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+ 	-- Skip keys typed into a TextBox, such as chat
+ 	if gameProcessed then
+ 		return
+ 	end
+ 
+-	-- Find which hotkey was pressed
+ 	local index = table.find(HOTKEYS, input.KeyCode)
+ 	if index then
+ 		selectBlock(BLOCK_ORDER[index])
+-	end -- if
+-end) -- InputBegan
++	end
++end)
+ 
+ -- TODO: let gamepad players cycle blocks with the shoulder buttons
+--- Mount the picker into the PlayerGui
++
+ mount(BlockPicker, localPlayer:WaitForChild("PlayerGui"))
+--- Roact.mount(Roact.createElement(BlockPicker), localPlayer.PlayerGui)
+ 
+--- Set the initial attribute so PlacementController has a value from the start
++-- Give PlacementController a value from the start
+ selectBlock(selected())

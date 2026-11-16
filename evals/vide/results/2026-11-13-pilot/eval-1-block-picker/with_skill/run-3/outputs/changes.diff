@@ -1,0 +1,471 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index d6fde35..302d298 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,8 +1,25 @@
+-local Players = game:GetService("Players")
++--!strict
++--@author: Crusherfire
++--@date: 2026-11-13
++--[[@description:
++	Client entry point: mounts the HUD, then starts block placement.
++]]
+ 
+-local BlockPlacer = require(script.Parent.BlockPlacer)
++const Players = game:GetService("Players")
++const RunService = game:GetService("RunService")
+ 
+-local localPlayer = Players.LocalPlayer
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const BlockPlacer = require("./BlockPlacer")
++const headsUpDisplay = require("./UI/headsUpDisplay")
++
++Vide.strict = RunService:IsStudio()
++
++const localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
+ 
++const playerGui = localPlayer:WaitForChild("PlayerGui")
++Vide.mount(headsUpDisplay, playerGui)
++
++-- Yields until the server's remote exists, so it comes after the UI is up.
+ BlockPlacer.start()
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+new file mode 100644
+index 0000000..1b56df9
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+@@ -0,0 +1,122 @@
++--!strict
++--@author: Crusherfire
++--@date: 2026-11-13
++--[[@description:
++	Facts about the player's screen, as Vide sources: how much the whole UI
++	grows, the viewport in UI units, and whether the touch layout applies.
++	UI binds to these so it follows window resizes and device switches live.
++]]
++
++const GuiService = game:GetService("GuiService")
++const RunService = game:GetService("RunService")
++const UserInputService = game:GetService("UserInputService")
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const batch = Vide.batch
++const source = Vide.source
++
++-- UI sizes are authored for a screen this many pixels on its short side.
++const REFERENCE_SHORT_SIDE = 1080
++const MINIMUM_SCALE = 1
++const MAXIMUM_SCALE = 3
++-- TVs are read from a couch.
++const LARGE_DISPLAY_BOOST = 1.25
++-- In UI units. Phones held sideways are 360 to 440 tall, tablets start near 600.
++const PHONE_SHORT_SIDE = 600
++const FALLBACK_VIEWPORT = Vector2.new(1920, 1080)
++
++local Module = {}
++
++local realViewport = source(FALLBACK_VIEWPORT)
++local prefersTouch = source(false)
++local prefersKeyboard = source(true)
++local isLargeDisplay = source(false)
++local viewportConnection: RBXScriptConnection? = nil
++
++local function refresh()
++	local camera = workspace.CurrentCamera
++	batch(function()
++		-- ViewportSize can read (1, 1) before the first frame, which would
++		-- pass for a tiny phone.
++		if camera and camera.ViewportSize.X > 1 and camera.ViewportSize.Y > 1 then
++			realViewport(camera.ViewportSize)
++		end
++		prefersTouch(UserInputService.PreferredInput == Enum.PreferredInput.Touch)
++		prefersKeyboard(UserInputService.PreferredInput == Enum.PreferredInput.KeyboardAndMouse)
++		isLargeDisplay(GuiService.ViewportDisplaySize == Enum.DisplaySize.Large)
++	end)
++end
++
++local function watchCamera()
++	if viewportConnection then
++		viewportConnection:Disconnect()
++	end
++	local camera = workspace.CurrentCamera
++	if camera then
++		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(refresh)
++	end
++	refresh()
++end
++
++--[[
++	How much the whole UI grows on this screen. Bind it to a UIScale under
++	every ScreenGui the game builds.
++]]
++function Module.uiScale(): number
++	const view = realViewport()
++	const boost = if isLargeDisplay() then LARGE_DISPLAY_BOOST else 1
++	return math.clamp(
++		math.min(view.X, view.Y) / REFERENCE_SHORT_SIDE * boost,
++		MINIMUM_SCALE,
++		MAXIMUM_SCALE
++	)
++end
++
++--[[
++	The viewport in UI units.
++]]
++function Module.viewport(): Vector2
++	return realViewport() / Module.uiScale()
++end
++
++--[[
++	Whether touch is the primary input, which is when Roblox shows its touch
++	controls.
++]]
++function Module.isTouch(): boolean
++	return prefersTouch()
++end
++
++--[[
++	Whether keyboard and mouse is the primary input, so keyboard shortcuts are
++	worth showing.
++]]
++function Module.isKeyboard(): boolean
++	return prefersKeyboard()
++end
++
++function Module.isPhone(): boolean
++	const view = Module.viewport()
++	return math.min(view.X, view.Y) < PHONE_SHORT_SIDE
++end
++
++--[[
++	Whether a HUD should use its touch layout: the touch controls are up, or
++	the screen is too small for the desktop layout.
++]]
++function Module.isTouchLayout(): boolean
++	return prefersTouch() or Module.isPhone()
++end
++
++-- Connections would outlive the fresh module copies that edit-mode tools load.
++if RunService:IsRunning() then
++	watchCamera()
++	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
++	GuiService:GetPropertyChangedSignal("ViewportDisplaySize"):Connect(refresh)
++	UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(refresh)
++else
++	refresh()
++end
++
++return Module
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/headsUpDisplay.luau b/src/StarterPlayer/StarterPlayerScripts/UI/headsUpDisplay.luau
+new file mode 100644
+index 0000000..21e1075
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/headsUpDisplay.luau
+@@ -0,0 +1,56 @@
++--!strict
++--@author: Crusherfire
++--@date: 2026-11-13
++--[[@description:
++	The in-game HUD: the block hotbar, wired to BlockPlacer. Selecting a slot
++	sets BlockPlacer's block type, and any change there (number keys included)
++	moves the highlight, so BlockPlacer stays the one owner of the selection.
++]]
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const cleanup = Vide.cleanup
++const create = Vide.create
++const source = Vide.source
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++const BlockPlacer = require("../BlockPlacer")
++const hotbar = require("./hotbar")
++const Screen = require("./Screen")
++
++-- Desktop sits at the bottom center. Touch moves to the top center, clear of
++-- the thumbstick region (lower left) and the jump button (lower right).
++const DESKTOP_ANCHOR = Vector2.new(0.5, 1)
++const DESKTOP_POSITION = UDim2.new(0.5, 0, 1, -16)
++const TOUCH_ANCHOR = Vector2.new(0.5, 0)
++const TOUCH_POSITION = UDim2.new(0.5, 0, 0, 8)
++
++local function headsUpDisplay(): ScreenGui
++	const selectedName = source(BlockPlacer.getBlockType())
++	cleanup(BlockPlacer.BlockTypeChanged:Connect(function(name: string)
++		selectedName(name)
++	end))
++
++	return create("ScreenGui")({
++		Name = "HeadsUpDisplay",
++
++		create("UIScale")({ Scale = Screen.uiScale }),
++
++		hotbar({
++			BlockTypes = BlockTypes.List,
++			SelectedName = selectedName,
++			Select = BlockPlacer.setBlockType,
++			IsCompact = Screen.isTouchLayout,
++			ShowsKeyHints = Screen.isKeyboard,
++			AnchorPoint = function()
++				return if Screen.isTouchLayout() then TOUCH_ANCHOR else DESKTOP_ANCHOR
++			end,
++			Position = function()
++				return if Screen.isTouchLayout() then TOUCH_POSITION else DESKTOP_POSITION
++			end,
++		}),
++	})
++end
++
++return headsUpDisplay
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/hotbar.luau b/src/StarterPlayer/StarterPlayerScripts/UI/hotbar.luau
+new file mode 100644
+index 0000000..efab6fe
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/hotbar.luau
+@@ -0,0 +1,242 @@
++--!strict
++--@author: Crusherfire
++--@date: 2026-11-13
++--[[@description:
++	A row of block slots: each shows its block's color and name, the selected
++	one is outlined, and clicking or tapping a slot selects it. The caller
++	owns the selection and passes it in, so the row stays a plain view.
++]]
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const create = Vide.create
++const derive = Vide.derive
++const read = Vide.read
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++type BlockType = BlockTypes.BlockType
++
++export type HotbarProps = {
++	BlockTypes: { BlockType },
++	SelectedName: () -> string,
++	Select: (name: string) -> (),
++	-- The touch-sized variant, for phones and small windows.
++	IsCompact: (boolean | () -> boolean)?,
++	-- Number labels for the keys 1 to 5, for players on keyboard and mouse.
++	ShowsKeyHints: (boolean | () -> boolean)?,
++	AnchorPoint: (Vector2 | () -> Vector2)?,
++	Position: (UDim2 | () -> UDim2)?,
++}
++
++type Metrics = {
++	SlotSize: number,
++	Gap: number,
++	CornerRadius: number,
++	SwatchSize: number,
++	SwatchTop: number,
++	NameTop: number,
++	NameHeight: number,
++	NameTextSize: number,
++}
++
++type SlotProps = {
++	BlockType: BlockType,
++	Index: number,
++	IsSelected: () -> boolean,
++	Metrics: () -> Metrics,
++	ShowsKeyHints: (boolean | () -> boolean)?,
++	Select: (name: string) -> (),
++}
++
++-- Slots stay above 44 so a thumb can hit them. Each column sums to SlotSize:
++-- SwatchTop + SwatchSize + gap + NameHeight + bottom margin.
++const REGULAR: Metrics = table.freeze({
++	SlotSize = 72,
++	Gap = 8,
++	CornerRadius = 10,
++	SwatchSize = 40,
++	SwatchTop = 8,
++	NameTop = 50,
++	NameHeight = 18,
++	NameTextSize = 16,
++})
++const COMPACT: Metrics = table.freeze({
++	SlotSize = 56,
++	Gap = 6,
++	CornerRadius = 8,
++	SwatchSize = 30,
++	SwatchTop = 6,
++	NameTop = 37,
++	NameHeight = 16,
++	NameTextSize = 14,
++})
++
++const BAR_COLOR = Color3.fromRGB(20, 20, 24)
++const BAR_TRANSPARENCY = 0.35
++const SLOT_COLOR = Color3.fromRGB(40, 40, 46)
++const SELECTED_SLOT_COLOR = Color3.fromRGB(78, 78, 88)
++const SELECTED_STROKE_COLOR = Color3.fromRGB(255, 255, 255)
++-- Below Gap, so the outline never reaches a neighbor or the bar's edge.
++const SELECTED_STROKE_THICKNESS = 3
++const SWATCH_CORNER_RADIUS = 6
++const SWATCH_EDGE_COLOR = Color3.fromRGB(0, 0, 0)
++const SWATCH_EDGE_TRANSPARENCY = 0.6
++-- A see-through block drawn at full transparency vanishes into the dark slot.
++const SWATCH_TRANSPARENCY_FACTOR = 0.5
++const NAME_COLOR = Color3.fromRGB(255, 255, 255)
++const KEY_HINT_COLOR = Color3.fromRGB(190, 190, 200)
++const KEY_HINT_TEXT_SIZE = 12
++-- Stays left of the smallest swatch's edge in both variants.
++const KEY_HINT_POSITION = UDim2.fromOffset(3, 2)
++const KEY_HINT_SIZE = UDim2.fromOffset(9, 14)
++const FONT = Enum.Font.BuilderSansBold
++
++local function slot(props: SlotProps): TextButton
++	const blockType = props.BlockType
++	const metrics = props.Metrics
++
++	return create("TextButton")({
++		Name = blockType.Name,
++		LayoutOrder = props.Index,
++		Size = function()
++			const size = metrics().SlotSize
++			return UDim2.fromOffset(size, size)
++		end,
++		BackgroundColor3 = function()
++			return if props.IsSelected() then SELECTED_SLOT_COLOR else SLOT_COLOR
++		end,
++
++		Activated = function()
++			props.Select(blockType.Name)
++		end,
++
++		create("UICorner")({
++			CornerRadius = function()
++				return UDim.new(0, metrics().CornerRadius)
++			end,
++		}),
++
++		-- Border mode, since a stroke on a TextButton outlines its text by default.
++		create("UIStroke")({
++			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++			Color = SELECTED_STROKE_COLOR,
++			Thickness = SELECTED_STROKE_THICKNESS,
++			Transparency = function()
++				return if props.IsSelected() then 0 else 1
++			end,
++		}),
++
++		create("Frame")({
++			Name = "Swatch",
++			AnchorPoint = Vector2.new(0.5, 0),
++			Position = function()
++				return UDim2.new(0.5, 0, 0, metrics().SwatchTop)
++			end,
++			Size = function()
++				const size = metrics().SwatchSize
++				return UDim2.fromOffset(size, size)
++			end,
++			BackgroundColor3 = blockType.Color,
++			BackgroundTransparency = blockType.Transparency * SWATCH_TRANSPARENCY_FACTOR,
++
++			create("UICorner")({ CornerRadius = UDim.new(0, SWATCH_CORNER_RADIUS) }),
++			create("UIStroke")({
++				Color = SWATCH_EDGE_COLOR,
++				Transparency = SWATCH_EDGE_TRANSPARENCY,
++			}),
++		}),
++
++		create("TextLabel")({
++			Name = "BlockName",
++			BackgroundTransparency = 1,
++			Position = function()
++				return UDim2.fromOffset(2, metrics().NameTop)
++			end,
++			Size = function()
++				return UDim2.new(1, -4, 0, metrics().NameHeight)
++			end,
++			Font = FONT,
++			Text = blockType.DisplayName,
++			TextColor3 = NAME_COLOR,
++			TextSize = function()
++				return metrics().NameTextSize
++			end,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++		}),
++
++		create("TextLabel")({
++			Name = "KeyHint",
++			BackgroundTransparency = 1,
++			Position = KEY_HINT_POSITION,
++			Size = KEY_HINT_SIZE,
++			Font = FONT,
++			Text = tostring(props.Index),
++			TextColor3 = KEY_HINT_COLOR,
++			TextSize = KEY_HINT_TEXT_SIZE,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			Visible = props.ShowsKeyHints or false,
++		}),
++	})
++end
++
++local function hotbar(props: HotbarProps): Frame
++	const metrics = derive(function(): Metrics
++		return if read(props.IsCompact) then COMPACT else REGULAR
++	end)
++
++	const slots = {}
++	for index, blockType in props.BlockTypes do
++		const isSelected = derive(function()
++			return props.SelectedName() == blockType.Name
++		end)
++		table.insert(
++			slots,
++			slot({
++				BlockType = blockType,
++				Index = index,
++				IsSelected = isSelected,
++				Metrics = metrics,
++				ShowsKeyHints = props.ShowsKeyHints,
++				Select = props.Select,
++			})
++		)
++	end
++
++	local function padding(): UDim
++		return UDim.new(0, metrics().Gap)
++	end
++
++	return create("Frame")({
++		Name = "Hotbar",
++		AnchorPoint = props.AnchorPoint or Vector2.zero,
++		Position = props.Position or UDim2.new(),
++		-- A Frame starts at 100 by 100, and AutomaticSize only grows.
++		Size = UDim2.new(),
++		AutomaticSize = Enum.AutomaticSize.XY,
++		BackgroundColor3 = BAR_COLOR,
++		BackgroundTransparency = BAR_TRANSPARENCY,
++		-- Sinks presses in the gaps between slots, so they never place a block.
++		Active = true,
++
++		create("UICorner")({
++			CornerRadius = function()
++				return UDim.new(0, metrics().CornerRadius + metrics().Gap)
++			end,
++		}),
++		create("UIPadding")({
++			PaddingTop = padding,
++			PaddingBottom = padding,
++			PaddingLeft = padding,
++			PaddingRight = padding,
++		}),
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			Padding = padding,
++		}),
++
++		slots,
++	})
++end
++
++return hotbar

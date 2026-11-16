@@ -1,0 +1,537 @@
+diff --git a/src/ServerScriptService/Stories/BlockGame.storybook.luau b/src/ServerScriptService/Stories/BlockGame.storybook.luau
+new file mode 100644
+index 0000000..b8ac89f
+--- /dev/null
++++ b/src/ServerScriptService/Stories/BlockGame.storybook.luau
+@@ -0,0 +1,4 @@
++return {
++	name = "Block Game",
++	storyRoots = { script.Parent },
++}
+diff --git a/src/ServerScriptService/Stories/Hotbar.story.luau b/src/ServerScriptService/Stories/Hotbar.story.luau
+new file mode 100644
+index 0000000..126196b
+--- /dev/null
++++ b/src/ServerScriptService/Stories/Hotbar.story.luau
+@@ -0,0 +1,56 @@
++--[[
++	The block hotbar. Click a slot to select it, as a player would.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local StarterPlayer = game:GetService("StarterPlayer")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Hotbar = require(StarterPlayer.StarterPlayerScripts.Hotbar)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local create = Vide.create
++local source = Vide.source
++
++type StoryProps = {
++	controls: {
++		IsCompact: () -> boolean,
++		ShowKeyHints: () -> boolean,
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	local selected = source(BlockTypes.List[1].Name)
++
++	return create("Frame")({
++		Name = "Preview",
++		BackgroundTransparency = 1,
++		AnchorPoint = Vector2.new(0.5, 0.5),
++		Position = UDim2.fromScale(0.5, 0.5),
++		AutomaticSize = Enum.AutomaticSize.XY,
++
++		Hotbar.new({
++			BlockTypes = BlockTypes.List,
++			Selected = selected,
++			OnSelect = function(name: string)
++				print(`selected {name}`)
++				selected(name)
++			end,
++			IsCompact = props.controls.IsCompact,
++			ShowKeyHints = props.controls.ShowKeyHints,
++		}),
++	})
++end
++
++return {
++	summary = "The block hotbar in its desktop and compact (touch) sizes.",
++	vide = Vide,
++	controls = {
++		-- The touch layout, used on phones and whenever touch is the primary input.
++		IsCompact = false,
++		-- The number key labels, shown when touch is not the primary input.
++		ShowKeyHints = true,
++	},
++	story = story,
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockHud.luau b/src/StarterPlayer/StarterPlayerScripts/BlockHud.luau
+new file mode 100644
+index 0000000..896c44e
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockHud.luau
+@@ -0,0 +1,90 @@
++--[[
++	The block placement HUD: connects the hotbar to BlockPlacer and places it along the bottom
++	of the screen, between Roblox's thumbstick region and jump button when those are showing.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockPlacer = require(script.Parent.BlockPlacer)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Hotbar = require(script.Parent.Hotbar)
++local Screen = require(script.Parent.Screen)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local cleanup = Vide.cleanup
++local create = Vide.create
++local source = Vide.source
++
++local BOTTOM_MARGIN = 12
++local EDGE_PADDING = 8
++
++-- Default PlayerModule touch controls, in real pixels. The dynamic thumbstick takes presses
++-- across the left 40 percent of the screen, and the jump button's left edge sits this far from
++-- the right edge, by whether the screen's short side is over 500.
++local THUMBSTICK_REGION_WIDTH = 0.4
++local SMALL_TOUCH_SHORT_SIDE = 500
++local SMALL_JUMP_BUTTON_LEFT = 95
++local LARGE_JUMP_BUTTON_LEFT = 170
++
++local BlockHud = {}
++
++--[[
++	Horizontal center of the hotbar in UI units, so it sits in the free span between the
++	thumbstick region and the jump button, or in the middle of the screen without them.
++]]
++local function hotbarCenterX(hotbarWidth: number): number
++	local viewport = Screen.viewport()
++	if not Screen.isTouch() then
++		return math.floor(viewport.X / 2)
++	end
++
++	local scale = Screen.uiScale()
++	local realShortSide = math.min(viewport.X, viewport.Y) * scale
++	local jumpButtonLeft = if realShortSide > SMALL_TOUCH_SHORT_SIDE
++		then LARGE_JUMP_BUTTON_LEFT
++		else SMALL_JUMP_BUTTON_LEFT
++	local freeLeft = viewport.X * THUMBSTICK_REGION_WIDTH
++	local freeRight = viewport.X - jumpButtonLeft / scale
++	local center = (freeLeft + freeRight) / 2
++
++	local halfWidth = hotbarWidth / 2
++	local minimum = halfWidth + EDGE_PADDING
++	local maximum = math.max(minimum, viewport.X - halfWidth - EDGE_PADDING)
++	return math.floor(math.clamp(center, minimum, maximum))
++end
++
++function BlockHud.new(): ScreenGui
++	local selected = source(BlockPlacer.getBlockType())
++	cleanup(BlockPlacer.BlockTypeChanged:Connect(function(name: string)
++		selected(name)
++	end))
++
++	return create("ScreenGui")({
++		Name = "BlockHud",
++
++		create("UIScale")({ Scale = Screen.uiScale }),
++
++		create("Frame")({
++			Name = "HotbarDock",
++			BackgroundTransparency = 1,
++			AnchorPoint = Vector2.new(0.5, 1),
++			Position = function()
++				local size = Hotbar.size(Screen.isTouchLayout(), #BlockTypes.List)
++				return UDim2.new(0, hotbarCenterX(size.X), 1, -BOTTOM_MARGIN)
++			end,
++			AutomaticSize = Enum.AutomaticSize.XY,
++
++			Hotbar.new({
++				BlockTypes = BlockTypes.List,
++				Selected = selected,
++				OnSelect = BlockPlacer.setBlockType,
++				IsCompact = Screen.isTouchLayout,
++				ShowKeyHints = function()
++					return not Screen.isTouch()
++				end,
++			}),
++		}),
++	})
++end
++
++return BlockHud
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Hotbar.luau b/src/StarterPlayer/StarterPlayerScripts/Hotbar.luau
+new file mode 100644
+index 0000000..a3fe5bf
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/Hotbar.luau
+@@ -0,0 +1,236 @@
++--[[
++	A row of block type slots with the selected block's name above it. Pressing a slot calls
++	OnSelect; the highlight follows Selected, so it stays right however the selection changes.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local create = Vide.create
++local derive = Vide.derive
++local read = Vide.read
++
++type BlockType = BlockTypes.BlockType
++
++export type HotbarProps = {
++	BlockTypes: { BlockType },
++	Selected: () -> string,
++	OnSelect: (name: string) -> (),
++	IsCompact: (boolean | () -> boolean)?,
++	ShowKeyHints: (boolean | () -> boolean)?,
++}
++
++type Metrics = {
++	SlotSize: number,
++	Gap: number,
++	BarPadding: number,
++	NameTextSize: number,
++}
++
++local REGULAR: Metrics = table.freeze({
++	SlotSize = 64,
++	Gap = 8,
++	BarPadding = 8,
++	NameTextSize = 20,
++})
++-- Narrow enough to fit between the thumbstick region and the jump button on a 667 wide phone.
++local COMPACT: Metrics = table.freeze({
++	SlotSize = 52,
++	Gap = 6,
++	BarPadding = 6,
++	NameTextSize = 18,
++})
++
++local BAR_RADIUS = 12
++local SLOT_RADIUS = 10
++local SWATCH_INSET = 6
++local SELECTED_STROKE = 3
++local NAME_GAP = 4
++local KEY_HINT_TEXT_SIZE = 14
++
++local BAR_COLOR = Color3.fromRGB(20, 20, 24)
++local BAR_TRANSPARENCY = 0.35
++local SLOT_COLOR = Color3.fromRGB(45, 45, 52)
++local SELECTED_SLOT_COLOR = Color3.fromRGB(90, 90, 100)
++local HIGHLIGHT_COLOR = Color3.fromRGB(255, 255, 255)
++local TEXT_COLOR = Color3.fromRGB(255, 255, 255)
++local TEXT_OUTLINE_COLOR = Color3.fromRGB(0, 0, 0)
++local FONT = Enum.Font.BuilderSansBold
++
++local Hotbar = {}
++
++local function metricsFor(isCompact: boolean): Metrics
++	return if isCompact then COMPACT else REGULAR
++end
++
++local function barWidth(metrics: Metrics, slotCount: number): number
++	return slotCount * metrics.SlotSize + (slotCount - 1) * metrics.Gap + 2 * metrics.BarPadding
++end
++
++--[[
++	The hotbar's full size in UI units, for placing it without reading AbsoluteSize back.
++]]
++function Hotbar.size(isCompact: boolean, slotCount: number): Vector2
++	local metrics = metricsFor(isCompact)
++	local barHeight = metrics.SlotSize + 2 * metrics.BarPadding
++	return Vector2.new(barWidth(metrics, slotCount), metrics.NameTextSize + NAME_GAP + barHeight)
++end
++
++local function slot(
++	blockType: BlockType,
++	index: number,
++	metrics: () -> Metrics,
++	props: HotbarProps
++): TextButton
++	local function isSelected(): boolean
++		return props.Selected() == blockType.Name
++	end
++
++	return create("TextButton")({
++		Name = blockType.Name,
++		LayoutOrder = index,
++		Text = "",
++		Size = function()
++			local size = metrics().SlotSize
++			return UDim2.fromOffset(size, size)
++		end,
++		BackgroundColor3 = function()
++			return if isSelected() then SELECTED_SLOT_COLOR else SLOT_COLOR
++		end,
++
++		Activated = function()
++			props.OnSelect(blockType.Name)
++		end,
++
++		create("UICorner")({ CornerRadius = UDim.new(0, SLOT_RADIUS) }),
++		create("UIStroke")({
++			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++			Color = HIGHLIGHT_COLOR,
++			Thickness = SELECTED_STROKE,
++			Enabled = isSelected,
++		}),
++
++		create("Frame")({
++			Name = "Swatch",
++			Position = UDim2.fromOffset(SWATCH_INSET, SWATCH_INSET),
++			Size = UDim2.new(1, -2 * SWATCH_INSET, 1, -2 * SWATCH_INSET),
++			BackgroundColor3 = blockType.Color,
++			BackgroundTransparency = blockType.Transparency,
++
++			create("UICorner")({ CornerRadius = UDim.new(0, SLOT_RADIUS - SWATCH_INSET) }),
++		}),
++
++		create("TextLabel")({
++			Name = "KeyHint",
++			Position = UDim2.fromOffset(SWATCH_INSET, SWATCH_INSET),
++			Size = UDim2.fromOffset(KEY_HINT_TEXT_SIZE, KEY_HINT_TEXT_SIZE),
++			BackgroundTransparency = 1,
++			Text = tostring(index),
++			TextSize = KEY_HINT_TEXT_SIZE,
++			Font = FONT,
++			TextColor3 = TEXT_COLOR,
++			TextStrokeColor3 = TEXT_OUTLINE_COLOR,
++			TextStrokeTransparency = 0.3,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			TextYAlignment = Enum.TextYAlignment.Top,
++			Visible = function()
++				return read(props.ShowKeyHints) == true
++			end,
++		}),
++	})
++end
++
++function Hotbar.new(props: HotbarProps): Frame
++	-- Derived so bindings rerun when the variant flips, not on every pixel of a resize.
++	local metrics = derive(function(): Metrics
++		return metricsFor(read(props.IsCompact) == true)
++	end)
++
++	local selectedDisplayName = derive(function(): string
++		local name = props.Selected()
++		for _, blockType in props.BlockTypes do
++			if blockType.Name == name then
++				return blockType.DisplayName
++			end
++		end
++		return name
++	end)
++
++	local slots = {}
++	for index, blockType in props.BlockTypes do
++		table.insert(slots, slot(blockType, index, metrics, props))
++	end
++
++	return create("Frame")({
++		Name = "Hotbar",
++		BackgroundTransparency = 1,
++		Size = function()
++			local size = Hotbar.size(read(props.IsCompact) == true, #props.BlockTypes)
++			return UDim2.fromOffset(size.X, size.Y)
++		end,
++
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Vertical,
++			HorizontalAlignment = Enum.HorizontalAlignment.Center,
++			Padding = UDim.new(0, NAME_GAP),
++		}),
++
++		create("TextLabel")({
++			Name = "SelectedName",
++			LayoutOrder = 1,
++			Size = function()
++				return UDim2.new(1, 0, 0, metrics().NameTextSize)
++			end,
++			BackgroundTransparency = 1,
++			Text = selectedDisplayName,
++			TextSize = function()
++				return metrics().NameTextSize
++			end,
++			Font = FONT,
++			TextColor3 = TEXT_COLOR,
++			TextStrokeColor3 = TEXT_OUTLINE_COLOR,
++			TextStrokeTransparency = 0.3,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++		}),
++
++		create("Frame")({
++			Name = "Bar",
++			LayoutOrder = 2,
++			Size = function()
++				local current = metrics()
++				return UDim2.new(1, 0, 0, current.SlotSize + 2 * current.BarPadding)
++			end,
++			BackgroundColor3 = BAR_COLOR,
++			BackgroundTransparency = BAR_TRANSPARENCY,
++
++			create("UICorner")({ CornerRadius = UDim.new(0, BAR_RADIUS) }),
++			create("UIPadding")({
++				PaddingLeft = function()
++					return UDim.new(0, metrics().BarPadding)
++				end,
++				PaddingRight = function()
++					return UDim.new(0, metrics().BarPadding)
++				end,
++				PaddingTop = function()
++					return UDim.new(0, metrics().BarPadding)
++				end,
++				PaddingBottom = function()
++					return UDim.new(0, metrics().BarPadding)
++				end,
++			}),
++			create("UIListLayout")({
++				FillDirection = Enum.FillDirection.Horizontal,
++				VerticalAlignment = Enum.VerticalAlignment.Center,
++				Padding = function()
++					return UDim.new(0, metrics().Gap)
++				end,
++			}),
++
++			slots,
++		}),
++	})
++end
++
++return Hotbar
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index d6fde35..a8432ec 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,8 +1,17 @@
+ local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
+ 
++local BlockHud = require(script.Parent.BlockHud)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++Vide.strict = RunService:IsStudio()
+ 
+ local localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
+ 
++local playerGui = localPlayer:WaitForChild("PlayerGui")
++Vide.mount(BlockHud.new, playerGui)
++
+ BlockPlacer.start()
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Screen.luau b/src/StarterPlayer/StarterPlayerScripts/Screen.luau
+new file mode 100644
+index 0000000..4f1c2a2
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/Screen.luau
+@@ -0,0 +1,99 @@
++--[[
++	Facts about the player's screen as Vide sources, so UI layout follows the live device: the
++	window can resize, a phone can rotate, and the primary input can change while the UI is up.
++	Sizes from viewport() are in UI units, the offsets UI is authored in for a 1080 tall screen.
++]]
++
++local GuiService = game:GetService("GuiService")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
++local UserInputService = game:GetService("UserInputService")
++local Workspace = game:GetService("Workspace")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local batch = Vide.batch
++local source = Vide.source
++
++local REFERENCE_SHORT_SIDE = 1080
++local MINIMUM_SCALE = 1
++local MAXIMUM_SCALE = 3
++local PHONE_SHORT_SIDE = 600
++local FALLBACK_VIEWPORT = Vector2.new(1920, 1080)
++
++local Screen = {}
++
++local realViewport = source(FALLBACK_VIEWPORT)
++local prefersTouch = source(false)
++local viewportConnection: RBXScriptConnection? = nil
++
++local function refresh()
++	local camera = Workspace.CurrentCamera
++	batch(function()
++		-- ViewportSize can read (1, 1) before the first frame, which would pass for a tiny
++		-- phone, so the fallback stays until a real size arrives.
++		if camera and camera.ViewportSize.X > 1 and camera.ViewportSize.Y > 1 then
++			realViewport(camera.ViewportSize)
++		end
++		prefersTouch(UserInputService.PreferredInput == Enum.PreferredInput.Touch)
++	end)
++end
++
++local function watchCamera()
++	if viewportConnection then
++		viewportConnection:Disconnect()
++	end
++	local camera = Workspace.CurrentCamera
++	if camera then
++		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(refresh)
++	end
++	refresh()
++end
++
++--[[
++	How much the whole UI grows on this screen. Bind it to a UIScale under every ScreenGui.
++	Smaller screens keep a scale of 1 and change layout instead.
++]]
++function Screen.uiScale(): number
++	local view = realViewport()
++	return math.clamp(math.min(view.X, view.Y) / REFERENCE_SHORT_SIDE, MINIMUM_SCALE, MAXIMUM_SCALE)
++end
++
++--[[
++	The viewport in UI units.
++]]
++function Screen.viewport(): Vector2
++	return realViewport() / Screen.uiScale()
++end
++
++--[[
++	Whether touch is the primary input, which is when Roblox shows its thumbstick and jump
++	button.
++]]
++function Screen.isTouch(): boolean
++	return prefersTouch()
++end
++
++function Screen.isPhone(): boolean
++	local view = Screen.viewport()
++	return math.min(view.X, view.Y) < PHONE_SHORT_SIDE
++end
++
++--[[
++	Whether a HUD should use its touch layout: the touch controls are up, or the screen is too
++	small for the desktop layout.
++]]
++function Screen.isTouchLayout(): boolean
++	return prefersTouch() or Screen.isPhone()
++end
++
++if RunService:IsRunning() then
++	watchCamera()
++	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
++	GuiService:GetPropertyChangedSignal("ViewportDisplaySize"):Connect(refresh)
++	UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(refresh)
++else
++	refresh()
++end
++
++return Screen

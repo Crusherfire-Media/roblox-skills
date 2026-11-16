@@ -1,0 +1,5 @@
+The four "Unknown require" errors weren't caused by the picker code. `sourcemap.json` was out of date and didn't list `BlockTypes`, `BlockPicker` or `BlockPlacer` at all, so luau-lsp couldn't resolve any require of those modules. All of those requires were already there before my change. The `BlockTypes.BlockType` error comes from the same unresolved require.
+
+I regenerated the sourcemap with `rojo sourcemap default.project.json --output sourcemap.json`, and it now lists all three modules. Git doesn't track `sourcemap.json`, so this changes nothing in the repo; the only modified files are still `BlockPicker.luau` and `Main.client.luau`.
+
+I couldn't re-run luau-lsp to confirm the errors are gone. The plain run lists hundreds of errors from missing Roblox type definitions, and the session's permission rules blocked each command I tried for filtering that output. Running `luau-lsp analyze --sourcemap=sourcemap.json` on the two files should now show no "Unknown require" lines. With the project as it is, that run will still report errors about Roblox globals such as `game` and `Color3` until a Roblox definitions file is added to the luau-lsp setup.
