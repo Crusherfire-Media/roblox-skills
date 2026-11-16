@@ -1,0 +1,116 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts follow the gameplay rules and handle timing correctly. A passes every check and uses BlockType parameters with an optional Counts? table type. B fails luau-lsp in its own code because it uses the BlockTypes.Order loop variable without a cast. B also gives up type safety by accepting unknown block types and drops the optional on the table value type. B's retries and its InvalidBlockType reason are good, but they don't make up for a type check that fails.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Implements the rules",
+          "score": 5,
+          "note": "Loads BlockInventory under player_{UserId} and falls back to 20 per type in buildCounts. TakeBlock checks <= 0, ReturnBlock stops at MAX_COUNT, GrantBlocks skips the cap, GetCount reads a count, and onPlayerRemoving clears the player's entry."
+        },
+        {
+          "criterion": "Handles timing",
+          "score": 5,
+          "note": "Returns false, NotLoaded (or nil from GetCount) for missing players. The player.Parent ~= Players check throws away a load that finishes after the player left. task.spawn loads players already in the server, and requiring the module doesn't yield."
+        },
+        {
+          "criterion": "Reports expected failures",
+          "score": 4,
+          "note": "Returns typed TakeFailure and ReturnFailure reasons and wraps GetAsync in pcall with a warn and defaults. An amount that isn't positive errors, but checkBlockType also errors on a bad block type string from a remote."
+        },
+        {
+          "criterion": "Types catch mistakes",
+          "score": 5,
+          "note": "Parameters use the closed BlockType set, functions have typed returns such as (boolean, TakeFailure?), and the table is { [Player]: Counts? }."
+        },
+        {
+          "criterion": "Call sites read clearly",
+          "score": 5,
+          "note": "GrantBlocks is a separate function for going past the cap, names are spelled out, and the yielding load is named loadSavedDataAsync."
+        },
+        {
+          "criterion": "In scope and merge-ready",
+          "score": 5,
+          "note": "One module that reuses BlockTypes, with no remotes or saving; luau-lsp, selene and StyLua all pass."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Implements the rules",
+          "score": 5,
+          "note": "Correct DataStore and key, defaults on failure, take and returnBlock stop at 0 and 99, grant goes past the cap, getCount reads a count, and unloadPlayer clears the player's entry."
+        },
+        {
+          "criterion": "Handles timing",
+          "score": 5,
+          "note": "The loadingPlayers table throws away loads that finish after the player left, resolve returns NotLoaded, existing players are spawned, and requiring the module doesn't yield."
+        },
+        {
+          "criterion": "Reports expected failures",
+          "score": 5,
+          "note": "A FailureReason union that includes InvalidBlockType, load wrapped in pcall with retries, and assert only for a bad amount."
+        },
+        {
+          "criterion": "Types catch mistakes",
+          "score": 2,
+          "note": "blockType is typed unknown on every public function, so a misspelled type is not a type error, and countsByPlayer is typed { [Player]: Counts } without the optional."
+        },
+        {
+          "criterion": "Call sites read clearly",
+          "score": 4,
+          "note": "grant is a separate function, but the yielding functions loadPlayer and fetchSaved don't have Async in their names."
+        },
+        {
+          "criterion": "In scope and merge-ready",
+          "score": 2,
+          "note": "luau-lsp fails at lines 49 and 68 because it uses the BlockTypes.Order loop variable without a BlockType cast; it also requires by Instance path."
+        }
+      ],
+      "overall_score": 5.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Uses the closed BlockType set and the optional Counts? table type",
+        "Throws away a load that finishes after the player left, and loads players already in the server",
+        "Returns named failure reasons; GrantBlocks is a separate function for going past the cap",
+        "All automatic checks pass"
+      ],
+      "weaknesses": [
+        "A block type string that isn't valid throws an error instead of returning a reason",
+        "No retry on DataStore load"
+      ]
+    },
+    "B": {
+      "score": 5.5,
+      "strengths": [
+        "Retries the DataStore load",
+        "Tracks loads in progress explicitly",
+        "Returns a value for an invalid block type from a client instead of throwing"
+      ],
+      "weaknesses": [
+        "luau-lsp type errors in its own code (missing cast)",
+        "blockType typed unknown, so the closed BlockType set catches nothing",
+        "Table value type isn't optional",
+        "Yielding functions don't have Async in their names; requires by Instance path"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 5.5
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

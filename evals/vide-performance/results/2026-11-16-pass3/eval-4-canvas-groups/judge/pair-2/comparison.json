@@ -1,0 +1,124 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "B builds the shine's CanvasGroup only while the shine is visible, through `show`, and fades it with `GroupTransparency`, so there is no pop. The card content stays in plain frames and the look is preserved. A changes how the shine is drawn and reparents the whole panel, cards included, into and out of a CanvasGroup, which risks a visible switch. A's own doc admits both the shine difference and the switch.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Few CanvasGroups when idle",
+          "score": 5,
+          "note": "Cards are now `create(\"Frame\")`, and the `effect` sets `fader.Parent = nil` once `fade() == 1`, so 0 CanvasGroups exist while open and idle."
+        },
+        {
+          "criterion": "Shine clipped by a temporary small CanvasGroup with UICorner",
+          "score": 2,
+          "note": "There is no shine CanvasGroup. A `UIGradient` with `Rotation = SHINE_ANGLE` on a card-sized frame with a `UICorner` does clip to the corners, but it swaps the rotated stripe for a different technique."
+        },
+        {
+          "criterion": "No pop of the temporary group",
+          "score": 3,
+          "note": "There is no shine group that could pop. `Visible = shine() > 0` is smooth, but moving `panel` out of `Fade` at the end of the fade-in can visibly switch rendering, as the doc admits ('text may get slightly sharper')."
+        },
+        {
+          "criterion": "Card content never moved into/out of a temporary CanvasGroup",
+          "score": 2,
+          "note": "The effect reparents the whole `Panel`, all cards included, between `fader` and `root` on every open and close, which is exactly the content shuffling this criterion rules out."
+        },
+        {
+          "criterion": "Look otherwise unchanged",
+          "score": 3,
+          "note": "The panel fade and card selection still work, but the shine is now a gradient band whose lean and width 'can look slightly different', per the attempt's own doc."
+        },
+        {
+          "criterion": "Doc quality",
+          "score": 4,
+          "note": "Gives the counting snippet, 41 before vs 0 idle / 1 during fade, Explorer checks, and phone low-quality steps. It also discloses the known visual differences."
+        },
+        {
+          "criterion": "Correct, typed, in scope; checks pass",
+          "score": 4,
+          "note": "All checks pass and the code is typed, but the reparenting via `effect` plus manual `cleanup(fader:Destroy())` is extra complexity and outside the scope the task needed."
+        }
+      ],
+      "overall_score": 5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Few CanvasGroups when idle",
+          "score": 5,
+          "note": "Cards are plain `Frame`s. Only the panel's `BlockCatalog` CanvasGroup remains while idle, so the count is 1."
+        },
+        {
+          "criterion": "Shine clipped by a temporary small CanvasGroup with UICorner",
+          "score": 5,
+          "note": "`show(function() return shine() > 0 end, ...)` builds a `ShineClip` CanvasGroup with `UICorner` `CARD_RADIUS`, keeping the original rotated stripe."
+        },
+        {
+          "criterion": "No pop of the temporary group",
+          "score": 5,
+          "note": "`GroupTransparency = 1 - shine()` together with the `shine() > 0` condition means the group is nearly clear when it is created and when it is removed."
+        },
+        {
+          "criterion": "Card content never moved into/out of a temporary CanvasGroup",
+          "score": 5,
+          "note": "The swatch, labels and hitbox stay as direct children of the card Frame. Only the Shine frame lives inside `ShineClip`."
+        },
+        {
+          "criterion": "Look otherwise unchanged",
+          "score": 5,
+          "note": "The panel CanvasGroup fade is kept, and the stripe geometry and 0.5 strength at full shine are preserved. Selection is untouched."
+        },
+        {
+          "criterion": "Doc quality",
+          "score": 5,
+          "note": "Lists counts for closed (0), idle (1), hover (2) and before (41), a snippet that prints the full names, a check for white flashes, and a Graphics Quality 1 phone check."
+        },
+        {
+          "criterion": "Correct, typed, in scope; checks pass",
+          "score": 5,
+          "note": "Minimal typed diff (`show`, `SHINE_TRANSPARENCY`). luau-lsp, selene and StyLua all pass."
+        }
+      ],
+      "overall_score": 9
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 5,
+      "strengths": [
+        "Reaches 0 CanvasGroups while idle",
+        "All checks pass",
+        "Thorough doc that admits the trade-offs"
+      ],
+      "weaknesses": [
+        "Changes how the shine is drawn (gradient instead of a rotated stripe), so the look may differ",
+        "Reparents the whole panel subtree into and out of a CanvasGroup, which risks a visible switch at the end of the fade",
+        "More fragile lifecycle code"
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "Matches the intended design exactly",
+        "Visual output is preserved",
+        "Minimal, clean diff",
+        "Clear doc with before and after counts"
+      ],
+      "weaknesses": [
+        "The panel's CanvasGroup stays for the whole time the catalog is open (acceptable under the rubric)"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 5,
+    "with_skill": 9
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

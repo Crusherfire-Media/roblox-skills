@@ -1,0 +1,1127 @@
+diff --git a/src/ServerScriptService/Stories/GameUI.storybook.luau b/src/ServerScriptService/Stories/GameUI.storybook.luau
+new file mode 100644
+index 0000000..6ab9706
+--- /dev/null
++++ b/src/ServerScriptService/Stories/GameUI.storybook.luau
+@@ -0,0 +1,4 @@
++return {
++	name = "Game UI",
++	storyRoots = { game:GetService("ServerScriptService").Stories },
++}
+diff --git a/src/ServerScriptService/Stories/Hud.story.luau b/src/ServerScriptService/Stories/Hud.story.luau
+new file mode 100644
+index 0000000..bebdfd5
+--- /dev/null
++++ b/src/ServerScriptService/Stories/Hud.story.luau
+@@ -0,0 +1,86 @@
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local StarterPlayer = game:GetService("StarterPlayer")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Hud = require(StarterPlayer.StarterPlayerScripts.UI.Hud)
++local UILabs = require(ReplicatedStorage.Packages.UILabs)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local create = Vide.create
++local source = Vide.source
++
++local Screen = require(StarterPlayer.StarterPlayerScripts.UI.Screen)
++
++type Input = Screen.Input
++type Layout = Screen.Layout
++
++local CONTROLS = {
++	Layout = UILabs.Ordered(
++		UILabs.ControlGroup({
++			Layout = UILabs.Ordered(UILabs.Choose({ "Desktop", "Phone", "Tablet", "Gamepad" }), 1),
++			-- Picks the prompts: key labels, controller glyphs, or none.
++			Input = UILabs.Ordered(UILabs.Choose({ "KeyboardAndMouse", "Touch", "Gamepad" }), 2),
++		}),
++		1
++	),
++	State = UILabs.Ordered(
++		UILabs.ControlGroup({
++			BuildMode = UILabs.Ordered(true, 1),
++			Coins = UILabs.Ordered(UILabs.Slider(250, 0, 1000000, 50), 2),
++		}),
++		2
++	),
++}
++
++type StoryProps = {
++	controls: {
++		Layout: {
++			Layout: () -> string,
++			Input: () -> string,
++		},
++		State: {
++			BuildMode: () -> boolean,
++			Coins: () -> number,
++		},
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	local layout = props.controls.Layout
++	local state = props.controls.State
++	local selected = source(BlockTypes.List[1].Name)
++
++	return create("Frame")({
++		Name = "HudPreview",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundTransparency = 1,
++
++		Hud({
++			Selected = selected,
++			Select = function(name: string)
++				selected(name)
++			end,
++			BuildMode = state.BuildMode,
++			ToggleBuildMode = function()
++				print("build mode toggled")
++			end,
++			Coins = state.Coins,
++			OpenInventory = function()
++				print("inventory opened")
++			end,
++			Layout = layout.Layout :: () -> Layout,
++			Input = layout.Input :: () -> Input,
++			Viewport = Screen.viewport,
++			JumpButtonClearance = Screen.jumpButtonClearance,
++		}),
++	})
++end
++
++return {
++	summary = "The HUD in each layout and input. Touch layouts place the hotbar from "
++		.. "Studio's viewport size, not the preview frame's.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 1c5b71d..3e42e3b 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,15 +1,25 @@
++local GuiService = game:GetService("GuiService")
+ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local UserInputService = game:GetService("UserInputService")
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Hud = require(script.Parent.UI.Hud)
++local Screen = require(script.Parent.UI.Screen)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
+ local mount = Vide.mount
+ local source = Vide.source
+ 
++-- Keep the gamepad keys in sync with the glyphs in UI/Hud. The triggers are
++-- left free for block placement.
++local PREVIOUS_BLOCK_KEY = Enum.KeyCode.ButtonL1
++local NEXT_BLOCK_KEY = Enum.KeyCode.ButtonR1
++local BUILD_MODE_KEYS = { Enum.KeyCode.B, Enum.KeyCode.ButtonY }
++local INVENTORY_KEYS = { Enum.KeyCode.I, Enum.KeyCode.ButtonX }
++
+ local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+ 
+ local selected = source(BlockPlacer.getBlockType())
+@@ -25,32 +35,64 @@ local function setBuildMode(enabled: boolean)
+ 	buildMode(enabled)
+ end
+ 
++local function toggleBuildMode()
++	setBuildMode(not buildMode())
++end
++
+ local function openInventory()
+ 	-- The inventory screen is still being built.
+ 	print("inventory opened")
+ end
+ 
++-- The hotbar wraps at both ends, as linear lists do for gamepad.
++local function stepBlockType(step: number)
++	local list = BlockTypes.List
++	local current = table.find(list, BlockTypes.ByName[BlockPlacer.getBlockType()]) or 1
++	local nextIndex = (current - 1 + step) % #list + 1
++	BlockPlacer.setBlockType(list[nextIndex].Name)
++end
++
+ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEvent: boolean)
+ 	if gameProcessedEvent then
+ 		return
+ 	end
+-	if input.KeyCode == Enum.KeyCode.B then
+-		setBuildMode(not buildMode())
+-	elseif input.KeyCode == Enum.KeyCode.I then
++	-- While gamepad selection is on a menu, the gamepad's buttons belong to
++	-- that menu.
++	local isGamepad = string.find(input.UserInputType.Name, "^Gamepad") ~= nil
++	if isGamepad and GuiService.SelectedObject then
++		return
++	end
++
++	local keyCode = input.KeyCode
++	if table.find(BUILD_MODE_KEYS, keyCode) then
++		toggleBuildMode()
++	elseif table.find(INVENTORY_KEYS, keyCode) then
+ 		openInventory()
++	elseif keyCode == PREVIOUS_BLOCK_KEY then
++		stepBlockType(-1)
++	elseif keyCode == NEXT_BLOCK_KEY then
++		stepBlockType(1)
+ 	end
+ end)
+ 
+ mount(function()
+ 	return create("ScreenGui")({
+ 		Name = "HudGui",
++		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
++
++		create("UIScale")({ Scale = Screen.uiScale }),
+ 
+ 		Hud({
+ 			Selected = selected,
+ 			Select = BlockPlacer.setBlockType,
+ 			BuildMode = buildMode,
++			ToggleBuildMode = toggleBuildMode,
+ 			Coins = coins,
+ 			OpenInventory = openInventory,
++			Layout = Screen.layout,
++			Input = Screen.input,
++			Viewport = Screen.viewport,
++			JumpButtonClearance = Screen.jumpButtonClearance,
+ 		}),
+ 	})
+ end, playerGui)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Hud.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Hud.luau
+index 19f653c..7353b76 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/UI/Hud.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Hud.luau
+@@ -1,7 +1,10 @@
+ --[[
+-	The in-game HUD: a hotbar of the ten block types along the bottom with their number keys, the
+-	build mode hint, the inventory button, and the coin counter. A slot's name shows in a tooltip
+-	while the mouse is over it.
++	The in-game HUD: a hotbar of the ten block types, the build mode toggle,
++	the inventory button, and the coin counter. It has one arrangement per
++	layout (desktop, phone, tablet, gamepad) and shows the prompts of the
++	current input: key labels for keyboard, controller glyphs for gamepad, and
++	none for touch. The name of a slot shows while the mouse is over it or
++	gamepad selection is on it, and for a moment after the selection changes.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+@@ -9,52 +12,319 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local cleanup = Vide.cleanup
+ local create = Vide.create
++local derive = Vide.derive
++local effect = Vide.effect
+ local show = Vide.show
+ local source = Vide.source
+ 
++local Screen = require(script.Parent.Screen)
++
+ type BlockType = BlockTypes.BlockType
++type Input = Screen.Input
++type Layout = Screen.Layout
++
++type Metrics = {
++	SlotSize: number,
++	SlotGap: number,
++	Padding: number,
++	Columns: number,
++	SelectedStroke: number,
++	KeyTextSize: number,
++	TextSize: number,
++	Margin: number,
++	GlyphSize: number,
++	ButtonSize: Vector2,
++	ButtonGap: number,
++}
++
++type Placement = {
++	AnchorPoint: Vector2,
++	Position: UDim2,
++}
+ 
+-local SLOT_SIZE = 40
+-local SLOT_GAP = 4
+ local KEY_LABELS = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" }
+ local SELECTED_COLOR = Color3.fromRGB(255, 200, 60)
+ local IDLE_STROKE_COLOR = Color3.fromRGB(20, 20, 24)
+ local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+ local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
++local ON_TEXT_COLOR = Color3.fromRGB(28, 28, 34)
++local NAME_FLASH_SECONDS = 2
++
++-- Keep in sync with the gamepad bindings in Main.client.
++local PREVIOUS_BLOCK_KEY = Enum.KeyCode.ButtonL1
++local NEXT_BLOCK_KEY = Enum.KeyCode.ButtonR1
++local BUILD_MODE_KEY = Enum.KeyCode.ButtonY
++local INVENTORY_KEY = Enum.KeyCode.ButtonX
++
++-- With default movement the dynamic thumbstick can appear anywhere in this
++-- share of the screen's width, from the left edge.
++local THUMBSTICK_SHARE = 0.4
++local CONTROL_GAP = 8
++
++local DESKTOP: Metrics = table.freeze({
++	SlotSize = 40,
++	SlotGap = 4,
++	Padding = 6,
++	Columns = 10,
++	SelectedStroke = 3,
++	KeyTextSize = 12,
++	TextSize = 14,
++	Margin = 16,
++	GlyphSize = 20,
++	ButtonSize = Vector2.new(140, 28),
++	ButtonGap = 8,
++})
++
++local PHONE: Metrics = table.freeze({
++	SlotSize = 46,
++	SlotGap = 6,
++	Padding = 6,
++	Columns = 5,
++	SelectedStroke = 3,
++	KeyTextSize = 12,
++	TextSize = 18,
++	Margin = 12,
++	GlyphSize = 28,
++	ButtonSize = Vector2.new(150, 52),
++	ButtonGap = 8,
++})
++
++local TABLET: Metrics = table.freeze({
++	SlotSize = 56,
++	SlotGap = 6,
++	Padding = 6,
++	Columns = 5,
++	SelectedStroke = 3,
++	KeyTextSize = 12,
++	TextSize = 18,
++	Margin = 16,
++	GlyphSize = 28,
++	ButtonSize = Vector2.new(140, 56),
++	ButtonGap = 10,
++})
++
++local GAMEPAD: Metrics = table.freeze({
++	SlotSize = 56,
++	SlotGap = 6,
++	Padding = 8,
++	Columns = 10,
++	SelectedStroke = 4,
++	KeyTextSize = 14,
++	TextSize = 26,
++	Margin = 32,
++	GlyphSize = 40,
++	ButtonSize = Vector2.new(200, 56),
++	ButtonGap = 12,
++})
++
++local METRICS: { [Layout]: Metrics } = table.freeze({
++	Desktop = DESKTOP,
++	Phone = PHONE,
++	Tablet = TABLET,
++	Gamepad = GAMEPAD,
++})
+ 
+ export type HudProps = {
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
+ 	BuildMode: () -> boolean,
++	ToggleBuildMode: () -> (),
+ 	Coins: () -> number,
+ 	OpenInventory: () -> (),
++	Layout: () -> Layout,
++	Input: () -> Input,
++	-- In UI units, as Screen.viewport and Screen.jumpButtonClearance return.
++	Viewport: () -> Vector2,
++	JumpButtonClearance: () -> Vector2,
+ }
+ 
+ type SlotProps = {
+ 	BlockType: BlockType,
+ 	Index: number,
++	Metrics: () -> Metrics,
++	ShowKey: () -> boolean,
+ 	IsSelected: () -> boolean,
+ 	Select: () -> (),
+ 	Hovered: Vide.Source<string?>,
++	Focused: Vide.Source<string?>,
++	Input: () -> Input,
++}
++
++type GlyphProps = {
++	KeyCode: Enum.KeyCode,
++	Fallback: string,
++	Size: () -> number,
++	Visible: () -> boolean,
++	LayoutOrder: number?,
++	AnchorPoint: Vector2?,
++	Position: UDim2?,
++}
++
++type ActionButtonProps = {
++	Name: string,
++	Label: () -> string,
++	KeyLabel: string,
++	KeyCode: Enum.KeyCode,
++	GlyphFallback: string,
++	IsOn: (() -> boolean)?,
++	Input: () -> Input,
++	Metrics: () -> Metrics,
++	Placement: () -> Placement,
++	Activated: () -> (),
+ }
+ 
++local function hotbarSize(metrics: Metrics): Vector2
++	local count = #BlockTypes.List
++	local columns = math.min(metrics.Columns, count)
++	local rows = math.ceil(count / columns)
++	return Vector2.new(
++		columns * metrics.SlotSize + (columns - 1) * metrics.SlotGap + metrics.Padding * 2,
++		rows * metrics.SlotSize + (rows - 1) * metrics.SlotGap + metrics.Padding * 2
++	)
++end
++
++local function glyph(props: GlyphProps): ImageLabel
++	local image = function()
++		return Screen.glyphImage(props.KeyCode)
++	end
++
++	return create("ImageLabel")({
++		Name = `Glyph{props.Fallback}`,
++		LayoutOrder = props.LayoutOrder,
++		AnchorPoint = props.AnchorPoint,
++		Position = props.Position,
++		Size = function()
++			return UDim2.fromOffset(props.Size(), props.Size())
++		end,
++		BackgroundTransparency = 1,
++		Visible = props.Visible,
++		Image = image,
++
++		create("TextLabel")({
++			Name = "Fallback",
++			Size = UDim2.fromScale(1, 1),
++			BackgroundColor3 = PANEL_COLOR,
++			Font = Enum.Font.GothamBold,
++			TextScaled = true,
++			TextColor3 = TEXT_COLOR,
++			Text = props.Fallback,
++			Visible = function()
++				return image() == ""
++			end,
++
++			create("UICorner")({ CornerRadius = UDim.new(0.5, 0) }),
++			create("UIPadding")({
++				PaddingLeft = UDim.new(0.15, 0),
++				PaddingRight = UDim.new(0.15, 0),
++				PaddingTop = UDim.new(0.2, 0),
++				PaddingBottom = UDim.new(0.2, 0),
++			}),
++		}),
++	})
++end
++
++local function actionButton(props: ActionButtonProps): TextButton
++	local function isOn(): boolean
++		return if props.IsOn then props.IsOn() else false
++	end
++
++	return create("TextButton")({
++		Name = props.Name,
++		AnchorPoint = function()
++			return props.Placement().AnchorPoint
++		end,
++		Position = function()
++			return props.Placement().Position
++		end,
++		Size = function()
++			local size = props.Metrics().ButtonSize
++			return UDim2.fromOffset(size.X, size.Y)
++		end,
++		BackgroundColor3 = function()
++			return if isOn() then SELECTED_COLOR else PANEL_COLOR
++		end,
++		AutoButtonColor = true,
++		Text = "",
++
++		Activated = props.Activated,
++
++		create("UICorner")({ CornerRadius = UDim.new(0, 6) }),
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			HorizontalAlignment = Enum.HorizontalAlignment.Center,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++			Padding = UDim.new(0, 8),
++		}),
++
++		glyph({
++			KeyCode = props.KeyCode,
++			Fallback = props.GlyphFallback,
++			LayoutOrder = 1,
++			Size = function()
++				return props.Metrics().GlyphSize
++			end,
++			Visible = function()
++				return props.Input() == "Gamepad"
++			end,
++		}),
++
++		create("TextLabel")({
++			Name = "Label",
++			LayoutOrder = 2,
++			AutomaticSize = Enum.AutomaticSize.X,
++			Size = function()
++				return UDim2.fromOffset(0, props.Metrics().TextSize + 4)
++			end,
++			BackgroundTransparency = 1,
++			Font = Enum.Font.GothamBold,
++			TextSize = function()
++				return props.Metrics().TextSize
++			end,
++			TextColor3 = function()
++				return if isOn() then ON_TEXT_COLOR else TEXT_COLOR
++			end,
++			Text = function()
++				local label = props.Label()
++				return if props.Input() == "KeyboardAndMouse"
++					then `[{props.KeyLabel}] {label}`
++					else label
++			end,
++		}),
++	})
++end
++
+ local function slot(props: SlotProps): TextButton
++	local displayName = props.BlockType.DisplayName
++
+ 	return create("TextButton")({
+ 		Name = props.BlockType.Name,
+ 		LayoutOrder = props.Index,
+-		Size = UDim2.fromOffset(SLOT_SIZE, SLOT_SIZE),
+ 		BackgroundColor3 = props.BlockType.Color,
++		AutoButtonColor = true,
++		Text = "",
+ 
+ 		MouseEnter = function()
+-			props.Hovered(props.BlockType.DisplayName)
++			-- A touch tap fires MouseEnter without a matching MouseLeave.
++			if props.Input() == "KeyboardAndMouse" then
++				props.Hovered(displayName)
++			end
+ 		end,
+ 		MouseLeave = function()
+-			if props.Hovered() == props.BlockType.DisplayName then
++			if props.Hovered() == displayName then
+ 				props.Hovered(nil)
+ 			end
+ 		end,
+-		MouseButton1Click = props.Select,
++		SelectionGained = function()
++			props.Focused(displayName)
++		end,
++		SelectionLost = function()
++			if props.Focused() == displayName then
++				props.Focused(nil)
++			end
++		end,
++		Activated = props.Select,
+ 
+ 		create("UICorner")({ CornerRadius = UDim.new(0, 4) }),
+ 		create("UIStroke")({
+@@ -63,32 +333,80 @@ local function slot(props: SlotProps): TextButton
+ 				return if props.IsSelected() then SELECTED_COLOR else IDLE_STROKE_COLOR
+ 			end,
+ 			Thickness = function()
+-				return if props.IsSelected() then 3 else 1
++				return if props.IsSelected() then props.Metrics().SelectedStroke else 1
+ 			end,
+ 		}),
+ 
+ 		create("TextLabel")({
+ 			Name = "Key",
+ 			Position = UDim2.fromOffset(3, 1),
+-			Size = UDim2.fromOffset(12, 12),
++			Size = function()
++				local size = props.Metrics().KeyTextSize
++				return UDim2.fromOffset(size, size)
++			end,
+ 			BackgroundTransparency = 1,
+ 			Font = Enum.Font.GothamBold,
+-			TextSize = 12,
++			TextSize = function()
++				return props.Metrics().KeyTextSize
++			end,
+ 			TextColor3 = TEXT_COLOR,
+ 			TextStrokeTransparency = 0.4,
+-			Text = KEY_LABELS[props.Index],
++			Text = KEY_LABELS[props.Index] or "",
++			Visible = props.ShowKey,
+ 		}),
+ 	})
+ end
+ 
+ local function hud(props: HudProps): { Instance }
+ 	local hovered: Vide.Source<string?> = source(nil :: string?)
++	local focused: Vide.Source<string?> = source(nil :: string?)
++	local flashed: Vide.Source<string?> = source(nil :: string?)
++
++	local metrics = derive(function(): Metrics
++		return METRICS[props.Layout()]
++	end)
++
++	local function isGamepad(): boolean
++		return props.Input() == "Gamepad"
++	end
++
++	-- Gamepad and touch players have no hover, so the name flashes after
++	-- each switch instead. Keyboard players keep the hover tooltip alone.
++	-- The thread, not the effect, records the last name, because strict mode
++	-- runs the effect twice and cancels the first thread before it starts.
++	local lastFlashedName = props.Selected()
++	effect(function()
++		local name = props.Selected()
++		local thread = task.defer(function()
++			local blockType = BlockTypes.ByName[name]
++			if name == lastFlashedName or not blockType then
++				return
++			end
++			lastFlashedName = name
++			if props.Input() == "KeyboardAndMouse" then
++				return
++			end
++			flashed(blockType.DisplayName)
++			task.wait(NAME_FLASH_SECONDS)
++			flashed(nil)
++		end)
++		cleanup(thread)
++	end)
++
++	local shownName = derive(function(): string?
++		local pointed = if props.Input() == "KeyboardAndMouse" then hovered() else nil
++		return pointed or focused() or flashed()
++	end)
+ 
+ 	local slots = {}
+ 	for index, blockType in BlockTypes.List do
+ 		slots[index] = slot({
+ 			BlockType = blockType,
+ 			Index = index,
++			Metrics = metrics,
++			ShowKey = function()
++				return props.Input() == "KeyboardAndMouse"
++			end,
+ 			IsSelected = function()
+ 				return props.Selected() == blockType.Name
+ 			end,
+@@ -96,91 +414,246 @@ local function hud(props: HudProps): { Instance }
+ 				props.Select(blockType.Name)
+ 			end,
+ 			Hovered = hovered,
++			Focused = focused,
++			Input = props.Input,
+ 		})
+ 	end
+ 
++	local function hotbarPlacement(): Placement
++		local current = metrics()
++		local layout = props.Layout()
++		local view = props.Viewport()
++		local halfWidth = hotbarSize(current).X / 2
++		if props.Input() == "Touch" then
++			-- Centered between the thumbstick's side and the jump button. When
++			-- that gap is narrower than the hotbar, it stays clear of the jump
++			-- button and reaches into the thumbstick's side.
++			local left = view.X * THUMBSTICK_SHARE + CONTROL_GAP
++			local right = view.X - props.JumpButtonClearance().X - CONTROL_GAP
++			local center = math.max(
++				math.min((left + right) / 2, right - halfWidth),
++				halfWidth + current.Margin
++			)
++			return {
++				AnchorPoint = Vector2.new(0.5, 1),
++				Position = UDim2.new(0, center, 1, -current.Margin),
++			}
++		end
++
++		-- The desktop and gamepad layouts share the bottom row with the two
++		-- action buttons. On a screen too narrow for all of it, such as a
++		-- Steam Deck, the hotbar moves up above the buttons.
++		local fromBottom = current.Margin
++		if layout == "Desktop" or layout == "Gamepad" then
++			local glyphWidth = current.GlyphSize + 12
++			local sideWidth = current.Margin + current.ButtonSize.X + CONTROL_GAP * 2
++			if view.X / 2 < halfWidth + glyphWidth + sideWidth then
++				fromBottom += current.ButtonSize.Y + current.ButtonGap
++			end
++		end
++		return {
++			AnchorPoint = Vector2.new(0.5, 1),
++			Position = UDim2.new(0.5, 0, 1, -fromBottom),
++		}
++	end
++
++	-- The phone and tablet layouts keep the two action buttons on the right:
++	-- in a row under the coins on a phone, where the top right is in thumb
++	-- reach and a column would run into the hotbar on short screens, and in a
++	-- column just above the jump button on a tablet, where the top is out of
++	-- reach. The build toggle is pressed more, so it sits nearest the thumb.
++	local function railPlacement(stackIndex: number): Placement
++		local current = metrics()
++		local buttonHeight = current.ButtonSize.Y
++		local layout = props.Layout()
++		if layout == "Phone" then
++			local top = current.Margin + current.TextSize + 6 + current.ButtonGap
++			local fromRight = current.Margin
++				+ (stackIndex - 1) * (current.ButtonSize.X + current.ButtonGap)
++			return {
++				AnchorPoint = Vector2.new(1, 0),
++				Position = UDim2.new(1, -fromRight, 0, top),
++			}
++		end
++		local bottom = props.JumpButtonClearance().Y + current.ButtonGap * 2
++		local fromBottom = bottom + (stackIndex - 1) * (buttonHeight + current.ButtonGap)
++		return {
++			AnchorPoint = Vector2.new(1, 1),
++			Position = UDim2.new(1, -current.Margin, 1, -fromBottom),
++		}
++	end
++
++	local function isTouchLayout(): boolean
++		local layout = props.Layout()
++		return layout == "Phone" or layout == "Tablet"
++	end
++
+ 	return {
+ 		create("Frame")({
+-			Name = "Hotbar",
+-			AnchorPoint = Vector2.new(0.5, 1),
+-			Position = UDim2.new(0.5, 0, 1, -16),
+-			AutomaticSize = Enum.AutomaticSize.XY,
+-			BackgroundColor3 = PANEL_COLOR,
+-			BackgroundTransparency = 0.3,
++			Name = "HotbarDock",
++			BackgroundTransparency = 1,
++			AnchorPoint = function()
++				return hotbarPlacement().AnchorPoint
++			end,
++			Position = function()
++				return hotbarPlacement().Position
++			end,
++			Size = function()
++				local size = hotbarSize(metrics())
++				return UDim2.fromOffset(size.X, size.Y)
++			end,
+ 
+-			create("UICorner")({ CornerRadius = UDim.new(0, 6) }),
+-			create("UIPadding")({
+-				PaddingLeft = UDim.new(0, 6),
+-				PaddingRight = UDim.new(0, 6),
+-				PaddingTop = UDim.new(0, 6),
+-				PaddingBottom = UDim.new(0, 6),
++			create("Frame")({
++				Name = "Hotbar",
++				Size = UDim2.fromScale(1, 1),
++				BackgroundColor3 = PANEL_COLOR,
++				BackgroundTransparency = 0.3,
++
++				create("UICorner")({ CornerRadius = UDim.new(0, 6) }),
++				create("UIPadding")({
++					PaddingLeft = function()
++						return UDim.new(0, metrics().Padding)
++					end,
++					PaddingRight = function()
++						return UDim.new(0, metrics().Padding)
++					end,
++					PaddingTop = function()
++						return UDim.new(0, metrics().Padding)
++					end,
++					PaddingBottom = function()
++						return UDim.new(0, metrics().Padding)
++					end,
++				}),
++				create("UIGridLayout")({
++					CellSize = function()
++						local size = metrics().SlotSize
++						return UDim2.fromOffset(size, size)
++					end,
++					CellPadding = function()
++						local gap = metrics().SlotGap
++						return UDim2.fromOffset(gap, gap)
++					end,
++					FillDirectionMaxCells = function()
++						return metrics().Columns
++					end,
++				}),
++
++				slots,
+ 			}),
+-			create("UIListLayout")({
+-				FillDirection = Enum.FillDirection.Horizontal,
+-				Padding = UDim.new(0, SLOT_GAP),
++
++			glyph({
++				KeyCode = PREVIOUS_BLOCK_KEY,
++				Fallback = "LB",
++				AnchorPoint = Vector2.new(1, 0.5),
++				Position = UDim2.new(0, -12, 0.5, 0),
++				Size = function()
++					return metrics().GlyphSize
++				end,
++				Visible = isGamepad,
++			}),
++			glyph({
++				KeyCode = NEXT_BLOCK_KEY,
++				Fallback = "RB",
++				AnchorPoint = Vector2.new(0, 0.5),
++				Position = UDim2.new(1, 12, 0.5, 0),
++				Size = function()
++					return metrics().GlyphSize
++				end,
++				Visible = isGamepad,
+ 			}),
+ 
+-			slots,
+-		}),
++			show(function()
++				return shownName() ~= nil
++			end, function()
++				return create("TextLabel")({
++					Name = "BlockName",
++					AnchorPoint = Vector2.new(0.5, 1),
++					Position = UDim2.new(0.5, 0, 0, -8),
++					AutomaticSize = Enum.AutomaticSize.X,
++					Size = function()
++						return UDim2.fromOffset(0, metrics().TextSize + 8)
++					end,
++					BackgroundColor3 = PANEL_COLOR,
++					Font = Enum.Font.Gotham,
++					TextSize = function()
++						return metrics().TextSize
++					end,
++					TextColor3 = TEXT_COLOR,
++					Text = function()
++						return shownName() or ""
++					end,
+ 
+-		show(function()
+-			return hovered() ~= nil
+-		end, function()
+-			return create("TextLabel")({
+-				Name = "Tooltip",
+-				AnchorPoint = Vector2.new(0.5, 1),
+-				Position = UDim2.new(0.5, 0, 1, -16 - SLOT_SIZE - 24),
+-				Size = UDim2.fromOffset(100, 22),
+-				BackgroundColor3 = PANEL_COLOR,
+-				Font = Enum.Font.Gotham,
+-				TextSize = 14,
+-				TextColor3 = TEXT_COLOR,
+-				Text = function()
+-					return hovered() or ""
+-				end,
+-			})
+-		end),
++					create("UICorner")({ CornerRadius = UDim.new(0, 4) }),
++					create("UIPadding")({
++						PaddingLeft = UDim.new(0, 8),
++						PaddingRight = UDim.new(0, 8),
++					}),
++				})
++			end),
++		}),
+ 
+-		create("TextLabel")({
+-			Name = "BuildModeHint",
+-			AnchorPoint = Vector2.new(0, 1),
+-			Position = UDim2.new(0, 16, 1, -16),
+-			Size = UDim2.fromOffset(180, 20),
+-			BackgroundTransparency = 1,
+-			Font = Enum.Font.Gotham,
+-			TextSize = 14,
+-			TextColor3 = TEXT_COLOR,
+-			TextStrokeTransparency = 0.5,
+-			TextXAlignment = Enum.TextXAlignment.Left,
+-			Text = function()
+-				return if props.BuildMode() then "[B] Build mode: ON" else "[B] Build mode: OFF"
++		actionButton({
++			Name = "BuildModeButton",
++			Label = function()
++				return if props.BuildMode() then "Build: On" else "Build: Off"
++			end,
++			KeyLabel = "B",
++			KeyCode = BUILD_MODE_KEY,
++			GlyphFallback = "Y",
++			IsOn = props.BuildMode,
++			Input = props.Input,
++			Metrics = metrics,
++			Placement = function(): Placement
++				if isTouchLayout() then
++					return railPlacement(1)
++				end
++				local margin = metrics().Margin
++				return {
++					AnchorPoint = Vector2.new(0, 1),
++					Position = UDim2.new(0, margin, 1, -margin),
++				}
+ 			end,
++			Activated = props.ToggleBuildMode,
+ 		}),
+ 
+-		create("TextButton")({
++		actionButton({
+ 			Name = "InventoryButton",
+-			AnchorPoint = Vector2.new(1, 1),
+-			Position = UDim2.new(1, -16, 1, -16),
+-			Size = UDim2.fromOffset(120, 28),
+-			BackgroundColor3 = PANEL_COLOR,
+-			Font = Enum.Font.GothamBold,
+-			TextSize = 14,
+-			TextColor3 = TEXT_COLOR,
+-			Text = "[I] Inventory",
+-
+-			MouseButton1Click = props.OpenInventory,
+-
+-			create("UICorner")({ CornerRadius = UDim.new(0, 6) }),
++			Label = function()
++				return "Inventory"
++			end,
++			KeyLabel = "I",
++			KeyCode = INVENTORY_KEY,
++			GlyphFallback = "X",
++			Input = props.Input,
++			Metrics = metrics,
++			Placement = function(): Placement
++				if isTouchLayout() then
++					return railPlacement(2)
++				end
++				local margin = metrics().Margin
++				return {
++					AnchorPoint = Vector2.new(1, 1),
++					Position = UDim2.new(1, -margin, 1, -margin),
++				}
++			end,
++			Activated = props.OpenInventory,
+ 		}),
+ 
+ 		create("TextLabel")({
+ 			Name = "Coins",
+ 			AnchorPoint = Vector2.new(1, 0),
+-			Position = UDim2.new(1, -16, 0, 12),
+-			Size = UDim2.fromOffset(140, 20),
++			Position = function()
++				local margin = metrics().Margin
++				return UDim2.new(1, -margin, 0, margin)
++			end,
++			Size = function()
++				return UDim2.fromOffset(240, metrics().TextSize + 6)
++			end,
+ 			BackgroundTransparency = 1,
+ 			Font = Enum.Font.GothamBold,
+-			TextSize = 14,
++			TextSize = function()
++				return metrics().TextSize
++			end,
+ 			TextColor3 = SELECTED_COLOR,
+ 			TextStrokeTransparency = 0.5,
+ 			TextXAlignment = Enum.TextXAlignment.Right,
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+new file mode 100644
+index 0000000..7b3f9ef
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+@@ -0,0 +1,182 @@
++--!strict
++--[[
++	Live facts about the player's screen and input, as Vide sources, so UI
++	follows a window resize, a device switch, or a controller picked up
++	mid-session. Each getter reads sources: pass it to a property as a binding
++	or call it inside one. Sizes are in UI units (offsets authored for a screen
++	1080 tall, before the root UIScale).
++]]
++
++local GuiService = game:GetService("GuiService")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
++local UserInputService = game:GetService("UserInputService")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local batch = Vide.batch
++local source = Vide.source
++
++local REFERENCE_SHORT_SIDE = 1080
++local MINIMUM_SCALE = 1
++local MAXIMUM_SCALE = 3
++local LARGE_DISPLAY_BOOST = 1.25
++local PHONE_SHORT_SIDE = 600
++local FALLBACK_VIEWPORT = Vector2.new(1920, 1080)
++
++-- The default PlayerModule's jump button, in real pixels in from the right
++-- edge (X) and up from the bottom edge (Y). It switches to the large layout
++-- above this short side.
++local SMALL_TOUCH_SHORT_SIDE = 500
++local SMALL_JUMP_CLEARANCE = Vector2.new(95, 90)
++local LARGE_JUMP_CLEARANCE = Vector2.new(170, 210)
++
++export type Input = "KeyboardAndMouse" | "Touch" | "Gamepad"
++export type Layout = "Desktop" | "Phone" | "Tablet" | "Gamepad"
++
++local Module = {}
++
++local realViewport = source(FALLBACK_VIEWPORT)
++local preferredInput = source("KeyboardAndMouse" :: Input)
++local isLargeDisplay = source(false)
++local gamepadRevision = source(0)
++local viewportConnection: RBXScriptConnection? = nil
++
++local function onGamepadChanged()
++	gamepadRevision(gamepadRevision() + 1)
++end
++
++-- Fires on every switch between mouse and keyboard too, so only a change to
++-- a gamepad counts.
++local function onLastInputTypeChanged(inputType: Enum.UserInputType)
++	if string.find(inputType.Name, "^Gamepad") then
++		onGamepadChanged()
++	end
++end
++
++local function readInput(): Input
++	local preferred = UserInputService.PreferredInput
++	if preferred == Enum.PreferredInput.Touch then
++		return "Touch"
++	elseif
++		preferred == Enum.PreferredInput.Gamepad
++		or preferred == Enum.PreferredInput.MicroGamepad
++	then
++		return "Gamepad"
++	else
++		return "KeyboardAndMouse"
++	end
++end
++
++local function refresh()
++	local camera = workspace.CurrentCamera
++	batch(function()
++		-- ViewportSize can read (1, 1) before the first frame, which would
++		-- pass for a tiny phone.
++		if camera and camera.ViewportSize.X > 1 and camera.ViewportSize.Y > 1 then
++			realViewport(camera.ViewportSize)
++		end
++		preferredInput(readInput())
++		isLargeDisplay(GuiService.ViewportDisplaySize == Enum.DisplaySize.Large)
++	end)
++end
++
++local function watchCamera()
++	if viewportConnection then
++		viewportConnection:Disconnect()
++	end
++	local camera = workspace.CurrentCamera
++	if camera then
++		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(refresh)
++	end
++	refresh()
++end
++
++--[[
++	How much the whole UI grows on this screen: 1 up to 1080p, more on larger
++	screens, and a quarter more on a TV. Bind it to a UIScale directly under
++	every ScreenGui the game builds.
++]]
++function Module.uiScale(): number
++	local view = realViewport()
++	local boost = if isLargeDisplay() then LARGE_DISPLAY_BOOST else 1
++	return math.clamp(
++		math.min(view.X, view.Y) / REFERENCE_SHORT_SIDE * boost,
++		MINIMUM_SCALE,
++		MAXIMUM_SCALE
++	)
++end
++
++function Module.viewport(): Vector2
++	return realViewport() / Module.uiScale()
++end
++
++--[[
++	The player's primary input as Roblox picks it. Touch means Roblox shows
++	its thumbstick and jump button.
++]]
++function Module.input(): Input
++	return preferredInput()
++end
++
++function Module.isPhone(): boolean
++	local view = Module.viewport()
++	return math.min(view.X, view.Y) < PHONE_SHORT_SIDE
++end
++
++--[[
++	Which HUD arrangement fits. A screen too small for the desktop or gamepad
++	layout gets the phone one whatever the input, which covers a phone with a
++	controller and a desktop window dragged small.
++]]
++function Module.layout(): Layout
++	local input = preferredInput()
++	if Module.isPhone() then
++		return "Phone"
++	elseif input == "Touch" then
++		return "Tablet"
++	elseif input == "Gamepad" then
++		return "Gamepad"
++	else
++		return "Desktop"
++	end
++end
++
++--[[
++	How far the touch jump button reaches in from the right edge (X) and up
++	from the bottom edge (Y). These are the default PlayerModule's numbers, not
++	a live reading, so keep a margin around them.
++]]
++function Module.jumpButtonClearance(): Vector2
++	local view = realViewport()
++	local clearance = if math.min(view.X, view.Y) <= SMALL_TOUCH_SHORT_SIDE
++		then SMALL_JUMP_CLEARANCE
++		else LARGE_JUMP_CLEARANCE
++	return clearance / Module.uiScale()
++end
++
++--[[
++	The button glyph for a gamepad KeyCode, for the kind of controller the
++	player is using, or "" when Roblox has none. Follows the player switching
++	controllers.
++]]
++function Module.glyphImage(keyCode: Enum.KeyCode): string
++	gamepadRevision()
++	return UserInputService:GetImageForKeyCode(keyCode)
++end
++
++-- UI Labs loads a fresh copy of this module on every reload, and each copy's
++-- connections would keep it alive, so edit mode reads the screen once.
++if RunService:IsRunning() then
++	watchCamera()
++	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
++	GuiService:GetPropertyChangedSignal("ViewportDisplaySize"):Connect(refresh)
++	UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(refresh)
++	UserInputService.GamepadConnected:Connect(onGamepadChanged)
++	UserInputService.GamepadDisconnected:Connect(onGamepadChanged)
++	UserInputService.LastInputTypeChanged:Connect(onLastInputTypeChanged)
++else
++	refresh()
++end
++
++return Module

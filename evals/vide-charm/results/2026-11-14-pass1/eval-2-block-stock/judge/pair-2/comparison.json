@@ -1,0 +1,123 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "The two attempts are nearly identical in design. Each has a BlockStock module that owns one Charm signal and replaces the table on every update, a useSignalState bridge inside the Vide scope, and a guard that reads Charm directly. Neither defines a shared computed for the selected count. A is slightly cleaner: its updater skips the set when the count hasn't changed, and its transparent wrapper frame keeps the label out of the panel's layout without B's padding-offset correction inside a Folder. B's story files count neither for nor against. A wins by a small margin.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Stock in one Charm signal owned by a module",
+          "score": 5,
+          "note": "BlockStock.luau holds the only `Charm.signal`, exposes `getStock`/`getCount`, and only `onStockChanged` calls `setStock`."
+        },
+        {
+          "criterion": "2. New table per update",
+          "score": 5,
+          "note": "The updater does `table.clone(current)`, sets one entry and returns the new table, and returns `current` unchanged when the count is the same."
+        },
+        {
+          "criterion": "3. Shared derived values defined once; guard reads Charm",
+          "score": 3,
+          "note": "The guard reads Charm directly through `BlockStock.getCount(blockType)`, but there is no shared computed for the selected count, so the UI recomputes `countOf(props.Selected())` on its own."
+        },
+        {
+          "criterion": "4. Vide-tracked bridge inside scope",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` runs inside `app()`, and the resulting source is passed down as `Stock`."
+        },
+        {
+          "criterion": "5. Live updates and sensible initial state",
+          "score": 5,
+          "note": "Tile Text, BackgroundColor3 and the Remaining label all read the `Stock` and `Selected` sources, so they update on both kinds of change. Before data arrives they show 0 and gray."
+        },
+        {
+          "criterion": "6. No yields in Charm callbacks; no leaks",
+          "score": 5,
+          "note": "The updater is pure, and the only listener is the one useSignalState creates, which Vide's cleanup removes."
+        },
+        {
+          "criterion": "7. Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "Only client files and the new BlockStock module change. A transparent wrapper frame cleanly keeps the label out of the UIListLayout, and all checks pass."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Stock in one Charm signal owned by a module",
+          "score": 5,
+          "note": "BlockStock.luau owns the signal and writes it only from `onStockChanged`; readers use `getStock`/`getCount`."
+        },
+        {
+          "criterion": "2. New table per update",
+          "score": 5,
+          "note": "`setStock(function(stock) local nextStock = table.clone(stock) ... return nextStock end)`."
+        },
+        {
+          "criterion": "3. Shared derived values defined once; guard reads Charm",
+          "score": 3,
+          "note": "The guard uses `BlockStock.getCount` directly, but the selected count is computed again in the UI through `countOf(props.Selected())`, with no shared computed."
+        },
+        {
+          "criterion": "4. Vide-tracked bridge inside scope",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` runs in `app()`, and the source goes to BlockPicker."
+        },
+        {
+          "criterion": "5. Live updates and sensible initial state",
+          "score": 5,
+          "note": "The bindings read the Stock and Selected sources, so updates are live. The tile gray is based on each block's brightness, and missing counts show as 0."
+        },
+        {
+          "criterion": "6. No yields in Charm callbacks; no leaks",
+          "score": 5,
+          "note": "The updater is pure, and the bridge's listener is cleaned up with the scope."
+        },
+        {
+          "criterion": "7. Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "It works and checks pass. Putting the label in a Folder inside the padded panel needs a `-PANEL_PADDING` offset correction, which is a bit more fragile, and the `number?` value type is slightly odd. The story files are neutral."
+        }
+      ],
+      "overall_score": 7.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "A clean module owns the signal, and each update clones the table and skips the set when the count is unchanged",
+        "The Vide bridge is set up correctly with useSignalState inside the scope",
+        "A transparent wrapper frame keeps the label out of the layout without padding hacks"
+      ],
+      "weaknesses": [
+        "There is no shared computed for the selected count or whether it can be placed, so the UI and the guard work it out separately"
+      ]
+    },
+    "B": {
+      "score": 7.5,
+      "strengths": [
+        "A clean module owns the signal, and each update clones the table",
+        "The Vide bridge is set up correctly with useSignalState inside the scope",
+        "The gray for an empty tile is based on each block's brightness"
+      ],
+      "weaknesses": [
+        "There is no shared computed for the selected count",
+        "The label sits in a Folder inside the padded panel and depends on an offset correction for the padding",
+        "Every update notifies, even when the count hasn't changed"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8,
+    "with_skill": 7.5
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

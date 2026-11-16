@@ -1,0 +1,302 @@
+diff --git a/src/ReplicatedStorage/Shared/PlotStats.luau b/src/ReplicatedStorage/Shared/PlotStats.luau
+index 9175d38..66e5c1e 100644
+--- a/src/ReplicatedStorage/Shared/PlotStats.luau
++++ b/src/ReplicatedStorage/Shared/PlotStats.luau
+@@ -1,15 +1,15 @@
++--!strict
+ -- Stats for a player's plot, shown on the plot sign and the build leaderboard.
+--- Each block is a table like { Type = "Brick", Position = Vector3 }, where
+--- Position is the block's center.
+ 
+-local PlotStats = {}
+-
+-local T = {
++-- A new block type goes in BlockType, BLOCK_TYPES, and BLOCK_COSTS.
++const BLOCK_TYPES: { BlockType } = {
+ 	"Brick",
+ 	"Dirt",
+ 	"Grass",
+ 	"Window",
+ 	"Wood",
++}
++const BLOCK_COSTS: { [string]: number? } = {
+ 	Brick = 5,
+ 	Dirt = 2,
+ 	Grass = 3,
+@@ -17,116 +17,192 @@ local T = {
+ 	Wood = 4,
+ }
+ 
+-function fmt(n, c, d)
+-	local s
+-	if d then
+-		s = string.format("%.1f", n)
+-	else
+-		s = tostring(math.floor(n))
++-- A block's Position is its center, so its top sits this far above it.
++const HALF_BLOCK_HEIGHT = 2
++
++const BULK_DISCOUNT_THRESHOLD = 50
++const BULK_DISCOUNT_MULTIPLIER = 0.9
++
++const POINTS_PER_BLOCK = 10
++const POINTS_PER_STUD_OF_HEIGHT = 2
++const POINTS_PER_BLOCK_TYPE = 25
++const ALL_TYPES_BONUS = 100
++
++export type BlockType = "Brick" | "Dirt" | "Grass" | "Window" | "Wood"
++
++export type Block = {
++	Type: string,
++	Position: Vector3?,
++}
++
++export type Summary = {
++	Counts: { [string]: number? },
++	Total: number,
++	Cost: number,
++	Height: number,
++	Score: number,
++	Variety: number,
++}
++
++--[[
++	The original lookup table held the type names both as keys and as an
++	array, so the numbers 1 to #BLOCK_TYPES also counted as known types.
++	getTallest keeps accepting them so its results do not change.
++]]
++local function isKnownType(blockType: unknown): boolean
++	if typeof(blockType) == "number" then
++		return BLOCK_TYPES[blockType] ~= nil
+ 	end
+-	if c then
+-		local int, frac = string.match(s, "^(%-?%d+)(.*)$")
+-		local out = int
+-		while true do
+-			local nxt, k = string.gsub(out, "^(%-?%d+)(%d%d%d)", "%1,%2")
+-			out = nxt
+-			if k == 0 then
+-				break
+-			end
+-		end
+-		s = out .. frac
++	if typeof(blockType) == "string" then
++		return BLOCK_COSTS[blockType] ~= nil
+ 	end
+-	return s
++	return false
+ end
+ 
+-function PlotStats.summarize(blks)
+-	assert(typeof(blks) == "table", "summarize expected a table of blocks, got " .. typeof(blks))
+-	local cnts = {}
+-	local tot = 0
+-	local cost = 0
+-	local h = 0
+-	for _, b in ipairs(blks) do
+-		if b ~= nil then
+-			if b.Position ~= nil then
+-				if T[b.Type] ~= nil then
+-					cnts[b.Type] = (cnts[b.Type] or 0) + 1
+-					tot = tot + 1
+-					cost = cost + T[b.Type]
+-					local top = b.Position.Y + 2
+-					if top > h then
+-						h = top
+-					end
+-				end
+-			end
++local function addThousandsSeparators(numberText: string): string
++	local integerPart, rest = string.match(numberText, "^(%-?%d+)(.*)$")
++	-- "nan" and "inf" have no digits to group
++	if integerPart == nil or rest == nil then
++		return numberText
++	end
++
++	-- Each pass inserts only the rightmost missing comma
++	local grouped = integerPart
++	while true do
++		local replaced, replacementCount = string.gsub(grouped, "^(%-?%d+)(%d%d%d)", "%1,%2")
++		grouped = replaced
++		if replacementCount == 0 then
++			break
+ 		end
+ 	end
+-	if tot > 50 then
+-		cost = math.floor(cost * 0.9)
++	return grouped .. rest
++end
++
++local function formatWholeNumber(value: number): string
++	return addThousandsSeparators(tostring(math.floor(value)))
++end
++
++local function formatOneDecimal(value: number): string
++	return string.format("%.1f", value)
++end
++
++local function applyBulkDiscount(cost: number, total: number): number
++	if total > BULK_DISCOUNT_THRESHOLD then
++		return math.floor(cost * BULK_DISCOUNT_MULTIPLIER)
++	end
++	return cost
++end
++
++local function calculateScore(total: number, height: number, variety: number): number
++	local score = total * POINTS_PER_BLOCK
++		+ math.floor(height) * POINTS_PER_STUD_OF_HEIGHT
++		+ variety * POINTS_PER_BLOCK_TYPE
++	if variety == #BLOCK_TYPES then
++		score += ALL_TYPES_BONUS
++	end
++	return score
++end
++
++local Module = {}
++
++--[[
++	Counts, prices, and scores a plot's blocks. Skips blocks with no Position
++	or an unknown Type, stops reading at the first nil in the array, and
++	never reports a Height below 0.
++]]
++function Module.summarize(blocks: { Block }): Summary
++	if typeof(blocks) ~= "table" then
++		-- Level 0 leaves the file position out of the message
++		error("summarize expected a table of blocks, got " .. typeof(blocks), 0)
+ 	end
+-	local v = 0
+-	for _, name in ipairs(T) do
+-		if cnts[name] then
+-			v = v + 1
++
++	local counts: { [string]: number? } = {}
++	local total = 0
++	local cost = 0
++	local height = 0
++	for _, block in ipairs(blocks) do
++		local position = block.Position
++		if position == nil then
++			continue
++		end
++		local blockCost = BLOCK_COSTS[block.Type]
++		if blockCost == nil then
++			continue
++		end
++
++		counts[block.Type] = (counts[block.Type] or 0) + 1
++		total += 1
++		cost += blockCost
++		local top = position.Y + HALF_BLOCK_HEIGHT
++		if top > height then
++			height = top
+ 		end
+ 	end
+-	local score = tot * 10 + math.floor(h) * 2 + v * 25
+-	if v == 5 then
+-		score = score + 100
++
++	local variety = 0
++	for _, blockType in BLOCK_TYPES do
++		if counts[blockType] then
++			variety += 1
++		end
+ 	end
++
+ 	return {
+-		Counts = cnts,
+-		Total = tot,
+-		Cost = cost,
+-		Height = h,
+-		Score = score,
+-		Variety = v,
++		Counts = counts,
++		Total = total,
++		Cost = applyBulkDiscount(cost, total),
++		Height = height,
++		Score = calculateScore(total, height, variety),
++		Variety = variety,
+ 	}
+ end
+ 
+-function PlotStats.getTallest(blks)
+-	local best = nil
+-	for _, b in ipairs(blks) do
+-		if b ~= nil then
+-			if b.Position ~= nil then
+-				if T[b.Type] ~= nil then
+-					if best == nil or b.Position.Y > best.Position.Y then
+-						best = b
+-					end
+-				end
+-			end
++--[[
++	Returns the block with the highest center, keeping the first one on a tie.
++	Returns no values at all, not nil, when no block qualifies.
++]]
++function Module.getTallest(blocks: { Block }): Block?
++	local tallest: Block? = nil
++	local tallestY = 0
++	for _, block in ipairs(blocks) do
++		local position = block.Position
++		if position == nil or not isKnownType(block.Type) then
++			continue
++		end
++		if tallest == nil or position.Y > tallestY then
++			tallest = block
++			tallestY = position.Y
+ 		end
+ 	end
+-	if best == nil then
++
++	if tallest == nil then
+ 		return
+ 	end
+-	return best
++	return tallest
+ end
+ 
+-function PlotStats.format(sum, short)
+-	local word = sum.Total == 1 and "block" or "blocks"
+-	if not short then
+-		local typeWord = sum.Variety == 1 and "type" or "types"
+-		return fmt(sum.Total, true, false)
+-			.. " "
+-			.. word
+-			.. ", "
+-			.. sum.Variety
+-			.. " "
+-			.. typeWord
+-			.. ", "
+-			.. fmt(sum.Height, false, true)
+-			.. " studs tall, score "
+-			.. fmt(sum.Score, true, false)
+-	else
+-		return fmt(sum.Total, true, false) .. " " .. word
++--[[
++	The short form is like "1,204 blocks". The long form is like
++	"1,204 blocks, 5 types, 38.0 studs tall, score 12,301".
++]]
++function Module.format(summary: Summary, short: boolean?): string
++	local blockWord = if summary.Total == 1 then "block" else "blocks"
++	local blockCount = `{formatWholeNumber(summary.Total)} {blockWord}`
++	if short then
++		return blockCount
+ 	end
++
++	local typeWord = if summary.Variety == 1 then "type" else "types"
++	return `{blockCount}, {summary.Variety} {typeWord}, `
++		.. `{formatOneDecimal(summary.Height)} studs tall, `
++		.. `score {formatWholeNumber(summary.Score)}`
+ end
+ 
+-function PlotStats.compare(a, b)
++-- Leaderboard sort order: higher score first, then more blocks.
++function Module.compare(a: Summary, b: Summary): boolean
+ 	if a.Score ~= b.Score then
+ 		return a.Score > b.Score
+ 	end
+ 	return a.Total > b.Total
+ end
+ 
+-return PlotStats
++return Module

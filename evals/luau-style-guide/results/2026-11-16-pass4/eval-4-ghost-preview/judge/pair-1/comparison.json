@@ -1,0 +1,113 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts implement the ghost correctly and tear it down completely. A fails luau-lsp because of its own `number?` narrowing in the constructor, so it isn't ready to merge. B passes every tool check, has an idempotent, guarded teardown and typed queries. Its failed \"disconnect\" check is a false negative because it uses `UnbindFromRenderStep`.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "PreRender update; filter covers the part and the character (refreshed after respawn); offsets along `result.Normal * BlockSize/2` before `PlacementRules.snap`; unparents on a miss; `check` runs against the PlacedBlocks folder; `SetBlockType` reapplies the style."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "`Destroy` disconnects `_Connection` and destroys `_Part`, so no frame update can run afterward."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 4,
+          "note": "Fields are declared in a `Fields` type and set together in the constructor; the part is CanCollide/CanQuery false and is in the raycast filter. The checker rejects the table literal, though."
+        },
+        {
+          "criterion": "Typing",
+          "score": 3,
+          "note": "Signatures are typed and `GetPlacement` returns `(boolean, Vector3?)`, but the constructor's `number?` locals cause a luau-lsp error at line 73."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "Uses an `Options` table with Transparency and RaycastDistance, plus DEFAULT_TRANSPARENCY and DEFAULT_RAYCAST_DISTANCE constants."
+        },
+        {
+          "criterion": "Scope and merge-ready",
+          "score": 3,
+          "note": "In scope, but luau-lsp analyze fails on the file's own code."
+        }
+      ],
+      "overall_score": 6.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "BindToRenderStep update after the camera; filter covers the character and the part every frame; half-block normal offset before `snap`; hides on a miss; red when `check` fails or the folder is missing; `setBlockType` reapplies the style."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "`destroy` calls `UnbindFromRenderStep` with a unique binding name and destroys the part; the `_destroyed` flag makes it idempotent and guards `getPlacement`."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 5,
+          "note": "`Fields` type enforced via `typeof(setmetatable(...))`, all fields set in one literal, colon methods, non-colliding and CanQuery=false part that is also filtered."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "Typed constructor and methods using BlockTypes.BlockType; `getPlacement` returns `(boolean, Vector3?, string?)` and gives a consistent nil when there's no spot."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "Uses an `Options` table with named DEFAULT_ constants."
+        },
+        {
+          "criterion": "Scope and merge-ready",
+          "score": 5,
+          "note": "Single class, no controller or input handling, all three tools pass."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 6.5,
+      "strengths": [
+        "Correct per-frame logic and half-block normal offset",
+        "Clean teardown with Disconnect and Destroy",
+        "Respects the block type's own transparency through math.max"
+      ],
+      "weaknesses": [
+        "luau-lsp type errors: `number?` values assigned to `number` fields",
+        "Destroy has no guard flag (harmless, but less explicit than B)"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Passes luau-lsp, selene and StyLua",
+        "Idempotent destroy with a destroyed guard",
+        "Unique render-step binding names, safe for many build-mode sessions"
+      ],
+      "weaknesses": [
+        "Ignores the block type's own Transparency (Window)",
+        "Hides by transparency instead of unparenting; the extra reason return value goes beyond the request"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 6.5,
+    "without_skill": 8.5
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

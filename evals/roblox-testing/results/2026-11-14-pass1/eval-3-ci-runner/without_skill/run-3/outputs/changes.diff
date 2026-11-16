@@ -1,0 +1,373 @@
+diff --git a/.github/workflows/specs.yml b/.github/workflows/specs.yml
+new file mode 100644
+index 0000000..f479f93
+--- /dev/null
++++ b/.github/workflows/specs.yml
+@@ -0,0 +1,205 @@
++# Runs the Jest specs (src/ServerScriptService/Tests/Specs) on every pull request.
++#
++# 1. Build the place with Rojo (default.project.json, which includes ServerScriptService.Tests).
++# 2. Publish the build as a new version of a dedicated CI place.
++# 3. Run ci/run-specs.luau against exactly that version through the Open Cloud Luau Execution
++#    API, print the task's logs (Jest's output), and fail unless the script reports `passed`.
++#
++# Repository secrets:
++#   ROBLOX_UNIVERSE_ID  universe of the CI place
++#   ROBLOX_PLACE_ID     the CI place (it gets overwritten by every run; don't point this at a real game)
++#   ROBLOX_API_KEY      Open Cloud API key with, for that universe:
++#                         universe-places:write                        (publish place versions)
++#                         universe.place.luau-execution-session:write  (create tasks)
++#                         universe.place.luau-execution-session:read   (read task state and logs)
++#
++# Secrets aren't passed to workflows triggered by pull requests from forks, so those runs fail
++# at the "Check secrets" step.
++
++name: Specs
++
++on:
++  pull_request:
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++concurrency:
++  group: specs-${{ github.event.pull_request.number || github.ref }}
++  cancel-in-progress: true
++
++env:
++  # Luau Execution task timeout. Open Cloud caps this (300s at the time of writing).
++  TASK_TIMEOUT: 300s
++  PLACE_FILE: build/ci.rbxl
++
++jobs:
++  specs:
++    name: Jest specs
++    runs-on: ubuntu-latest
++    timeout-minutes: 20
++    env:
++      ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
++      ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
++      ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
++
++    steps:
++      - name: Check secrets
++        run: |
++          missing=0
++          for name in ROBLOX_UNIVERSE_ID ROBLOX_PLACE_ID ROBLOX_API_KEY; do
++            if [ -z "${!name}" ]; then
++              echo "::error::Repository secret $name is not set (or unavailable to this run, e.g. a pull request from a fork)."
++              missing=1
++            fi
++          done
++          exit "$missing"
++
++      - uses: actions/checkout@v4
++
++      - name: Install Rokit
++        run: |
++          curl -sSf https://raw.githubusercontent.com/rojo-rbx/rokit/main/scripts/install.sh | bash
++          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
++
++      - name: Install tools (rokit.toml)
++        env:
++          GITHUB_TOKEN: ${{ github.token }}
++        run: |
++          # Authenticated GitHub API calls avoid the shared-runner rate limit on tool downloads.
++          rokit authenticate github --token "$GITHUB_TOKEN" || echo "::warning::rokit authenticate failed; continuing unauthenticated"
++          rokit install --no-trust-check
++
++      - name: Install packages (pesde)
++        # The root pesde.toml lists test_packages as a workspace member, so this installs both
++        # roblox_packages/ and test_packages/roblox_packages/ (Jest).
++        run: pesde install --locked
++
++      - name: Build place
++        run: |
++          mkdir -p "$(dirname "$PLACE_FILE")"
++          rojo build default.project.json --output "$PLACE_FILE"
++
++      - name: Publish to CI place
++        id: publish
++        run: |
++          set -euo pipefail
++          response=$(curl -sS --fail-with-body --retry 3 --retry-all-errors \
++            -X POST "https://apis.roblox.com/universes/v1/${ROBLOX_UNIVERSE_ID}/places/${ROBLOX_PLACE_ID}/versions?versionType=Published" \
++            -H "x-api-key: ${ROBLOX_API_KEY}" \
++            -H "Content-Type: application/octet-stream" \
++            --data-binary "@${PLACE_FILE}") || {
++              echo "::error::Publishing the CI place failed: $response"
++              exit 1
++            }
++          version=$(jq -r '.versionNumber // empty' <<<"$response")
++          if [ -z "$version" ]; then
++            echo "::error::Unexpected publish response: $response"
++            exit 1
++          fi
++          echo "Published CI place version $version"
++          echo "version=$version" >> "$GITHUB_OUTPUT"
++
++      - name: Run specs (Open Cloud Luau Execution)
++        env:
++          PLACE_VERSION: ${{ steps.publish.outputs.version }}
++        run: |
++          set -euo pipefail
++          api="https://apis.roblox.com/cloud/v2"
++
++          # GET with a few retries for transient errors and rate limiting (429).
++          get() {
++            curl -sS --fail-with-body --retry 5 --retry-all-errors --retry-delay 3 \
++              -H "x-api-key: ${ROBLOX_API_KEY}" "$1"
++          }
++
++          # Target the version just published, so concurrent runs from other pull requests
++          # can't swap the place out from under this one.
++          body=$(jq -n --rawfile script ci/run-specs.luau --arg timeout "$TASK_TIMEOUT" \
++            '{script: $script, timeout: $timeout}')
++          task=$(curl -sS --fail-with-body \
++            -X POST "${api}/universes/${ROBLOX_UNIVERSE_ID}/places/${ROBLOX_PLACE_ID}/versions/${PLACE_VERSION}/luau-execution-session-tasks" \
++            -H "x-api-key: ${ROBLOX_API_KEY}" \
++            -H "Content-Type: application/json" \
++            --data "$body") || {
++              echo "::error::Creating the Luau Execution task failed: $task"
++              exit 1
++            }
++          task_path=$(jq -r '.path // empty' <<<"$task")
++          if [ -z "$task_path" ]; then
++            echo "::error::Unexpected task creation response: $task"
++            exit 1
++          fi
++          echo "Task: $task_path"
++
++          # Poll until the task leaves QUEUED/PROCESSING. Allow queue time on top of the task timeout.
++          timeout_seconds=${TASK_TIMEOUT%s}
++          deadline=$(( $(date +%s) + timeout_seconds + 600 ))
++          state=$(jq -r '.state' <<<"$task")
++          while [ "$state" = "QUEUED" ] || [ "$state" = "PROCESSING" ] || [ "$state" = "STATE_UNSPECIFIED" ]; do
++            if [ "$(date +%s)" -ge "$deadline" ]; then
++              echo "::error::Timed out waiting for the Luau Execution task (last state: $state)"
++              exit 1
++            fi
++            sleep 5
++            task=$(get "${api}/${task_path}")
++            state=$(jq -r '.state' <<<"$task")
++            echo "State: $state"
++          done
++
++          # Print the task's logs: Jest's reporter output, including failure diffs.
++          echo "::group::Task logs (Jest output)"
++          page_token=""
++          while :; do
++            url="${api}/${task_path}/logs?maxPageSize=10000"
++            if [ -n "$page_token" ]; then
++              url="${url}&pageToken=${page_token}"
++            fi
++            logs=$(get "$url") || { echo "::warning::Could not fetch task logs"; break; }
++            jq -r '.luauExecutionSessionTaskLogs[]?.messages[]?' <<<"$logs"
++            page_token=$(jq -r '.nextPageToken // empty' <<<"$logs")
++            [ -n "$page_token" ] || break
++          done
++          echo "::endgroup::"
++
++          if [ "$state" != "COMPLETE" ]; then
++            message=$(jq -r '.error.message // "no error message"' <<<"$task")
++            echo "::error::Luau Execution task ended in state $state: $message"
++            {
++              echo "## Specs: task $state"
++              echo
++              echo '```'
++              echo "$message"
++              echo '```'
++            } >> "$GITHUB_STEP_SUMMARY"
++            exit 1
++          fi
++
++          summary=$(jq '.output.results[0] // {}' <<<"$task")
++
++          # Annotate each failing test and write a job summary.
++          jq -r '.failures[]? | "::error title=\(.test | gsub("[\r\n:,]"; " "))::\(.suite)%0A\(.message | gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A"))"' <<<"$summary"
++          {
++            echo "## Jest specs"
++            echo
++            jq -r '"| | Passed | Failed | Total |\n|---|---|---|---|\n| Suites | \(.numPassedTestSuites // 0) | \((.numFailedTestSuites // 0)) | \(.numTotalTestSuites // 0) |\n| Tests | \(.numPassedTests // 0) | \(.numFailedTests // 0) | \(.numTotalTests // 0) |"' <<<"$summary"
++            if jq -e '.error' <<<"$summary" >/dev/null; then
++              echo
++              echo '```'
++              jq -r '.error' <<<"$summary"
++              echo '```'
++            fi
++            if jq -e '(.failures // []) | length > 0' <<<"$summary" >/dev/null; then
++              echo
++              echo "### Failures"
++              jq -r '.failures[] | "\n**\(.test)** (`\(.suite)`)\n\n```\n\(.message)\n```"' <<<"$summary"
++            fi
++          } >> "$GITHUB_STEP_SUMMARY"
++
++          if [ "$(jq -r '.passed' <<<"$summary")" != "true" ]; then
++            error=$(jq -r '.error // empty' <<<"$summary")
++            echo "::error::Specs failed. ${error}"
++            exit 1
++          fi
++          echo "All specs passed: $(jq -r '"\(.numPassedTests) tests in \(.numTotalTestSuites) suites"' <<<"$summary")"
+diff --git a/README.md b/README.md
+index 9e549e3..7fce196 100644
+--- a/README.md
++++ b/README.md
+@@ -41,8 +41,24 @@ String requires work too, for example `require("@game/ReplicatedStorage/Packages
+ ## Tests
+ 
+ Jest specs live under `src/ServerScriptService/Tests/Specs`, beside `jest.config.luau`, whose
+-`testMatch` picks up every ModuleScript named `*.spec`. Specs run only in Studio, which this
+-project can't reach, so check specs with the commands below like any other file.
++`testMatch` picks up every ModuleScript named `*.spec`. Locally, specs run only in Studio, which
++this project can't reach, so check specs with the commands below like any other file.
++
++### CI
++
++`.github/workflows/specs.yml` runs the specs on every pull request: it installs packages,
++builds `default.project.json` with Rojo, publishes the build as a new version of a dedicated CI
++place, and runs `ci/run-specs.luau` against that version through Open Cloud's Luau Execution API.
++The pull request fails if any spec fails, any spec file fails to load, or no specs are found.
++Jest's output is in the job's "Task logs" group, and failures are summarized on the run page.
++
++It needs three repository secrets: `ROBLOX_UNIVERSE_ID` and `ROBLOX_PLACE_ID` (the CI place,
++which every run overwrites) and `ROBLOX_API_KEY` (an Open Cloud key with
++`universe-places:write` and `universe.place.luau-execution-session:read`/`:write` on that
++universe). Pull requests from forks don't get the secrets, so their runs fail.
++
++In CI, Jest can't use `debug.loadmodule`, so modules are cached across spec files rather than
++loaded fresh for each one. Don't rely on module state being reset between spec files.
+ 
+ ## Checks
+ 
+diff --git a/ci/run-specs.luau b/ci/run-specs.luau
+new file mode 100644
+index 0000000..3579b76
+--- /dev/null
++++ b/ci/run-specs.luau
+@@ -0,0 +1,125 @@
++--!strict
++--[[
++	Runs the Jest specs in ServerScriptService.Tests.Specs and returns a summary table.
++
++	This file is not part of the place. .github/workflows/specs.yml sends its contents as the
++	`script` of an Open Cloud Luau Execution task, which runs it on a headless server of the
++	uploaded CI place version. The task's `output.results[1]` is the table returned at the
++	bottom; the workflow fails the pull request unless `passed` is true.
++
++	The script only errors (making the task FAILED) when it can't load Jest or find the specs.
++	Spec failures and Jest crashes are reported through the returned table instead, so the
++	workflow can tell them apart.
++]]
++
++-- Open Cloud task scripts can't call debug.loadmodule (in Studio it sits behind the
++-- FFlagEnableLoadModule flag). This global makes Jest Roblox's module registry fall back to
++-- plain `require`. Consequence: modules required by specs are cached across spec files
++-- instead of being re-loaded fresh for each file, and jest.resetModules() / jest.mock()
++-- of ModuleScripts can't isolate them the way they do in Studio.
++-- It must be set before Jest is required.
++(_G :: any).__NO_LOADMODULE__ = true
++
++local ServerScriptService = game:GetService("ServerScriptService")
++
++local Tests = ServerScriptService:WaitForChild("Tests", 30)
++assert(Tests, "ServerScriptService.Tests is missing from the CI place build")
++local Specs = Tests:WaitForChild("Specs", 30)
++assert(Specs, "ServerScriptService.Tests.Specs is missing from the CI place build")
++local TestPackages = Tests:WaitForChild("Packages", 30)
++assert(TestPackages, "ServerScriptService.Tests.Packages is missing; did `pesde install` run before `rojo build`?")
++local JestModule = TestPackages:WaitForChild("Jest", 30)
++assert(JestModule, "ServerScriptService.Tests.Packages.Jest is missing")
++
++local Jest = require(JestModule) :: any
++
++-- Jest prints ANSI escape codes; strip them from text that goes into the returned table.
++local function stripAnsi(text: string): string
++	return (string.gsub(text, "\27%[[%d;]*m", ""))
++end
++
++local function truncate(text: string, maxLength: number): string
++	if #text <= maxLength then
++		return text
++	end
++	return string.sub(text, 1, maxLength) .. "\n... (truncated)"
++end
++
++-- `ci = true` keeps Jest from writing new snapshots (it can't write files here anyway).
++local ok, status, result = pcall(function()
++	return Jest.runCLI(Specs, { ci = true, verbose = true }, { Specs }):awaitStatus()
++end)
++
++if not ok or status ~= "Resolved" then
++	-- runCLI threw or its promise rejected: Jest itself broke (bad config, a spec that errors
++	-- while Jest collects it, and so on).
++	local message = if ok then tostring(result) else tostring(status)
++	print("Jest did not finish:\n" .. message)
++	return {
++		passed = false,
++		error = truncate(stripAnsi(message), 4000),
++	}
++end
++
++local aggregated = result.results
++
++local failures = {}
++for _, suite in aggregated.testResults or {} do
++	local suitePath = tostring(suite.testFilePath)
++	if suite.testExecError ~= nil then
++		local execError = suite.testExecError
++		local message = if typeof(execError) == "table" then execError.message else execError
++		table.insert(failures, {
++			suite = suitePath,
++			test = "(suite failed to run)",
++			message = truncate(stripAnsi(tostring(message)), 2000),
++		})
++	end
++	for _, assertion in suite.testResults or {} do
++		if assertion.status == "failed" then
++			local messages = {}
++			for _, failureMessage in assertion.failureMessages or {} do
++				table.insert(messages, stripAnsi(tostring(failureMessage)))
++			end
++			table.insert(failures, {
++				suite = suitePath,
++				test = tostring(assertion.fullName),
++				message = truncate(table.concat(messages, "\n"), 2000),
++			})
++		end
++	end
++end
++
++local numTotalTestSuites = aggregated.numTotalTestSuites or 0
++local numFailedTests = aggregated.numFailedTests or 0
++local numFailedTestSuites = aggregated.numFailedTestSuites or 0
++local numRuntimeErrorTestSuites = aggregated.numRuntimeErrorTestSuites or 0
++
++-- Finding no specs counts as a failure: it usually means the specs didn't make it into the
++-- build or testMatch stopped matching, and a green check would hide that.
++local passed = aggregated.success == true
++	and numTotalTestSuites > 0
++	and numFailedTests == 0
++	and numFailedTestSuites == 0
++	and numRuntimeErrorTestSuites == 0
++
++local errorMessage = nil
++if numTotalTestSuites == 0 then
++	errorMessage = "Jest found no spec files under ServerScriptService.Tests.Specs (testMatch: **/*.spec)."
++	print(errorMessage)
++end
++
++return {
++	passed = passed,
++	error = errorMessage,
++	numTotalTestSuites = numTotalTestSuites,
++	numPassedTestSuites = aggregated.numPassedTestSuites or 0,
++	numFailedTestSuites = numFailedTestSuites,
++	numRuntimeErrorTestSuites = numRuntimeErrorTestSuites,
++	numTotalTests = aggregated.numTotalTests or 0,
++	numPassedTests = aggregated.numPassedTests or 0,
++	numFailedTests = numFailedTests,
++	numPendingTests = aggregated.numPendingTests or 0,
++	numTodoTests = aggregated.numTodoTests or 0,
++	failures = failures,
++}

@@ -1,0 +1,5 @@
+The "Unknown require" errors are fixed, and both scripts now pass `luau-lsp analyze` with no errors. The code was fine: the generated `sourcemap.json` was out of date and didn't list `BlockTypes`, so luau-lsp couldn't resolve the `@game/ReplicatedStorage/Shared/BlockTypes` require. I regenerated it with `rojo sourcemap default.project.json --output sourcemap.json`.
+
+For a while I switched the requires to instance paths, but I've put the `@game/...` string requires back. The changed files are the same three as before, since `sourcemap.json` is ignored by Git.
+
+Generating the sourcemap also shows that Rojo reads the project with the new `StarterKit.model.json` in it. The full `rojo build` is still unrun, because it was blocked earlier, and the feature still needs a playtest. If luau-lsp shows this error again after files are added, regenerate the sourcemap the same way.

@@ -1,0 +1,133 @@
+diff --git a/PR_DESCRIPTION.md b/PR_DESCRIPTION.md
+new file mode 100644
+index 0000000..8337c35
+--- /dev/null
++++ b/PR_DESCRIPTION.md
+@@ -0,0 +1,48 @@
++# Add t and use it to check PlaceBlock arguments
++
++## Summary
++
++- Adds the [t](https://github.com/osyrisrblx/t) runtime type checker (`osyrisrblx/t`, pinned to
++  `=3.1.1`, the latest on Wally) to `pesde.toml`. It installs through pesde's Wally index like the
++  other packages, into `roblox_packages`, so it appears as `ReplicatedStorage.Packages.t`.
++- `BlockPlacement.server.luau` now checks the PlaceBlock remote's arguments with one `t.tuple`
++  check instead of hand-written `typeof` checks. Remotes added later can define their checks the
++  same way.
++- Adds t to the package table in `README.md`.
++
++## Checks kept
++
++| Before | After |
++|---|---|
++| `typeof(blockTypeName) == "string"` | `t.string` |
++| `typeof(position) == "Vector3"` | `t.Vector3` |
++| `position == position` (rejects a Vector3 with a NaN component) | Custom check in `t.intersection` after `t.Vector3` |
++
++Everything after the type checks is unchanged: the `BlockTypes.ByName` lookup, the rate limit,
++the character and HumanoidRootPart check, the Y >= 0 and occupied-cell checks, and the reach
++limit. The handler still returns silently on any failure.
++
++## Before testing
++
++1. **Stop `rojo serve`**, then run `pesde install` at the repo root. Until then
++   `ReplicatedStorage.Packages.t` doesn't exist and BlockPlacement errors on its first line.
++2. **Commit the updated `pesde.lock`** to this branch. It was not regenerated here, because no
++   install could run, so the lockfile in this PR does not yet list t.
++3. Regenerate the sourcemap so luau-lsp can type the new package:
++   `rojo sourcemap default.project.json -o sourcemap.json --include-non-scripts`
++4. Restart `rojo serve` and reconnect the Rojo plugin.
++
++## Testing
++
++Not yet run: the package isn't installed, so analysis, linting, and a playtest still need doing.
++
++- Run the checks in the README (`luau-lsp analyze`, `selene src`, `stylua --check src`).
++- Playtest and place blocks normally: they should place as before.
++- From the client command bar during a playtest, fire bad arguments and confirm no block appears
++  and no server error is logged:
++  - `game.ReplicatedStorage.PlaceBlock:FireServer(1, Vector3.zero)`
++  - `game.ReplicatedStorage.PlaceBlock:FireServer("Brick", "not a vector")`
++  - `game.ReplicatedStorage.PlaceBlock:FireServer("Brick", Vector3.new(0/0, 4, 0))`
++  - `game.ReplicatedStorage.PlaceBlock:FireServer("NotABlock", Vector3.new(0, 4, 0))`
++
++🤖 Generated with [Claude Code](https://claude.com/claude-code)
+diff --git a/README.md b/README.md
+index 9e549e3..5b1bda3 100644
+--- a/README.md
++++ b/README.md
+@@ -33,6 +33,7 @@ All of them come from Wally through pesde. Require each one through its link, ne
+ | CharmSync (`littensy/charm-sync`) | 0.4.1 | `require(ReplicatedStorage.Packages.CharmSync)` |
+ | UI Labs utilities (`pepeeltoro41/ui-labs`) | 2.4.2 | `require(ReplicatedStorage.Packages.UILabs)` |
+ | Module Loader (`crusherfire/module-loader`) | 4.0.1 | `require(ReplicatedStorage.Packages.ModuleLoader)` |
++| t (`osyrisrblx/t`) | 3.1.1 | `require(ReplicatedStorage.Packages.t)` |
+ | Jest Roblox (`roblox/jest`) | 3.20.1 | `require(ServerScriptService.Tests.Packages.Jest)` |
+ | Jest globals (`roblox/jest-globals`) | 3.20.1 | `require(ServerScriptService.Tests.Packages.JestGlobals)` |
+ 
+diff --git a/pesde.toml b/pesde.toml
+index d196787..e10bc52 100644
+--- a/pesde.toml
++++ b/pesde.toml
+@@ -23,6 +23,7 @@ VideCharm = { wally = "littensy/vide-charm", version = "=0.4.1" }
+ CharmSync = { wally = "littensy/charm-sync", version = "=0.4.1" }
+ UILabs = { wally = "pepeeltoro41/ui-labs", version = "=2.4.2" }
+ ModuleLoader = { wally = "crusherfire/module-loader", version = "=4.0.1" }
++t = { wally = "osyrisrblx/t", version = "=3.1.1" }
+ 
+ [dev_dependencies]
+ scripts_rojo = { name = "pesde/scripts_rojo", version = "^0.2.0", target = "lune" }
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index 812f4f9..e4e1023 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -7,6 +7,8 @@ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local Workspace = game:GetService("Workspace")
+ 
++local t = require(ReplicatedStorage.Packages.t)
++
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ 
+ local BLOCK_SIZE = BlockTypes.BlockSize
+@@ -15,6 +17,14 @@ local MAX_REACH = 64
+ -- Shortest time between two placements by one player, in seconds.
+ local MIN_INTERVAL = 0.1
+ 
++local isPlaceBlockArgs = t.tuple(
++	t.string,
++	t.intersection(t.Vector3, function(position: Vector3)
++		-- NaN is the only value not equal to itself.
++		return position == position, "position has a NaN component"
++	end)
++)
++
+ local placeBlock = Instance.new("RemoteEvent")
+ placeBlock.Name = "PlaceBlock"
+ placeBlock.Parent = ReplicatedStorage
+@@ -35,15 +45,11 @@ local function snapToCell(position: Vector3): Vector3
+ end
+ 
+ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+-	if typeof(blockTypeName) ~= "string" or typeof(position) ~= "Vector3" then
+-		return
+-	end
+-	-- NaN is the only value not equal to itself.
+-	if position ~= position then
++	if not isPlaceBlockArgs(blockTypeName, position) then
+ 		return
+ 	end
+ 
+-	local blockType = BlockTypes.ByName[blockTypeName]
++	local blockType = BlockTypes.ByName[blockTypeName :: string]
+ 	if not blockType then
+ 		return
+ 	end
+@@ -59,7 +65,7 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 		return
+ 	end
+ 
+-	local cell = snapToCell(position)
++	local cell = snapToCell(position :: Vector3)
+ 	if cell.Y < 0 or occupied[cell] then
+ 		return
+ 	end

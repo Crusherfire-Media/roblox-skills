@@ -1,0 +1,244 @@
+diff --git a/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/Implementation/_HudClientSetup.meta.json b/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/Implementation/_HudClientSetup.meta.json
+new file mode 100644
+index 0000000..966c67f
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/Implementation/_HudClientSetup.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "ClientOnly": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/SystemPackage/HudClientService.meta.json b/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/SystemPackage/HudClientService.meta.json
+index 6e4927b..966c67f 100644
+--- a/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/SystemPackage/HudClientService.meta.json
++++ b/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/SystemPackage/HudClientService.meta.json
+@@ -1,5 +1,5 @@
+ {
+   "attributes": {
+-    "ClientOnly": "true"
++    "ClientOnly": true
+   }
+ }
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminClientService.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminClientService.luau
+index fa2a739..f5370f8 100644
+--- a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminClientService.luau
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminClientService.luau
+@@ -49,15 +49,19 @@ local function createPanel(): ScreenGui
+ 	return screenGui
+ end
+ 
+-function AdminClientService:Start()
+-	local player = Players.LocalPlayer
+-	if not self:IsAdmin(player.UserId) then
++local function showPanelIfAdminAsync()
++	local isAdmin = AdminNetwork.IsAdmin:InvokeServer()
++	if isAdmin ~= true then
+ 		return
+ 	end
+-	local playerGui = player:FindFirstChildOfClass("PlayerGui")
++	local playerGui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+ 	if playerGui then
+ 		createPanel().Parent = playerGui
+ 	end
+ end
+ 
++function AdminClientService:Start()
++	task.spawn(showPanelIfAdminAsync)
++end
++
+ return AdminClientService
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminList.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminList.luau
+deleted file mode 100644
+index 409b2cf..0000000
+--- a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminList.luau
++++ /dev/null
+@@ -1,9 +0,0 @@
+---[[
+-	User IDs of the players who may use admin tools.
+-]]
+-
+-return table.freeze({
+-	14200731,
+-	52930118,
+-	88104562,
+-})
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminNetwork/IsAdmin.model.json b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminNetwork/IsAdmin.model.json
+new file mode 100644
+index 0000000..61a0557
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminNetwork/IsAdmin.model.json
+@@ -0,0 +1,3 @@
++{
++  "className": "RemoteFunction"
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminNetwork/init.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminNetwork/init.luau
+index e4d28dc..8fb8b8a 100644
+--- a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminNetwork/init.luau
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminNetwork/init.luau
+@@ -6,6 +6,8 @@
+ local AdminNetwork = {
+ 	-- Client to server: (message: string)
+ 	Announce = script:WaitForChild("Announce") :: RemoteEvent,
++	-- Client to server: () -> boolean, whether the calling player is an admin
++	IsAdmin = script:WaitForChild("IsAdmin") :: RemoteFunction,
+ }
+ 
+ return table.freeze(AdminNetwork)
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.luau
+deleted file mode 100644
+index 6e5efc4..0000000
+--- a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.luau
++++ /dev/null
+@@ -1,35 +0,0 @@
+---[[
+-	Server side of the admin tools: sends an admin's announcement to every player.
+-]]
+-
+-local Players = game:GetService("Players")
+-
+-local AdminNetwork = require("./AdminNetwork")
+-local AdminSharedService = require("./AdminSharedService")
+-local NotificationServerService = require(
+-	"@game/ServerScriptService/Modules/Systems/Core/NotificationSystem/SystemPackage/NotificationServerService"
+-)
+-
+-local AdminServerService = setmetatable({}, AdminSharedService)
+-
+-local function onAnnounce(player: Player, message: unknown)
+-	if not AdminServerService:IsAdmin(player.UserId) then
+-		return
+-	end
+-	if typeof(message) ~= "string" or message == "" then
+-		return
+-	end
+-	if utf8.len(message) == nil or #message > AdminSharedService.MaxAnnouncementLength then
+-		return
+-	end
+-
+-	for _, target in Players:GetPlayers() do
+-		NotificationServerService:Notify(target, `{player.DisplayName}: {message}`)
+-	end
+-end
+-
+-function AdminServerService:Init()
+-	AdminNetwork.Announce.OnServerEvent:Connect(onAnnounce)
+-end
+-
+-return AdminServerService
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.meta.json b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.meta.json
+deleted file mode 100644
+index 2322559..0000000
+--- a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.meta.json
++++ /dev/null
+@@ -1,5 +0,0 @@
+-{
+-  "attributes": {
+-    "RelocateToServerScriptService": true
+-  }
+-}
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService/_AdminList.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService/_AdminList.luau
+new file mode 100644
+index 0000000..382caa0
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService/_AdminList.luau
+@@ -0,0 +1,11 @@
++--[[
++	User IDs of the players who may use admin tools. Nested under
++	AdminServerService so it stays on the server; shared or client code must
++	never require it.
++]]
++
++return table.freeze({
++	14200731,
++	52930118,
++	88104562,
++})
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService/init.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService/init.luau
+new file mode 100644
+index 0000000..68d4ba8
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService/init.luau
+@@ -0,0 +1,49 @@
++--[[
++	Server side of the admin tools: sends an admin's announcement to every player.
++]]
++
++local Players = game:GetService("Players")
++
++local AdminList = require("@self/_AdminList")
++local AdminNetwork = require("../AdminNetwork")
++local AdminSharedService = require("../AdminSharedService")
++local NotificationServerService = require(
++	"@game/ServerScriptService/Modules/Systems/Core/NotificationSystem/SystemPackage/NotificationServerService"
++)
++
++local AdminServerService = setmetatable({}, AdminSharedService)
++
++local function onAnnounce(player: Player, message: unknown)
++	if not AdminServerService:IsAdmin(player.UserId) then
++		return
++	end
++	if typeof(message) ~= "string" or message == "" then
++		return
++	end
++	if utf8.len(message) == nil or #message > AdminSharedService.MaxAnnouncementLength then
++		return
++	end
++
++	for _, target in Players:GetPlayers() do
++		NotificationServerService:Notify(target, `{player.DisplayName}: {message}`)
++	end
++end
++
++local function onIsAdminInvoked(player: Player): boolean
++	return AdminServerService:IsAdmin(player.UserId)
++end
++
++--[[
++	Server only. Clients ask through AdminNetwork.IsAdmin, which answers for the
++	calling player alone.
++]]
++function AdminServerService:IsAdmin(userId: number): boolean
++	return table.find(AdminList, userId) ~= nil
++end
++
++function AdminServerService:Init()
++	AdminNetwork.Announce.OnServerEvent:Connect(onAnnounce)
++	AdminNetwork.IsAdmin.OnServerInvoke = onIsAdminInvoked
++end
++
++return AdminServerService
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService/init.meta.json b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService/init.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService/init.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminSharedService.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminSharedService.luau
+index 0ad92f7..c30ad14 100644
+--- a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminSharedService.luau
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminSharedService.luau
+@@ -2,8 +2,6 @@
+ 	What the server and client sides of the admin tools share.
+ ]]
+ 
+-local AdminList = require("./AdminList")
+-
+ -- Longest announcement, in characters.
+ local MAX_ANNOUNCEMENT_LENGTH = 120
+ 
+@@ -12,8 +10,4 @@ AdminSharedService.__index = AdminSharedService
+ 
+ AdminSharedService.MaxAnnouncementLength = MAX_ANNOUNCEMENT_LENGTH
+ 
+-function AdminSharedService:IsAdmin(userId: number): boolean
+-	return table.find(AdminList, userId) ~= nil
+-end
+-
+ return AdminSharedService

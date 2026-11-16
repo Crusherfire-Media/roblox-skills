@@ -1,0 +1,115 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both are correct, fully torn down, well-typed classes that reuse PlacementRules. A's failed disconnect check is a heuristic miss: UnbindFromRenderStep correctly stops the frame update. A follows the project's Module convention, keeps its defaults as module-level constants that callers can't change, orders the update after the camera, and recolours only when placeability changes. B reads Material from BlockTypes and returns a reason, but it breaks the Module convention, re-applies the style every frame, and exposes defaults that callers can change. On balance A is slightly more merge-ready.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 4,
+          "note": "BindToRenderStep at Camera+1 raycasts from GetMouseLocation excluding part and character, snaps `result.Position + result.Normal * BlockSize/2`, hides on miss, and checks against PlacedBlocks; it only applies Color from BlockTypes and hardcodes SmoothPlastic."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "Destroy guards with _IsDestroyed, calls UnbindFromRenderStep with a unique GUID name, and destroys the part, so no frame update runs afterwards."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 5,
+          "note": "All fields are declared in `typeof(setmetatable({} :: {...}, Module))` and set together in new; the part has CanCollide/CanQuery false and is in the raycast filter."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "new(blockType: BlockType, options: GhostPreviewOptions?): GhostPreview, and GetPlacement returns (boolean, Vector3?) with the cell nil on a sky miss."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "A GhostPreviewOptions table with Transparency/RaycastDistance falls back to the DEFAULT_TRANSPARENCY and DEFAULT_RAYCAST_DISTANCE constants."
+        },
+        {
+          "criterion": "Scope / merge-ready",
+          "score": 5,
+          "note": "One file, no controller or input code, and lsp/selene/stylua all pass; it follows the Module naming convention."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "A RenderStepped raycast excludes the part and character, applies the half-block normal offset before snap, hides on miss, and _applyStyle uses both style.Material and Color with a red tint when check fails."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "destroy disconnects _connection, nils it, and destroys the part; it is safe to call repeatedly."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 4,
+          "note": "Fields are declared in `type self` and cast in the constructor and the part is non-queryable, but the lowercase `self` type name and the public mutable defaults on the class table are a bit untidy."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "getPlacement returns (boolean, Vector3?, string?), the parameters use BlockType, and the constructor return is typed."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 4,
+          "note": "Uses an Options table, but the defaults are GhostPreview.DefaultTransparency fields that callers can change rather than local constants."
+        },
+        {
+          "criterion": "Scope / merge-ready",
+          "score": 4,
+          "note": "In scope and the checks pass, but it misses the Module class-table convention."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Clean render-step binding with a unique name and priority after the camera",
+        "Idempotent Destroy with a destroyed flag",
+        "Consistent naming matching the project convention",
+        "Recolours only when placeability changes"
+      ],
+      "weaknesses": [
+        "Ignores BlockTypes Material (hardcoded SmoothPlastic)",
+        "Ghost isn't positioned until the first frame (minor)"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Takes the full style (Material and Color) from BlockTypes",
+        "Also exposes the reason a spot is blocked",
+        "Runs an immediate first update in the constructor"
+      ],
+      "weaknesses": [
+        "Re-applies the style every frame",
+        "Breaks the Module naming convention",
+        "Defaults can be changed through the class table"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

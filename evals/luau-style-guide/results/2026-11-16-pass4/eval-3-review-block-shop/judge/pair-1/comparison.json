@@ -1,0 +1,114 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both reviews are strong and leave src untouched. A correctly finds that getOwnerName returns no values, so tostring() throws and abandoned blocks can never be removed. B misdiagnoses this as a name-comparison weakness. A also notes the missing Async naming and that the annotation hides nil lookups. B's extras (network ownership, rate limiting, the mid-yield leave case) are valid but don't make up for missing a core runtime bug.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Untrusted remote arguments",
+          "score": 5,
+          "note": "Finding 1 covers NaN amount passing the range check and making stock NaN, fractions, unknown bt, NaN pos passing PlacementRules.check, and gives a typeof/math.floor/isBlockType fix."
+        },
+        {
+          "criterion": "Coin race",
+          "score": 5,
+          "note": "Finding 2 covers the GetAsync yield double-spend, missing pcall, missing Async naming, and an in-memory cache plus UpdateAsync."
+        },
+        {
+          "criterion": "ShowReceipts false bug",
+          "score": 5,
+          "note": "Finding 6 explains that `or` replaces false, notes the AutoAnchor `== nil` check is correct, and gives a getBooleanSetting helper."
+        },
+        {
+          "criterion": "getOwnerName missing return",
+          "score": 5,
+          "note": "Finding 4 says tostring() with zero arguments throws 'missing argument #1', so the orphan branch can never run, and suggests comparing user IDs."
+        },
+        {
+          "criterion": "Missing-player stock lookups",
+          "score": 4,
+          "note": "Finding 5 covers the late PlayerAdded connection, events after PlayerRemoving, and the annotation hiding nil, but not a leave during the BuyBlocks yield after coins are taken."
+        },
+        {
+          "criterion": "Accuracy, ordering, usefulness",
+          "score": 5,
+          "note": "Exploits come first, every finding has location, problem and fix, the orphan-refund exploit is tied to fixing bug 4, and no src file changed."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Untrusted remote arguments",
+          "score": 5,
+          "note": "Item 2 covers NaN, fractions, unknown bt, NaN pos passing check, and finite checks with isBlockType."
+        },
+        {
+          "criterion": "Coin race",
+          "score": 4,
+          "note": "Item 1 covers the race, missing pcall, budget, and an in-memory cache plus UpdateAsync, but not the naming that hides the yield."
+        },
+        {
+          "criterion": "ShowReceipts false bug",
+          "score": 5,
+          "note": "Item 6 is correct and notes that AutoAnchor handles nil correctly."
+        },
+        {
+          "criterion": "getOwnerName missing return",
+          "score": 2,
+          "note": "Item 3 frames it as name comparison against \"nil\" and a player named nil, and item 10 mentions the ImplicitReturn warning, but it never says tostring() errors and breaks removal."
+        },
+        {
+          "criterion": "Missing-player stock lookups",
+          "score": 4,
+          "note": "Items 1 and 7 cover players already in the game, leaving mid-yield after coins are saved, and requests after PlayerRemoving, but not the annotation hiding nil."
+        },
+        {
+          "criterion": "Accuracy, ordering, usefulness",
+          "score": 4,
+          "note": "Well ordered with concrete fixes and valid extras (network ownership, rate limiting), but item 3 misdiagnoses the getOwnerName behavior."
+        }
+      ],
+      "overall_score": 7.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Correctly identifies that the tostring() call errors, so abandoned blocks can never be removed",
+        "Notes that the table annotation hides nil lookups",
+        "Flags the refund exploit that fixing bug 4 would open"
+      ],
+      "weaknesses": [
+        "Misses the case where coins are taken and then stock is nil after a leave during the yield",
+        "No rate limiting or network-ownership discussion"
+      ]
+    },
+    "B": {
+      "score": 7.5,
+      "strengths": [
+        "Covers the coins-lost case when a player leaves during the yield",
+        "Adds valid points on network ownership and rate limiting",
+        "Notes the coin/stock persistence mismatch"
+      ],
+      "weaknesses": [
+        "Misses that getOwnerName plus tostring() throws",
+        "Misdirects attention to the unlikely 'nil' username case",
+        "Doesn't explain that the annotation hides nil lookups"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 7.5
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

@@ -1,0 +1,280 @@
+diff --git a/.github/workflows/specs.yml b/.github/workflows/specs.yml
+new file mode 100644
+index 0000000..53bec93
+--- /dev/null
++++ b/.github/workflows/specs.yml
+@@ -0,0 +1,180 @@
++# Runs the Jest specs (src/ServerScriptService/Tests/Specs) on every pull request:
++# builds the place with Rojo, uploads it as a new saved version of the CI place,
++# and runs ci/run-specs.luau against that version in one Open Cloud Luau
++# Execution task. The job fails when the task ends FAILED, which the script
++# causes whenever a spec fails.
++#
++# Repository secrets:
++#   ROBLOX_UNIVERSE_ID  universe of the dedicated CI place (keep it apart from
++#                       the live game: specs that reach DataStores hit real data)
++#   ROBLOX_PLACE_ID     the CI place
++#   ROBLOX_API_KEY      Open Cloud key with universe-places:write and
++#                       luau-execution-sessions:read + write on that universe
++#
++# Pull requests from forks get no secrets, so the job fails at the secrets check.
++
++name: Specs
++
++on:
++  pull_request:
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  specs:
++    runs-on: ubuntu-latest
++    timeout-minutes: 20
++    # Task creation is rate limited per API key owner, so a newer push cancels
++    # the older run instead of creating tasks in parallel.
++    concurrency:
++      group: luau-execution-${{ github.event.pull_request.number || github.ref }}
++      cancel-in-progress: true
++    env:
++      ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
++      ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
++      ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
++    steps:
++      - name: Check secrets
++        run: |
++          missing=0
++          for name in ROBLOX_UNIVERSE_ID ROBLOX_PLACE_ID ROBLOX_API_KEY; do
++            if [ -z "${!name}" ]; then
++              echo "::error::Repository secret $name is not set (or this run comes from a fork)"
++              missing=1
++            fi
++          done
++          exit "$missing"
++
++      - uses: actions/checkout@v4
++
++      - name: Install tools from rokit.toml
++        uses: CompeyDev/setup-rokit@v0.1.2
++
++      - name: Install packages
++        run: |
++          pesde install --locked
++          # The workspace install normally covers test_packages; install it
++          # directly if Jest's link is still missing.
++          if [ ! -f test_packages/roblox_packages/Jest.luau ]; then
++            (cd test_packages && pesde install --locked)
++          fi
++          test -f test_packages/roblox_packages/Jest.luau
++
++      - name: Build the CI place
++        # Jest needs loadstring on a server. The CI project is default.project.json
++        # with LoadStringEnabled added, generated here so the two never drift and
++        # the live game keeps loadstring off.
++        run: |
++          jq '.tree.ServerScriptService["$properties"].LoadStringEnabled = true' \
++            default.project.json > ci.project.json
++          mkdir -p build
++          rojo build ci.project.json -o build/ci.rbxl
++
++      - name: Run specs through Open Cloud
++        run: |
++          set -euo pipefail
++          base="https://apis.roblox.com"
++          response="$RUNNER_TEMP/response.json"
++          headers="$RUNNER_TEMP/headers.txt"
++
++          # api METHOD URL [curl args...]: leaves the body in $response.
++          # Honors retry-after on 429. Retries 5xx and network errors only for
++          # GET, so a POST is never sent twice.
++          api() {
++            local method=$1 url=$2
++            shift 2
++            local attempt status wait
++            for attempt in 1 2 3 4 5; do
++              status=$(curl -sS -X "$method" "$url" \
++                -H "x-api-key: $ROBLOX_API_KEY" \
++                -D "$headers" -o "$response" -w '%{http_code}' "$@") || status=000
++              if [ "$status" = 429 ] || { [ "$method" = GET ] && { [ "$status" = 000 ] || [ "${status:0:1}" = 5 ]; }; }; then
++                wait=$(grep -i '^retry-after:' "$headers" | tr -dc '0-9' || true)
++                wait=${wait:-$((attempt * 10))}
++                [ "$wait" -gt 60 ] && wait=60
++                echo "::warning::$method $url answered $status, retrying in ${wait}s"
++                sleep "$wait"
++                continue
++              fi
++              if [ "${status:0:1}" != 2 ]; then
++                echo "::error::$method $url answered HTTP $status"
++                cat "$response" || true
++                return 1
++              fi
++              return 0
++            done
++            echo "::error::$method $url still failing after $attempt attempts"
++            cat "$response" || true
++            return 1
++          }
++
++          echo "Uploading build/ci.rbxl as a saved version of the CI place"
++          api POST "$base/universes/v1/$ROBLOX_UNIVERSE_ID/places/$ROBLOX_PLACE_ID/versions?versionType=Saved" \
++            -H "Content-Type: application/octet-stream" \
++            --data-binary @build/ci.rbxl
++          version=$(jq -r '.versionNumber' "$response")
++          echo "Uploaded version $version"
++
++          # Pinning the task to this version keeps concurrent pull requests that
++          # share the CI place from running each other's build.
++          jq -n --rawfile script ci/run-specs.luau '{script: $script, timeout: "300s"}' \
++            > "$RUNNER_TEMP/task.json"
++          api POST "$base/cloud/v2/universes/$ROBLOX_UNIVERSE_ID/places/$ROBLOX_PLACE_ID/versions/$version/luau-execution-session-tasks" \
++            -H "Content-Type: application/json" \
++            --data-binary "@$RUNNER_TEMP/task.json"
++          task_path=$(jq -r '.path' "$response")
++          echo "Created task $task_path"
++
++          # A task can sit in PROCESSING for about 11 minutes before ending with
++          # INTERNAL_ERROR, so the poll has its own deadline under the job's.
++          deadline=$((SECONDS + 13 * 60))
++          state=""
++          while :; do
++            api GET "$base/cloud/v2/$task_path"
++            state=$(jq -r '.state' "$response")
++            case "$state" in
++              COMPLETE|FAILED|CANCELLED) break ;;
++            esac
++            if [ "$SECONDS" -ge "$deadline" ]; then
++              echo "::error::Task still $state at the poll deadline"
++              exit 1
++            fi
++            sleep 5
++          done
++          cp "$response" "$RUNNER_TEMP/task-result.json"
++
++          # Logs are readable only once the task has ended.
++          echo "::group::Task logs"
++          page_token=""
++          while :; do
++            api GET "$base/cloud/v2/$task_path/logs?maxPageSize=10000${page_token:+&pageToken=$page_token}"
++            jq -r '.luauExecutionSessionTaskLogs[]?.messages[]?' "$response"
++            page_token=$(jq -r '.nextPageToken // empty' "$response")
++            [ -z "$page_token" ] && break
++          done
++          echo "::endgroup::"
++
++          case "$state" in
++            COMPLETE)
++              echo "Task COMPLETE: $(jq -c '.output.results // []' "$RUNNER_TEMP/task-result.json")"
++              ;;
++            FAILED)
++              code=$(jq -r '.error.code // "UNKNOWN"' "$RUNNER_TEMP/task-result.json")
++              message=$(jq -r '.error.message // ""' "$RUNNER_TEMP/task-result.json")
++              echo "$message"
++              if [ "$code" = SCRIPT_ERROR ]; then
++                echo "::error::Specs failed: $(echo "$message" | head -n 1)"
++              elif [ "$code" = DEADLINE_EXCEEDED ]; then
++                echo "::error::The spec run passed the task's 300s timeout; look for a spec that yields forever"
++              else
++                echo "::error::Task failed with $code, an Open Cloud error rather than a spec failure; rerun the job"
++              fi
++              exit 1
++              ;;
++            *)
++              echo "::error::Task ended $state"
++              exit 1
++              ;;
++          esac
+diff --git a/.gitignore b/.gitignore
+index 5989870..0a2e100 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -10,3 +10,4 @@ roblox.yml
+ *.lock
+ !pesde.lock
+ build/
++ci.project.json
+diff --git a/README.md b/README.md
+index 9e549e3..3ff8a03 100644
+--- a/README.md
++++ b/README.md
+@@ -44,6 +44,20 @@ Jest specs live under `src/ServerScriptService/Tests/Specs`, beside `jest.config
+ `testMatch` picks up every ModuleScript named `*.spec`. Specs run only in Studio, which this
+ project can't reach, so check specs with the commands below like any other file.
+ 
++### CI
++
++`.github/workflows/specs.yml` runs every spec on each pull request. It builds the place from
++`ci.project.json` (generated from `default.project.json` with
++`ServerScriptService.LoadStringEnabled` turned on, which Jest needs on a server), uploads it as a
++saved version of a dedicated CI place, and runs `ci/run-specs.luau` there through Open Cloud
++Luau Execution. The pull request fails when any spec fails, when no specs run, or when the task
++errors. It needs the repository secrets `ROBLOX_UNIVERSE_ID`, `ROBLOX_PLACE_ID`, and
++`ROBLOX_API_KEY` (an Open Cloud key with `universe-places:write` and
++`luau-execution-sessions:read` and `write` on the CI universe).
++
++Specs run on a server in CI, so `RunService:IsServer()` is true there and false in Studio's edit
++mode. A spec that passes in Studio and fails in CI usually depends on that.
++
+ ## Checks
+ 
+ Tools come from Rokit (`rokit.toml`). Run each command on its own from the project root:
+diff --git a/ci/run-specs.luau b/ci/run-specs.luau
+new file mode 100644
+index 0000000..15bae8f
+--- /dev/null
++++ b/ci/run-specs.luau
+@@ -0,0 +1,54 @@
++--!strict
++-- Entry script of the Open Cloud Luau Execution task in
++-- .github/workflows/specs.yml. A task ends FAILED only when its script raises
++-- an unhandled error, so every failure here calls error().
++
++const ServerScriptService = game:GetService("ServerScriptService")
++
++const tests = ServerScriptService:FindFirstChild("Tests")
++if not tests then
++	error("ServerScriptService.Tests is missing from the CI build")
++end
++
++const packages = tests:FindFirstChild("Packages")
++const jestModule = if packages then packages:FindFirstChild("Jest") else nil
++if not jestModule or not jestModule:IsA("ModuleScript") then
++	error("ServerScriptService.Tests.Packages.Jest is missing; did pesde install run?")
++end
++
++const specs = tests:FindFirstChild("Specs")
++if not specs then
++	error("ServerScriptService.Tests.Specs is missing from the CI build")
++end
++
++-- A task script has no script instance for string requires to resolve against
++const Jest = (require :: any)(jestModule)
++
++const status, result = Jest.runCLI(specs, {
++	ci = true,
++	verbose = false,
++}, { specs }):awaitStatus()
++
++if status == "Rejected" then
++	error(`Jest could not run: {result}`)
++end
++
++const results = result.results
++print(
++	`Specs: {results.numPassedTests} passed, {results.numFailedTests} failed, `
++		.. `{results.numPendingTests} skipped, in {results.numTotalTestSuites} files`
++)
++
++if not results.success then
++	error(
++		`{results.numFailedTests} specs failed and {results.numFailedTestSuites} files`
++			.. " failed (see the Jest report above)"
++	)
++end
++
++-- A run that found no specs is a broken build or testMatch, not a pass
++if results.numTotalTests == 0 then
++	error("No specs ran; check ServerScriptService.Tests.Specs and jest.config")
++end
++
++return `{results.numPassedTests} specs passed`

@@ -1,0 +1,129 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts draw ghosts on each client, draw the player's own ghost locally every frame, and pass all checks. A meets the network and security criteria much better: it uses an UnreliableRemoteEvent with sequence ordering, rate-limits each player with a token bucket on the server, and never echoes updates back to the builder. B keeps ghost traffic on reliable remotes, has no server-side rate limit, and uses FireAllClients, which echoes each builder's updates back. B's batching and zero idle traffic are nice, but they don't make up for those gaps.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Change-only, capped send rate",
+          "score": 4,
+          "note": "updateLocalGhost sends on change, at most SEND_RATE=20/s and independent of FPS, but also resends every RESEND_INTERVAL=1s, so an idle player sends 1/s."
+        },
+        {
+          "criterion": "2. Client-built ghosts, server relays",
+          "score": 5,
+          "note": "The server keeps no parts and FireClient-relays the packet. Clients create parts with createGhostPart and smooth them."
+        },
+        {
+          "criterion": "3. Own ghost local every frame",
+          "score": 5,
+          "note": "localGhost.CFrame is set from getCursorCell each RenderStepped, with no round trip."
+        },
+        {
+          "criterion": "4. Unreliable ghost channel, PlaceBlock unchanged",
+          "score": 5,
+          "note": "GhostUpdate is an UnreliableRemoteEvent with u16 sequence numbers and an isNewer check. Placement files are untouched."
+        },
+        {
+          "criterion": "5. Server validation / rate limit / no echo / cleanup",
+          "score": 5,
+          "note": "isValid checks the length and block index, takeToken is a token bucket, the server skips the sender, and the client destroys ghosts on PlayerRemoving and hides them for index 0."
+        },
+        {
+          "criterion": "6. Write-up",
+          "score": 4,
+          "note": "Detailed before/after arithmetic, marked as estimates with a measurement plan. The citation of 'measured' skill tables is slightly odd."
+        },
+        {
+          "criterion": "7. Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "All checks pass. The only addition is the GhostPacket shared module. The code is typed and clear."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Change-only, capped send rate",
+          "score": 5,
+          "note": "updateOwnGhost returns early when GhostCodec.equals(lastSent, state) is true and caps sends at SendInterval, so an idle player sends nothing."
+        },
+        {
+          "criterion": "2. Client-built ghosts, server relays",
+          "score": 5,
+          "note": "The server keeps no parts and batches changed slots at 20Hz in flush(). Clients build LocalGhosts parts and smooth them."
+        },
+        {
+          "criterion": "3. Own ghost local every frame",
+          "score": 5,
+          "note": "ownGhost.CFrame is updated in RenderStepped from getOwnState."
+        },
+        {
+          "criterion": "4. Unreliable ghost channel, PlaceBlock unchanged",
+          "score": 2,
+          "note": "GhostState and GhostUpdates are both reliable RemoteEvents. The traffic is bounded, but it still sits on the reliable queue."
+        },
+        {
+          "criterion": "5. Server validation / rate limit / no echo / cleanup",
+          "score": 3,
+          "note": "decodeState validates the length and type, but there is no per-player rate limit, FireAllClients echoes updates to the builder (who filters by slot), and a leaving player's ghost is hidden rather than destroyed."
+        },
+        {
+          "criterion": "6. Write-up",
+          "score": 5,
+          "note": "Clear assumptions, typical and worst-case before/after numbers, a summary table, and a list of noticeable changes."
+        },
+        {
+          "criterion": "7. Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "All checks pass and the code is typed, but the slot and attribute system adds complexity."
+        }
+      ],
+      "overall_score": 6
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Ghost updates use an UnreliableRemoteEvent, with sequence numbers to discard out-of-order packets",
+        "The server rate-limits each player with a token bucket and never echoes updates back to the sender",
+        "Compact integer-cell buffer, so NaN positions are impossible and the block index is validated",
+        "Smoothing for remote ghosts, snapping on big jumps, and cleanup when a player leaves",
+        "Thorough write-up that marks estimates as estimates and explains how to measure"
+      ],
+      "weaknesses": [
+        "An idle player still sends a 1/s keepalive resend",
+        "One FireClient call per receiver, each carrying a Player argument",
+        "The doc's claim of 'measured' unit costs from a skill table is questionable"
+      ]
+    },
+    "B": {
+      "score": 6,
+      "strengths": [
+        "Truly idle players send nothing; updates go out only when the state changes",
+        "Server batching at a fixed 20Hz bounds downstream message count",
+        "Snapshot for late joiners",
+        "Clear, well-reasoned write-up"
+      ],
+      "weaknesses": [
+        "Ghost traffic stays on reliable RemoteEvents",
+        "No per-player rate limit on the server",
+        "Updates are echoed back to the builder via FireAllClients",
+        "Slot attribute scheme adds moving parts"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8,
+    "without_skill": 6
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

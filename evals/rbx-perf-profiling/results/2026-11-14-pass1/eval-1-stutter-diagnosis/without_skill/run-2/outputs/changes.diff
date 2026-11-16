@@ -1,0 +1,177 @@
+diff --git a/docs/perf/stutter-diagnosis.md b/docs/perf/stutter-diagnosis.md
+new file mode 100644
+index 0000000..ef6a665
+--- /dev/null
++++ b/docs/perf/stutter-diagnosis.md
+@@ -0,0 +1,171 @@
++# Laptop stutter diagnosis (Sam, building on a 6,000-block plot)
++
++Source: `docs/perf/captures/laptop-stutter-analysis.txt`, which is Priya's LibMP output for
++`laptop-stutter.gprx`, a client MicroProfiler dump of about 5 s covering 240 frames.
++I did not have the `.gprx` or `tools/profiling` in this repo. Everything below comes from that
++pasted output only. Where a claim rests on inference and not a direct measurement, it says so.
++
++## Short version
++
++| Symptom | Cause | Frames |
++|---|---|---|
++| Stutter every ~2.1 s (~95 ms hitch, then a ~28 ms frame) | `BuildAutosave:Snapshot`: ~21 ms of its own Luau work plus **~54 ms of Luau GC** that its allocations trigger, on the main thread inside Heartbeat | 18236, 18327, 18419 (+ follow-ups 18237, 18328, 18420) |
++| Choppy the rest of the time (~22 ms frames, about 45 FPS, not 60) | The main thread is the bottleneck, and `BlockHighlight:Update` alone takes **~10 ms every frame** (7.9 ms self + 2.3 ms GC) | Steady window 18330–18410 (all of it) |
++| Looks alarming but isn't the problem | 352 ms frame = MicroProfiler's own `MicroProfileFlip`. GPU "frame span" of 21.7 ms. Workers "31.4 ms/frame" | 18223. Window 18330–18410 |
++
++## Finding frames
++
++LibMP id and absolute frame id differ by a constant: **abs = id + 585894** (holds for every pair
++in the overview). `t` is the time from the start of the dump to the start of the frame, so you can
++also find frames on the MicroProfiler UI timeline.
++
++| LibMP id | abs id | t (s) | ms | What it is |
++|---|---|---|---|---|
++| 18223 | 604117 | 0.27 | 352.6 | Profiler artifact (`MicroProfileFlip`) |
++| 18236 | 604130 | 0.89 | 95.2 | Autosave hitch #1 |
++| 18237 | 604131 | ~0.98 | 28.5 | GC tail after #1 |
++| 18327 | 604221 | 2.98 | 96.4 | Autosave hitch #2 |
++| 18328 | 604222 | ~3.08 | 29.4 | GC tail after #2 |
++| 18419 | 604313 | 5.09 | 97.1 | Autosave hitch #3 |
++| 18420 | 604314 | ~5.19 | 28.4 | GC tail after #3 |
++| 18330–18410 | 604224–604304 | ~3.13–~4.9 | ~22 avg | Steady-state window used for the "choppy" analysis |
++
++Capture range: 18211–18450 = abs 604105–604344.
++
++---
++
++## 1. The stutter: `BuildAutosave:Snapshot` and the GC it triggers
++
++**Evidence**
++
++- Three hitches of 95–97 ms at t = 0.89, 2.98, 5.09 s. They are 91 and 92 frames apart, about
++  **2.1 s**, which matches "every couple of seconds". Every other frame is 20–24 ms, apart from
++  the one right after each hitch.
++- `tree` on **18419**: Main `Heartbeat > RunService.Heartbeat > Script_Main >
++  BuildAutosave:Snapshot` = **75.42 ms**: **21.07 ms self** and **54.35 ms `GC [Script]`** nested
++  under it. Nothing else on Main changed: `BlockHighlight:Update` (10.16), RenderJob (6.93) and
++  Simulation (2.18) match the steady window. The worker tree also matches the steady window.
++  This hitch comes only from main-thread Luau.
++- `series` on 18322–18332: `BuildAutosave:Snapshot` runs **only in 18327** (74.88 ms) and GC there
++  is 56.57 ms over 2 scopes (the ~54 ms under Snapshot plus the usual ~2.2 ms under
++  BlockHighlight). Note that GC is *nested inside* the script scopes. Don't add the GC column to
++  the script columns.
++- `memory/Luau/heap` sits at ~188 MB and jumps by **~48 MB** on each hitch (18236: 235.1,
++  18327: 236.4, 18419: 236.9). It then decays back to baseline over ~20 frames
++  (e.g. 236.4 → 217.2 → 193.0 → 188.2). Snapshot creates about 48 MB of short-lived garbage each
++  time, and the GC assist charged to that allocation is most of the hitch.
++- The frame after each hitch is 28–29 ms. In 18328, GC is **9.12 ms** where it is normally
++  ~2.2 ms, so the collector is still working through the snapshot's garbage. This is part of the
++  same problem.
++- 18236 has no `tree` run. It is attributed to the autosave by its timing, duration and identical
++  heap spike. Confirm it with the commands below.
++
++**What this means**: most of the cost is not the snapshot logic. It is the *allocation volume*.
++Of the 75 ms, 54 ms is GC triggered by building ~48 MB of temporary tables/strings. It all runs
++synchronously in one Heartbeat on the client.
++
++**Also worth noting**: `instance_count/part` is **6231 for all 240 samples**. No parts were added
++or removed during the capture, but the autosave still ran three times. It looks like it fires on a
++timer and doesn't check whether anything changed. This is an inference. It's possible that
++"building" here meant previewing or moving blocks without creating instances
++(`BlockPlacer:OnInput` runs ~3×/frame).
++
++## 2. Choppy frames: main-thread bound, `BlockHighlight:Update` is half of it
++
++**Evidence (steady window 18330–18410, 81 frames)**
++
++- Frames average **22.04 ms** (p50 22.2, p90 23.6), so about 45 FPS against a 16.67 ms budget for
++  60 FPS. Frames are consistently slow, with no spikes in this window, which fits "a bit choppy".
++- **Main is busy 21.58 of 22.04 ms**. It is the critical path. Render (7.12 ms), each worker
++  (7.5–8.2 ms) and the GPU (6.38 ms) all have lots of idle time.
++- Main breakdown per frame: Heartbeat 11.42 ms, RenderJob 6.88, Simulation 2.14, Replicator 0.71,
++  InputDispatch 0.47.
++- Inside Heartbeat, **`BlockHighlight:Update` = 10.12 ms every frame** (self 7.86 ms + 2.26 ms GC
++  under it). That's ~47 % of the frame from one script function. `BlockPlacer:OnInput` is only
++  0.57 ms.
++- Without BlockHighlight's ~10 ms, Main would be ~11.5 ms per frame, well under 16.67 ms. Engine
++  work (render prep, physics) is not what keeps this off 60 FPS.
++- The 2.26 ms of GC every frame means BlockHighlight allocates every frame. That steady garbage
++  also adds to the GC load that the autosave then pushes over the edge.
++
++**Hypothesis (not provable from this output)**: 7.9 ms of self time per frame on a ~6,200-part
++plot suggests BlockHighlight walks all blocks or rebuilds highlight state every frame, when it
++could react only when the hovered/selected block changes. Check whether its cost scales with part
++count (see next steps).
++
++## 3. Alarming but not the problem
++
++**Frame 18223 / abs 604117, 352.6 ms at t = 0.27 s: MicroProfiler overhead.**
++Main shows `MicroProfileFlip [MicroProfiler]` = **328.74 ms self**. That is the profiler's own
++work. Sam enabled it (Ctrl+F6) right before the capture, and this is the first-flip cost. Game
++work in that frame is normal (Heartbeat 11.06, `BlockHighlight:Update` 9.79, no
++`BuildAutosave:Snapshot`), and the heap shows no jump (186.9 → 187.3). Players without the
++profiler never get this frame. It also inflates the capture's `max` and `avg` (24.52 ms avg vs
++22.2 p50). Ignore it.
++
++**GPU "frame span" 21.71 ms: not GPU-bound.**
++`TickEndGpu - TickStartGpu` is nearly the same as the CPU span (22.04 ms). That makes it look like
++the GPU is also maxed out. It isn't. The span measures the interval between the GPU frame markers,
++which follows the CPU frame rate. The GPU thread's actual **busy time is 6.38 ms** per frame
++(Scene 3.91, ShadowMap 1.22, UI 0.61, Glow 0.42, other 0.22). The GPU is idle about 70 % of the
++time. Lowering graphics quality won't fix this. The three frames skipped for "GPU end before
++start" (18342, 18371, 18395 = abs 604236, 604265, 604289) are timestamp quirks in the frame
++descriptors, not a GPU fault.
++
++**Workers "31.40 ms/frame": summed across threads.**
++The merged worker tree adds up roots across 4 worker threads, so it can exceed the frame time.
++Per thread it's 7.49–8.21 ms of a 22 ms frame (~35 % busy). Culling (`SpawnCullJobs`/`Cull`, ~25
++cull jobs per frame), `Kernel::stepWorld`, `LightGridCPU`, and `ShadowMapSystem` are all running
++in parallel with Main and are not on the critical path. They are the same in hitch and non-hitch
++frames.
++
++**Minor:** 18429 (24.41 ms) appears in the "longest frames" list only because the list shows 8
++entries. It is normal variance. The heap baseline creeps slightly (186.2 → 188.4 MB over 5 s).
++That is too small and short to call a leak from this capture, but keep an eye on it in a longer
++one.
++
++---
++
++## What to look at next
++
++**In the game scripts (when they're available):**
++
++1. `BuildAutosave:Snapshot`. Why does it allocate ~48 MB for a 6,200-block plot? Does it run on a
++   fixed ~2 s timer from inside `Script_Main`'s Heartbeat connection? Does it skip when nothing
++   changed (a dirty flag)? Can it reuse buffers, serialize incrementally, or be spread across
++   frames? Should the client be doing it at all, or the server?
++2. `BlockHighlight:Update`. What does it iterate per frame, and what does it allocate (the
++   2.26 ms of per-frame GC)? Can it do work only when the target block changes?
++
++**More LibMP runs on the same dump** (from `tools/profiling`):
++
++```
++# Confirm hitch #1 and the GC tail frames are the same pattern
++lute tree.luau laptop-stutter.gprx 18236 18236 0.4 6
++lute tree.luau laptop-stutter.gprx 18237 18237 0.4 6
++lute tree.luau laptop-stutter.gprx 18328 18328 0.4 6
++
++# Confirm Snapshot runs exactly 3 times, and how the per-frame GC behaves across the whole capture
++lute series.luau laptop-stutter.gprx 18211 18450 "BuildAutosave:Snapshot|BlockHighlight:Update|GC"
++
++# Deeper tree to see whether BlockHighlight / Snapshot have instrumented child scopes
++lute tree.luau laptop-stutter.gprx 18330 18410 0.1 10
++lute tree.luau laptop-stutter.gprx 18419 18419 0.1 10
++
++# Full (untrimmed) heap curve
++lute counter-series.luau laptop-stutter.gprx "memory/Luau/heap$" 1
++```
++
++**In the MicroProfiler UI:** open abs 604313 (t ≈ 5.09 s) and look at the Main thread to see the
++`BuildAutosave:Snapshot` bar with the large `GC` child. Compare it with any frame in abs
++604224–604304 for the steady `BlockHighlight:Update` cost. Skip abs 604117.
++
++**New captures:**
++
++- Add `debug.profilebegin`/`profileend` labels inside `BuildAutosave:Snapshot` and
++  `BlockHighlight:Update` (e.g. collect / serialize / write, or iterate / apply), so the next
++  dump shows *which part* allocates and burns time.
++- Capture on a small plot (a few hundred blocks) and compare the `BlockHighlight:Update` and
++  Snapshot times. If they scale with part count, that confirms the per-block iteration hypothesis.
++- Turn the profiler on a second or two before the window you care about, so the first-flip
++  artifact (like 18223) falls outside it.

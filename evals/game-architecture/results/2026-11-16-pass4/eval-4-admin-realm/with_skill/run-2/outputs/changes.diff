@@ -1,0 +1,140 @@
+diff --git a/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/Implementation/_HudClientSetup.meta.json b/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/Implementation/_HudClientSetup.meta.json
+new file mode 100644
+index 0000000..966c67f
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/Implementation/_HudClientSetup.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "ClientOnly": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/SystemPackage/HudClientService.meta.json b/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/SystemPackage/HudClientService.meta.json
+index 6e4927b..966c67f 100644
+--- a/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/SystemPackage/HudClientService.meta.json
++++ b/src/ServerScriptService/Modules/Systems/Presentation/HudSystem/SystemPackage/HudClientService.meta.json
+@@ -1,5 +1,5 @@
+ {
+   "attributes": {
+-    "ClientOnly": "true"
++    "ClientOnly": true
+   }
+ }
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminClientService.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminClientService.luau
+index fa2a739..005e13a 100644
+--- a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminClientService.luau
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminClientService.luau
+@@ -49,15 +49,29 @@ local function createPanel(): ScreenGui
+ 	return screenGui
+ end
+ 
+-function AdminClientService:Start()
+-	local player = Players.LocalPlayer
+-	if not self:IsAdmin(player.UserId) then
+-		return
+-	end
++local function showPanel(player: Player)
+ 	local playerGui = player:FindFirstChildOfClass("PlayerGui")
+ 	if playerGui then
+ 		createPanel().Parent = playerGui
+ 	end
+ end
+ 
++function AdminClientService:Start()
++	local player = Players.LocalPlayer
++	local attribute = AdminSharedService.IsAdminAttribute
++	if player:GetAttribute(attribute) == true then
++		showPanel(player)
++		return
++	end
++
++	-- The server's attribute can replicate after this runs.
++	local connection: RBXScriptConnection
++	connection = player:GetAttributeChangedSignal(attribute):Connect(function()
++		if player:GetAttribute(attribute) == true then
++			connection:Disconnect()
++			showPanel(player)
++		end
++	end)
++end
++
+ return AdminClientService
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminList.meta.json b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminList.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminList.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.luau
+index 6e5efc4..0297fe1 100644
+--- a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.luau
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminServerService.luau
+@@ -4,6 +4,7 @@
+ 
+ local Players = game:GetService("Players")
+ 
++local AdminList = require("./AdminList")
+ local AdminNetwork = require("./AdminNetwork")
+ local AdminSharedService = require("./AdminSharedService")
+ local NotificationServerService = require(
+@@ -12,6 +13,10 @@ local NotificationServerService = require(
+ 
+ local AdminServerService = setmetatable({}, AdminSharedService)
+ 
++function AdminServerService:IsAdmin(userId: number): boolean
++	return table.find(AdminList, userId) ~= nil
++end
++
+ local function onAnnounce(player: Player, message: unknown)
+ 	if not AdminServerService:IsAdmin(player.UserId) then
+ 		return
+@@ -28,8 +33,19 @@ local function onAnnounce(player: Player, message: unknown)
+ 	end
+ end
+ 
++local function onPlayerAdded(player: Player)
++	if AdminServerService:IsAdmin(player.UserId) then
++		player:SetAttribute(AdminSharedService.IsAdminAttribute, true)
++	end
++end
++
+ function AdminServerService:Init()
+ 	AdminNetwork.Announce.OnServerEvent:Connect(onAnnounce)
++
++	Players.PlayerAdded:Connect(onPlayerAdded)
++	for _, player in Players:GetPlayers() do
++		onPlayerAdded(player)
++	end
+ end
+ 
+ return AdminServerService
+diff --git a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminSharedService.luau b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminSharedService.luau
+index 0ad92f7..0a799ae 100644
+--- a/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminSharedService.luau
++++ b/src/ServerScriptService/Modules/Systems/Tooling/AdminSystem/SystemPackage/AdminSharedService.luau
+@@ -2,8 +2,6 @@
+ 	What the server and client sides of the admin tools share.
+ ]]
+ 
+-local AdminList = require("./AdminList")
+-
+ -- Longest announcement, in characters.
+ local MAX_ANNOUNCEMENT_LENGTH = 120
+ 
+@@ -12,8 +10,8 @@ AdminSharedService.__index = AdminSharedService
+ 
+ AdminSharedService.MaxAnnouncementLength = MAX_ANNOUNCEMENT_LENGTH
+ 
+-function AdminSharedService:IsAdmin(userId: number): boolean
+-	return table.find(AdminList, userId) ~= nil
+-end
++-- Set to true on admins by the server, so clients can show admin UI without the
++-- admin list. It only controls UI; the server checks the list on every request.
++AdminSharedService.IsAdminAttribute = "IsAdmin"
+ 
+ return AdminSharedService

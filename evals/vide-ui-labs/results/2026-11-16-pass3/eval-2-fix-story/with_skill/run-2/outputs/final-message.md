@@ -1,0 +1,5 @@
+Those six `luau-lsp` findings come from an out-of-date `sourcemap.json`, not from my edits. The sourcemap has the `Shared` and `StarterPlayerScripts` folders but none of the modules inside them: no `BlockTypes`, `BlockPicker` or `BlockPlacer`. So the checker can't find any require that points at them. That includes lines I didn't touch, like `Main.client.luau`'s requires of `BlockPicker` and `BlockPlacer`, which were already in the original file. The `BlockTypes.BlockType` error follows from the same missing require.
+
+Because of that, the type checks on the new props (`PlayerName`, the live `ShowNames`) haven't actually run. Running `rojo sourcemap default.project.json -o sourcemap.json` and then `luau-lsp analyze` again would check them properly. I didn't do it because it rewrites a tracked file, and this session can't approve that kind of command.
+
+Everything in my earlier summary still holds. StyLua and selene are clean, the story hasn't been run in Studio yet, and the leftover TileClick sounds in SoundService still need deleting by hand.

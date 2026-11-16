@@ -1,0 +1,267 @@
+diff --git a/src/ReplicatedStorage/Shared/Dev/FrameReport.luau b/src/ReplicatedStorage/Shared/Dev/FrameReport.luau
+index ede07d3..9dec0ee 100644
+--- a/src/ReplicatedStorage/Shared/Dev/FrameReport.luau
++++ b/src/ReplicatedStorage/Shared/Dev/FrameReport.luau
+@@ -3,10 +3,13 @@
+ 	each recent frame it returns the frame time, the time the main thread spent in the Physics
+ 	group, the GPU time, and the five scopes that took longest on the main thread. It also returns
+ 	the Luau heap size at the end of the capture.
++
++	It reads a snapshot and never changes the profiler's global state (capture, frame limit),
++	which FpsOverlay and the on-screen MicroProfiler share. A report therefore holds at most the
++	frame limit FpsOverlay set.
+ ]]
+ 
+ local LibMP = require(script.Parent.LibMPLoader)
+-local FpsOverlay = require(script.Parent.FpsOverlay)
+ 
+ local REPORT_FRAMES = 120
+ local TOP_SCOPES = 5
+@@ -29,73 +32,200 @@ export type Report = {
+ 	LuauHeap: number?,
+ }
+ 
++-- start1, end1, start2, end2, ...
++type Intervals = { number }
++
++type FrameData = {
++	Row: FrameRow,
++	ScopeIntervals: { [number]: Intervals? },
++	PhysicsIntervals: Intervals,
++	GpuIntervals: Intervals,
++}
++
+ local FrameReport = {}
+ 
++local function addInterval(intervals: Intervals, startTick: number, endTick: number)
++	if endTick > startTick then
++		table.insert(intervals, startTick)
++		table.insert(intervals, endTick)
++	end
++end
++
++--[[
++	Length of the union of the intervals, so nested instances of one scope, nested Physics
++	scopes, and overlapping GPU scopes are not counted twice.
++]]
++local function unionLength(intervals: Intervals): number
++	local spans = {}
++	for index = 1, #intervals, 2 do
++		table.insert(spans, { intervals[index], intervals[index + 1] })
++	end
++	table.sort(spans, function(a, b)
++		return a[1] < b[1]
++	end)
++
++	local total = 0
++	local currentStart, currentEnd = 0, nil
++	for _, span in spans do
++		if currentEnd and span[1] <= currentEnd then
++			currentEnd = math.max(currentEnd, span[2])
++		else
++			if currentEnd then
++				total += currentEnd - currentStart
++			end
++			currentStart, currentEnd = span[1], span[2]
++		end
++	end
++	if currentEnd then
++		total += currentEnd - currentStart
++	end
++	return total
++end
++
+ local function scopeName(session: any, timerId: number): string
+-	local timer = session:GetTimerDesc(timerId)
+-	local group = session:FetchGroupDesc(timer:GroupId())
+-	return `{timer:TimerName()} [{group.GroupName}]`
++	local timer = session:FetchTimerDesc(timerId)
++	local group = session:FetchGroupDesc(timer.GroupId)
++	return `{timer.TimerName} [{group.GroupName}]`
+ end
+ 
+ function FrameReport.run(): Report
+-	-- Hold the data still while we read it, and keep enough frames for the report.
+-	LibMP.Control:EnableCapture(false)
+-	LibMP.Control:SetFrameLimit(256)
+-
+-	local session = FpsOverlay.getSession() or LibMP.Session.OpenFromLiveData()
++	local snapshot = LibMP.Control:CaptureToBufferSync()
++	local session = LibMP.Session.OpenFromBuffer(snapshot)
+ 	assert(session, "could not open the MicroProfiler data")
++
+ 	local global = session:FetchGlobalDesc()
++	local minId = session:GetFrameIdMin()
+ 	local lastId = session:GetFrameIdMax()
+-	local firstId = math.max(session:GetFrameIdMin(), lastId - REPORT_FRAMES + 1)
++	-- The newest frame may still be recording, so its end time is not real yet.
++	while lastId > 0 and lastId >= minId and session:FetchFrameDesc(lastId).IsIncomplete do
++		lastId -= 1
++	end
++	if lastId == 0 or lastId < minId then
++		session:Dispose()
++		return {
++			Frames = {},
++			LuauHeap = nil,
++		}
++	end
++	local firstId = math.max(minId, lastId - REPORT_FRAMES + 1)
+ 
+-	local rows: { [number]: FrameRow } = {}
+-	local scopeMs: { [number]: { [number]: number } } = {}
++	local frameData: { [number]: FrameData? } = {}
+ 	for frameId = firstId, lastId do
+ 		local frame = session:FetchFrameDesc(frameId)
+-		rows[frameId] = {
+-			FrameId = frameId,
+-			FrameMs = (frame.TickEndCpu - frame.TickStartCpu) * global.TickToMsCpu,
+-			GpuMs = (frame.TickEndGpu - frame.TickStartGpu) * global.TickToMsCpu,
+-			PhysicsMs = 0,
+-			TopScopes = {},
++		frameData[frameId] = {
++			Row = {
++				FrameId = frameId,
++				FrameMs = (frame.TickEndCpu - frame.TickStartCpu) * global.TickToMsCpu,
++				GpuMs = 0,
++				PhysicsMs = 0,
++				TopScopes = {},
++			},
++			ScopeIntervals = {},
++			PhysicsIntervals = {},
++			GpuIntervals = {},
+ 		}
+-		scopeMs[frameId] = {}
++	end
++
++	local mainThreadId = session:FindThreadId("Main")
++	assert(mainThreadId ~= 0, "could not find the main thread")
++	-- Zero on platforms without a GPU thread; GpuMs then stays 0.
++	local gpuThreadId = session:GetThreadIdGpu()
++	local physicsGroupId = session:FindGroupId("Physics")
++	local threadIds = { mainThreadId }
++	if gpuThreadId ~= 0 then
++		table.insert(threadIds, gpuThreadId)
++	end
++
++	local timerGroupIds: { [number]: number? } = {}
++	local function isPhysicsTimer(timerId: number): boolean
++		local groupId = timerGroupIds[timerId]
++		if not groupId then
++			groupId = session:FetchTimerDesc(timerId).GroupId
++			timerGroupIds[timerId] = groupId
++		end
++		return physicsGroupId ~= 0 and groupId == physicsGroupId
++	end
++
++	local function recordScope(
++		frameId: number,
++		isGpu: boolean,
++		timerId: number,
++		enterTick: number,
++		exitTick: number
++	)
++		local data = frameData[frameId]
++		if not data then
++			return
++		end
++		if isGpu then
++			addInterval(data.GpuIntervals, enterTick, exitTick)
++			return
++		end
++		local intervals = data.ScopeIntervals[timerId]
++		if not intervals then
++			intervals = {}
++			data.ScopeIntervals[timerId] = intervals
++		end
++		addInterval(intervals :: Intervals, enterTick, exitTick)
++		if isPhysicsTimer(timerId) then
++			addInterval(data.PhysicsIntervals, enterTick, exitTick)
++		end
+ 	end
+ 
+ 	local iter = session:CreateLogIterator()
+ 	local state = iter:GetState()
+-	local mainThreadId = session:FindThreadId("Main")
+ 	iter:Configure({
+ 		SkipEvents = true,
+-		ThreadIds = { mainThreadId },
++		EmitThreadFrameEnd = true,
++		ThreadIds = threadIds,
+ 	})
+-	iter:RewindTo(firstId, lastId)
++	-- One frame early fills the scope stacks before the first reported frame.
++	iter:RewindTo(math.max(minId, firstId - 1), lastId)
+ 
++	-- A scope that crosses frame boundaries is split: each frame gets only the part inside it.
++	local frameStartCpu, frameStartGpu = 0, 0
+ 	while iter:Step() do
+-		if
+-			state:IsExit()
+-			and not state:ThreadStackIsUnderflowed()
+-			and not state:ThreadStackWasOverflowed()
+-		then
+-			local row = rows[state:FrameId()]
+-			if row then
+-				local element = iter:GetCurrentThreadStackElement(state:ThreadStackDepth())
+-				local ms = (state:Timestamp() - element:EnterTimestamp()) * global.TickToMsCpu
+-				local timerId = state:TimerId()
+-				local frameScopes = scopeMs[row.FrameId]
+-				frameScopes[timerId] = (frameScopes[timerId] or 0) + ms
+-				if session:FetchTimerDesc(timerId).GroupId == session:FindGroupId("Physics") then
+-					row.PhysicsMs += ms
++		if state:IsFrameBoundary() then
++			frameStartCpu = state:Timestamp()
++			frameStartGpu = state:TimestampGpu()
++		elseif state:IsThreadFrameEnd() then
++			-- Scopes still open at the end of this thread's frame.
++			local frameId = state:FrameId()
++			local isGpu = state:IsGpuThread()
++			local endTick = state:Timestamp()
++			for depth = state:ThreadStackDepth() - 1, 0, -1 do
++				local element = iter:GetCurrentThreadStackElement(depth)
++				if element then
++					local timerId = element:EnterTimerId()
++					local enterTick = element:EnterTimestampFrameLocal()
++					recordScope(frameId, isGpu, timerId, enterTick, endTick)
+ 				end
+ 			end
++		elseif state:IsExit() and not state:ThreadStackWasOverflowed() then
++			local isGpu = state:IsGpuThread()
++			local enterTick
++			if state:ThreadStackIsUnderflowed() then
++				-- The enter came before the iterated range.
++				enterTick = if isGpu then frameStartGpu else frameStartCpu
++			else
++				local element = iter:GetCurrentThreadStackElement(state:ThreadStackDepth())
++				enterTick = element:EnterTimestampFrameLocal()
++			end
++			recordScope(state:FrameId(), isGpu, state:TimerId(), enterTick, state:Timestamp())
+ 		end
+ 	end
+ 
+ 	local frames: { FrameRow } = {}
+ 	for frameId = firstId, lastId do
+-		local row = rows[frameId]
++		local data = frameData[frameId] :: FrameData
++		local row = data.Row
++		row.PhysicsMs = unionLength(data.PhysicsIntervals) * global.TickToMsCpu
++		-- The frame's own GPU start and end are unreliable; GPU scope sections are not.
++		row.GpuMs = unionLength(data.GpuIntervals) * global.TickToMsGpu
++
+ 		local scopes: { ScopeTime } = {}
+-		for timerId, ms in scopeMs[frameId] do
++		for timerId, intervals in data.ScopeIntervals do
++			local ms = unionLength(intervals :: Intervals) * global.TickToMsCpu
+ 			table.insert(scopes, { Name = scopeName(session, timerId), Ms = ms })
+ 		end
+ 		table.sort(scopes, function(a, b)
+@@ -108,8 +238,7 @@ function FrameReport.run(): Report
+ 	end
+ 
+ 	local heapId = session:FindCounterId("**/Luau/heap")
+-	local heapSamples = session:GetCounterSamples(heapId)
+-	local lastHeapSample = heapSamples:FetchLastSample()
++	local lastHeapSample = if heapId ~= 0 then session:FetchLastCounterSample(heapId) else nil
+ 
+ 	iter:Dispose()
+ 	session:Dispose()

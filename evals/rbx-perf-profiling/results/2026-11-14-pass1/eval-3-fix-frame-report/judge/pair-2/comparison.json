@@ -1,0 +1,126 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both switch to snapshots and leave the profiler alone, and both fix the hidden misuses. B's creditMain walks the whole stack on every exit, so open outer scopes and outer Physics scopes get credited again on every nested exit. That inflates scope and physics times, so the physics bug is not fixed and the field meanings change. B also fails StyLua. A splits scopes across frames correctly, uses interval unions to avoid double counting, measures GPU time from GPU-thread scopes, and passes all checks.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Stops breaking the overlay",
+          "score": 5,
+          "note": "Uses CaptureToBufferSync + OpenFromBuffer for its own session, drops the FpsOverlay require, and disposes only its own session."
+        },
+        {
+          "criterion": "Leaves the shared profiler as it found it",
+          "score": 5,
+          "note": "Removes EnableCapture(false) and SetFrameLimit(256) entirely; it reads only from the snapshot."
+        },
+        {
+          "criterion": "Per-frame scope splitting",
+          "score": 5,
+          "note": "Uses EmitThreadFrameEnd with EnterTimestampFrameLocal for scopes still open, uses the frame start for underflowed exits, and starts one frame early to warm the stack."
+        },
+        {
+          "criterion": "Nested Physics counted once",
+          "score": 5,
+          "note": "unionLength over PhysicsIntervals counts overlapping nested Physics scopes only once."
+        },
+        {
+          "criterion": "GPU time",
+          "score": 5,
+          "note": "Takes the union of GPU-thread scope intervals times TickToMsGpu and ignores the frame's unreliable GPU ticks."
+        },
+        {
+          "criterion": "Unreported misuses",
+          "score": 5,
+          "note": "scopeName uses FetchTimerDesc, FetchLastCounterSample replaces the undisposed array, and FindGroupId/FindThreadId run once with group IDs cached."
+        },
+        {
+          "criterion": "Fields kept, scoped, checks pass",
+          "score": 4,
+          "note": "Same fields and meanings, only FrameReport changed, and all checks pass; with no pcall, the session/iterator leak if an error is thrown."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Stops breaking the overlay",
+          "score": 5,
+          "note": "Uses CaptureToSlotSync + OpenFromSlot, then disposes its own session and resets the slot inside pcall."
+        },
+        {
+          "criterion": "Leaves the shared profiler as it found it",
+          "score": 5,
+          "note": "Never pauses capture or sets the frame limit."
+        },
+        {
+          "criterion": "Per-frame scope splitting",
+          "score": 2,
+          "note": "Uses EnterTimestampFrameLocal and frame ends, but on every exit creditMain credits all ancestors (count = depth+1), so open outer scopes are re-added on each child exit and frames can exceed their length; underflowed exits are skipped."
+        },
+        {
+          "criterion": "Nested Physics counted once",
+          "score": 2,
+          "note": "Picks the outermost Physics scope per event, but adds it again on every nested exit, so Physics is still overcounted."
+        },
+        {
+          "criterion": "GPU time",
+          "score": 4,
+          "note": "Uses outermost GPU-thread scopes with TickToMsGpu and clamped enters; this looks right."
+        },
+        {
+          "criterion": "Unreported misuses",
+          "score": 5,
+          "note": "Uses FetchTimerDesc/FetchGroupDesc, FetchLastCounterSample, and calls FindGroupId once with a cache."
+        },
+        {
+          "criterion": "Fields kept, scoped, checks pass",
+          "score": 2,
+          "note": "StyLua fails on its own creditMain signature, and the inflated scope/physics numbers change the fields' meaning."
+        }
+      ],
+      "overall_score": 4
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Snapshot-based and never touches global profiler state",
+        "Correct frame splitting with clamped enters",
+        "Interval union handles nested scopes and nested Physics cleanly",
+        "GPU time measured from GPU thread scopes with TickToMsGpu",
+        "Fixes all hidden misuses; all checks pass"
+      ],
+      "weaknesses": [
+        "No pcall, so an error leaks the session and iterator",
+        "Relies on IsFrameBoundary/TimestampGpu, which the provided facts don't document"
+      ]
+    },
+    "B": {
+      "score": 4,
+      "strengths": [
+        "Robust snapshot with pcall cleanup and slot reset",
+        "GPU time handled correctly",
+        "Fixes hidden misuses"
+      ],
+      "weaknesses": [
+        "Ancestor scopes credited on every child exit, which badly inflates TopScopes and PhysicsMs",
+        "Skips underflowed exits",
+        "StyLua failure"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 4
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts keep the menu and its pages and keep the slide working. A disconnects the rainbow swatch's Heartbeat connection while the swatch can't be seen and restores the fresh-page behavior: scroll back to top and hue back to red. B leaves the Heartbeat connection running every frame, lets scroll position persist without saying so, and its note gives weaker verification steps.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Pages built once and kept",
+          "score": 5,
+          "note": "`indexes(pageKeys, ...)` reads from a `visited` map whose keys never leave, so each page is built on its first visit; `keptPage` sets `built.Visible = isSelected()` in an effect."
+        },
+        {
+          "criterion": "Menu built once and kept while closed",
+          "score": 5,
+          "note": "`show(hasMenuOpened, ...)` builds the menu on the first open and never tears it down, because `hasMenuOpened` never goes false."
+        },
+        {
+          "criterion": "Slide plays every time",
+          "score": 5,
+          "note": "`Present = present() and isMenuOpen()` starts false, so the first open slides in too; `Visible = isMenuShowing` keeps the panel on screen until `slide() < 1` is false."
+        },
+        {
+          "criterion": "Per-frame work stops when unseen",
+          "score": 5,
+          "note": "The Heartbeat connection is made inside an `effect` gated on `showingContext` (menu showing and page selected), and `cleanup` disconnects it when the gate turns off."
+        },
+        {
+          "criterion": "Kept page behaves like a fresh one",
+          "score": 5,
+          "note": "Scrolling pages reset `CanvasPosition` to zero once off screen, the hue goes back to red on each visit, and the note names the turn-around when reopening mid-slide."
+        },
+        {
+          "criterion": "Note quality",
+          "score": 4,
+          "note": "Covers the change, the before/after MicroProfiler steps on the reported actions, and a command-bar script that counts instances per frame; it says the look and slide are the same but gives no list of things to check by eye."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "All checks pass, the code is typed and stays in scope, and the M key and Menu button both go through `toggleMenu`."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Pages built once and kept",
+          "score": 5,
+          "note": "`keptPage` wraps each page in `show(built)`, and `built` latches true on the first visit while the menu is open; pages bind `Visible = isShown`."
+        },
+        {
+          "criterion": "Menu built once and kept while closed",
+          "score": 5,
+          "note": "`BuildMenu.component` is mounted directly at start with `Present = isMenuOpen`, so it is never destroyed."
+        },
+        {
+          "criterion": "Slide plays every time",
+          "score": 5,
+          "note": "The spring starts at 1 because `isMenuOpen` starts false, and `Visible = panelShown` hides the panel only after the slide-out finishes."
+        },
+        {
+          "criterion": "Per-frame work stops when unseen",
+          "score": 3,
+          "note": "The Heartbeat connection stays connected forever and only returns early when `isShown()` is false, so the callback still runs every frame."
+        },
+        {
+          "criterion": "Kept page behaves like a fresh one",
+          "score": 3,
+          "note": "The note names the hue continuing instead of restarting, but the scroll position is not reset and that difference goes unmentioned."
+        },
+        {
+          "criterion": "Note quality",
+          "score": 3,
+          "note": "Gives MicroProfiler steps and an Explorer/Memory check, but has no per-frame instance count, no before-commit comparison, and no checks by eye."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "All checks pass and the change is simple, readable, and typed."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Truly disconnects the Heartbeat connection while the swatch can't be seen",
+        "Reproduces the fresh-page behavior: scroll back to top and hue back to red",
+        "Thorough note with a script that counts instances created per frame"
+      ],
+      "weaknesses": [
+        "The context and indexes setup is somewhat complex",
+        "The note doesn't list what to check by eye (slide, highlight, tint selection)"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Simpler structure: three `keptPage` calls with a bound `Visible`",
+        "Menu mounted once with a clean `Present = isMenuOpen`"
+      ],
+      "weaknesses": [
+        "The Heartbeat callback still fires every frame while hidden",
+        "The scroll position persists across reopen, and the note doesn't mention it",
+        "Thinner verification steps in the note"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 7
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

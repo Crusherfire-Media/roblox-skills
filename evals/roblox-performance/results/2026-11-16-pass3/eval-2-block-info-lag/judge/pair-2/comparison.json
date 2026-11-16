@@ -1,0 +1,124 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts fix the problem the same way: counts driven by events, a hover lookup whose cost no longer depends on build size, updates only when something changes, and honest reports. A's grid index matches the rubric's grid-cell option and keeps the old behavior exactly, including the GetChildren-order tie-break. B's GetPartBoundsInRadius is simpler but adds a small table allocation every frame and can behave a little differently (CanQuery filtering and tie order), though it documents these differences. A wins by a small margin.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Event-driven counts",
+          "score": 5,
+          "note": "`onChildAdded` and `onChildRemoved` on `blocksFolder` keep `countsByName` and `totalCount` current, the folder is read once with `GetChildren()` at startup, and no per-frame scan is left."
+        },
+        {
+          "criterion": "Hover lookup independent of block count",
+          "score": 5,
+          "note": "A `blocksByCell` grid index with `CELL_SIZE = HOVER_RADIUS` is searched only in the 3x3x3 cells around the hit point, which is exactly the grid-cell lookup the rubric names."
+        },
+        {
+          "criterion": "Work only on input change",
+          "score": 5,
+          "note": "`isTextStale` controls when `updateText` runs, and `selectionBox.Adornee` is written only when `hovered ~= hoveredBlock`."
+        },
+        {
+          "criterion": "Same behavior",
+          "score": 5,
+          "note": "Existing blocks are seeded at startup, the total counts every child as before, `joinOrderByBlock` keeps the old GetChildren tie-break, and the hover radius rule is the same."
+        },
+        {
+          "criterion": "Removes cost rather than spreading it",
+          "score": 5,
+          "note": "There is no throttling, pooling or native code; the O(n) scans are replaced by O(1) bookkeeping per add or remove."
+        },
+        {
+          "criterion": "Honest report",
+          "score": 5,
+          "note": "The report explains the three GetChildren calls and their allocations behind the GC label, labels the After column as 'not measured', and gives before/after MicroProfiler, scale-test and phone FPS checks."
+        },
+        {
+          "criterion": "Correct, in scope, typed",
+          "score": 5,
+          "note": "Only the script and the report changed, the code is typed, and all three checks pass; the cost is extra index-maintenance code that is still readable."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Event-driven counts",
+          "score": 5,
+          "note": "ChildAdded and ChildRemoved handlers keep `counts` and `totalChildren` current, the folder is counted once at startup, and `countedName` makes sure removal undoes exactly what adding did."
+        },
+        {
+          "criterion": "Hover lookup independent of block count",
+          "score": 5,
+          "note": "`Workspace:GetPartBoundsInRadius` with an Include filter on `blocksFolder` returns only nearby candidates, so the cost no longer grows with the build."
+        },
+        {
+          "criterion": "Work only on input change",
+          "score": 5,
+          "note": "`countsDirty`, `shownHovered` and `shownHoveredName` decide when the text is rebuilt, and `Adornee` and `Text` are written only when their values differ."
+        },
+        {
+          "criterion": "Same behavior",
+          "score": 4,
+          "note": "Counts and total are preserved, but the spatial query skips parts with `CanQuery = false` and may break exact-distance ties differently; both differences are acknowledged in the report."
+        },
+        {
+          "criterion": "Removes cost rather than spreading it",
+          "score": 5,
+          "note": "There is no throttling or micro-tuning; the scans are replaced outright."
+        },
+        {
+          "criterion": "Honest report",
+          "score": 5,
+          "note": "The report explains the O(n) allocations behind the GC label, says nothing has run in Studio, and lists MicroProfiler, a bigger-build test, phone FPS and behavior checks."
+        },
+        {
+          "criterion": "Correct, in scope, typed",
+          "score": 5,
+          "note": "Only the script and the report changed, the code is typed, tidy and readable, and all checks pass."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Grid-cell index gives the same candidate set as the old full scan",
+        "Keeps the GetChildren-order tie-break exactly",
+        "Report is clear about evidence and states the assumptions (blocks never renamed or moved) and the Deferred signal behavior"
+      ],
+      "weaknesses": [
+        "More bookkeeping code (cell maps and join order) to maintain",
+        "Builds 27 Vector3 keys per frame (a small cost)",
+        "Removal reads `child.Name` at removal time instead of the name it was counted under"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Simple, idiomatic engine spatial query with no index to maintain",
+        "Stores the name each child was counted under, so removal is robust",
+        "Honest report that names its edge cases"
+      ],
+      "weaknesses": [
+        "The query allocates a small result table every frame",
+        "Small behavior differences: CanQuery and collision-group filtering, and tie order"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 8.5
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts are valid, safe, and pass all checks, and both widen Title to accept a source in the same way. B handles selection the intended way: a local source synced from the control by an effect and updated by tile clicks. A rebuilds the whole picker through indexes whenever the control changes and leaves a debug print. A has better typing, but B's cleaner state handling makes it the slightly better story to merge.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story",
+          "score": 5,
+          "note": "BlockPicker.story.luau returns `{ vide = Vide, controls = CONTROLS, story = story }` with Vide from ReplicatedStorage.Packages, and the story returns a Frame that wraps the picker."
+        },
+        {
+          "criterion": "Controls from BlockTypes.List; title text; long-title access",
+          "score": 3,
+          "note": "`UILabs.Choose(blockNames)` builds the list from BlockTypes.List and Title is `UILabs.String(\"Blocks\")`, both ordered, but there is no long-title preset or default."
+        },
+        {
+          "criterion": "Live title updates",
+          "score": 4,
+          "note": "Title is now `string | () -> string` and the story passes the `controls.Title` source, which keeps the game's plain-string caller working (assuming the picker binds Title straight to Text)."
+        },
+        {
+          "criterion": "Control and clicks both move the highlight",
+          "score": 4,
+          "note": "`indexes` keyed on `controls.Selected()` rebuilds the picker with a fresh `source(initialName)` that `Select` updates; it works, but changing the control rebuilds the whole picker."
+        },
+        {
+          "criterion": "Safe in edit mode",
+          "score": 5,
+          "note": "It requires only BlockPicker, BlockTypes, UILabs, and Vide, never yields, and creates only a Frame returned to the preview."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "It is `--!strict` with a typed StoryProps and all checks pass, but a stray `print` was left in `Select` and the rebuild approach is heavier than needed."
+        }
+      ],
+      "overall_score": 7.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story",
+          "score": 5,
+          "note": "`UILabs.CreateVideStory({ vide = Vide, controls = controls }, function(props) ... return BlockPicker(...) end)` is a valid Vide story."
+        },
+        {
+          "criterion": "Controls from BlockTypes.List; title text; long-title access",
+          "score": 3,
+          "note": "`UILabs.Choose(blockNames)` comes from BlockTypes.List and the plain string `Title = \"Blocks\"` becomes a String control, but there is no long-title preset."
+        },
+        {
+          "criterion": "Live title updates",
+          "score": 4,
+          "note": "The Title type is widened to `string | () -> string` with an explanatory comment and the `props.controls.Title` source is passed in, which keeps the game caller working."
+        },
+        {
+          "criterion": "Control and clicks both move the highlight",
+          "score": 5,
+          "note": "A local `source(selectedControl())` is synced by an `effect` from the control and updated by `Select` on clicks, which is exactly the intended pattern."
+        },
+        {
+          "criterion": "Safe in edit mode",
+          "score": 5,
+          "note": "It requires only BlockTypes, UILabs, Vide, and BlockPicker through instance paths, never yields, and creates nothing outside the preview."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "All checks pass and the code is clear and documented, but it has no `--!strict` and `props` is untyped apart from local annotations."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7.5,
+      "strengths": [
+        "Strict typing, including a typed StoryProps",
+        "Controls are ordered",
+        "Minimal, backward-compatible change to the picker's prop type"
+      ],
+      "weaknesses": [
+        "Rebuilds the whole picker through indexes whenever the selection control changes",
+        "Debug print left in Select",
+        "No preset for a long title"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Idiomatic selection handling: an effect syncs from the control while clicks update local state",
+        "Documents the one-way behaviour of UI Labs controls",
+        "Simple and readable"
+      ],
+      "weaknesses": [
+        "Not strict mode and props are untyped",
+        "No preset for a long title",
+        "Controls are unordered"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 7.5,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

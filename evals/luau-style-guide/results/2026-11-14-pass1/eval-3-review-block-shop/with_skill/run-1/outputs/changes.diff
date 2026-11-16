@@ -1,0 +1,306 @@
+diff --git a/docs/review.md b/docs/review.md
+new file mode 100644
+index 0000000..30f90ed
+--- /dev/null
++++ b/docs/review.md
+@@ -0,0 +1,300 @@
++# Review: `src/ServerScriptService/BlockShop.server.luau`
++
++Findings are ordered by impact. Line numbers refer to the script as of commit
++`f935ed5`. Items 1 to 3 are exploits or broken features and should be fixed
++before building on this script. Items 4 to 6 are bugs or design gaps. Items 7
++to 10 are robustness, API shape, and style.
++
++---
++
++## 1. Client arguments are trusted. One NaN gives a player unlimited free blocks forever
++
++**Where:** `BuyBlocks` handler (lines 84-103), `PlaceBlock` handler
++(lines 105-125), `RemoveBlock` handler (lines 127-140).
++
++**What's wrong:** The handlers annotate client values as `string`, `number`,
++`Vector3`, and `Instance`. Those annotations only tell the type checker to
++trust the client. A client can send anything.
++
++- **`amt = 0/0` (NaN) in `BuyBlocks`.** Every comparison with NaN is false,
++  so `amt < 1 or amt > MAX_PURCHASE` lets it through. `price` becomes NaN,
++  `coins < price` is false, and `setCoins` writes **NaN to the DataStore**.
++  After that, `coins < price` stays false on every later purchase, so the
++  player can buy as much as they want, permanently. Their stock becomes NaN
++  too, and `NaN < 1` is false, so the stock check in `PlaceBlock` passes
++  forever as well.
++- **Fractional `amt`** (for example `1.5`) is accepted. It charges fractional
++  coins and grants fractional stock.
++- **Unknown or non-string `bt`** makes `PRICES[bt] * amt` error. **A string
++  `amt`** makes the comparison error. Neither can be exploited, but any client
++  can use them to spam errors.
++- **NaN components in `pos` in `PlaceBlock`.** `PlacementRules.snap` returns a
++  NaN position. `PlacementRules.check` then passes it, because the height
++  check (`center.Y < 0`, `> MaxHeight`) and the reach check
++  (`Magnitude > MaxReach`) are both false for NaN. The block is placed at a
++  NaN position, from any distance. A non-`Vector3` `pos` errors inside
++  `snap`.
++- **`part = nil` in `RemoveBlock`** errors on `part.Parent`.
++
++**What to do instead:** Type every argument after `player` as `unknown`.
++Narrow each one with `typeof` and range checks that are shaped to reject NaN,
++and return early when a check fails:
++
++```lua
++buyRemote.OnServerEvent:Connect(function(player: Player, blockType: unknown, amount: unknown)
++	if not BlockTypes.isBlockType(blockType) then
++		return
++	end
++	if
++		typeof(amount) ~= "number"
++		or amount ~= math.floor(amount) -- rejects NaN and fractions
++		or amount < 1
++		or amount > MAX_PURCHASE
++	then
++		return
++	end
++	-- blockType :: BlockTypes.BlockType, amount is a whole number in range
++end)
++```
++
++For `pos`, check `typeof(pos) == "Vector3"` and that all three components are
++finite (`x == x and math.abs(x) ~= math.huge`). Consider adding the same
++finite check to `PlacementRules.check` too, so the client preview and the
++server agree on it. For `part`, check `typeof(part) == "Instance"` and
++`part:IsA("BasePart")`.
++
++Make `BlockTypes.isBlockType` narrow its argument
++(`(value: unknown) -> boolean` cannot narrow, so cast after the check, or
++change it to return `BlockType?`). That also removes the
++`bt :: BlockTypes.BlockType` cast at line 66.
++
++---
++
++## 2. Coins are read and written in the DataStore on every purchase: duplication race, throttling, unhandled errors
++
++**Where:** `getCoins` / `setCoins` (lines 42-48), used at lines 90-94.
++
++**What's wrong:**
++
++- **Race / duplication.** `GetAsync` yields. If a client fires `BuyBlocks`
++  twice in quick succession, both handlers read the same balance, both pass
++  `coins < price`, and both write `coins - price`. The player pays once and
++  gets the stock twice. Repeating this lets them buy without limit.
++- **Throttling.** Each purchase costs one read and one write on the same key.
++  DataStore budgets are per server, and writes to the same key have a
++  cooldown. A single player spamming the remote can use up the budget, which
++  delays or fails saves for everyone on the server.
++- **No error handling.** `GetAsync` and `SetAsync` throw on network or
++  service failure. Nothing is wrapped in `pcall`, so failures show up as
++  random handler errors with no retry and no feedback to the player.
++- **Yields are hidden.** Neither function has an `Async` suffix, so nothing at
++  the call site shows that the handler yields partway through and can
++  interleave with other events. That interleaving is exactly what the race
++  above needs.
++
++**What to do instead:** Load the balance once when the player joins (in a
++`pcall`, with retries), keep it in a server-side table, and change it there
++synchronously. In-memory reads and writes don't yield, so the check-and-deduct
++can't interleave. Save on `PlayerRemoving`, in `game:BindToClose`, and on a
++periodic autosave, using `UpdateAsync` in a `pcall`. If coins are going to
++matter beyond this shop, use a session-locking data library (ProfileStore or
++similar) rather than writing your own. Also move coins out of this script
++into a module that owns player data, so the shop asks it to spend coins
++(`trySpend(player, price): boolean`) and doesn't touch storage itself.
++
++---
++
++## 3. `RemoveBlock`: abandoned blocks can never be removed, and the design refunds the wrong player
++
++**Where:** `getOwnerName` (lines 50-57) and the `RemoveBlock` handler
++(lines 127-140).
++
++**What's wrong:**
++
++- **The "owner has left" path always errors.** When no player matches,
++  `getOwnerName` falls off its end, which returns *no values*, not `nil`.
++  `tostring(getOwnerName(part))` then fails with "missing argument #1 to
++  'tostring'". So the feature the comment on line 132 describes (clearing a
++  block whose owner has left) can never happen.
++- **If that worked, it would be an exploit.** The refund on line 139 goes to
++  `stock[plr]`, the player who *removed* the block, not the owner. Clearing an
++  absent player's build would give the clearer free blocks.
++- **Ownership is compared by name through a string sentinel.** Comparing
++  `tostring(...)` against `"nil"` is fragile, and `"nil"` is a legal
++  three-character Roblox username. The attribute already holds a `UserId`, so
++  compare that.
++- **The refund reads the block type from `part.Name`.** The name is a display
++  property. A dedicated attribute is safer.
++- **There is no reach check.** A player can remove their own blocks from
++  anywhere on the map. That may be acceptable, but placing has a reach limit
++  and removing doesn't.
++
++**What to do instead:** Compare `UserId`s directly, and only refund the
++owner:
++
++```lua
++local ownerId = part:GetAttribute("OwnerId")
++local isOwner = ownerId == player.UserId
++local isOwnerPresent = typeof(ownerId) == "number"
++	and Players:GetPlayerByUserId(ownerId) ~= nil
++if not isOwner and isOwnerPresent then
++	return
++end
++
++part:Destroy()
++if isOwner then
++	-- refund to player
++end
++```
++
++Store the block type in a `BlockType` attribute in `placeBlock` and read it
++back here. Decide whether removing a block needs the same reach rule as
++placing one.
++
++---
++
++## 4. Purchased stock is lost when the player leaves, but the coins are already gone
++
++**Where:** `stock` (line 40), `PlayerRemoving` (lines 146-148).
++
++**What's wrong:** Coins are saved, but stock lives only in memory and is
++cleared on leave. A player who buys 50 blocks and disconnects (or whose
++server shuts down) loses them, and the coins don't come back. Their placed
++blocks also stay in `workspace` with no owner online. Once item 3 is fixed,
++anyone can clear them, and nothing ever cleans them up on its own.
++
++**What to do instead:** This is a product decision, but the two halves need
++to agree. Either save stock alongside coins (same load, save, and
++`BindToClose` path as item 2), or refund unplaced stock on leave. Decide what
++happens to a leaving player's placed blocks: destroy them on
++`PlayerRemoving`, refund them, or save the build.
++
++---
++
++## 5. `stock[plr]` can be `nil`, and the type hides it
++
++**Where:** line 40 (type), lines 96-97, 106-107, 139 (reads), lines 142-148
++(setup).
++
++**What's wrong:**
++
++- `PlayerAdded` is connected at the end of the script. Players who are
++  already in the game when it runs (common in Studio playtests, and possible
++  after a slow require) never get a `stock` entry. Every remote they fire then
++  errors when it indexes `nil`.
++- A remote that arrives after `PlayerRemoving` hits the same error.
++- The map is typed `{ [Player]: { [string]: number } }`. Luau treats a lookup
++  in that type as always present, so the checker never flags the missing
++  case.
++
++**What to do instead:** Type it as `{ [Player]: { [BlockType]: number }? }`
++and guard each read (`local playerStock = stock[player]; if not playerStock
++then return end`). After connecting `PlayerAdded`, run the same handler for
++every player in `Players:GetPlayers()`. Once item 2 moves loading to join
++time, this becomes the "player data not loaded yet" guard as well.
++
++---
++
++## 6. Players can never turn receipts off
++
++**Where:** line 99.
++
++**What's wrong:** `plr:GetAttribute("ShowReceipts") or DEFAULT_SHOW_RECEIPTS`
++replaces `false` with `true`, because `or` treats `false` like `nil`. Setting
++the attribute to `false` has no effect. `AutoAnchor` (lines 118-121) handles
++this correctly with `== nil`.
++
++**What to do instead:** Use the same pattern as `AutoAnchor`, and check the
++type, since `GetAttribute` returns `any`:
++
++```lua
++local showReceipts = player:GetAttribute("ShowReceipts")
++if typeof(showReceipts) ~= "boolean" then
++	showReceipts = DEFAULT_SHOW_RECEIPTS
++end
++```
++
++Pull this into one small helper, such as
++`getBooleanSetting(player, name, default)`, so both settings read the same
++way.
++
++---
++
++## 7. Unanchored blocks can be moved by clients
++
++**Where:** lines 118-124 and `placeBlock` line 71.
++
++**What's wrong:** When `AutoAnchor` is `false`, the block is unanchored, and
++Roblox gives physics ownership to a nearby client. That client (including an
++exploiter) can then move the block anywhere, push it into other players'
++builds, or fling it. Blocks also drift off the grid, so the overlap check in
++`PlacementRules` stops matching what's in the world.
++
++**What to do instead:** If unanchored blocks are a real feature, call
++`part:SetNetworkOwner(nil)` after parenting so the server simulates them, and
++accept that cost. If they aren't, drop the setting and always anchor.
++
++---
++
++## 8. Clients can flood the server log
++
++**Where:** line 79 (`print` on every placement) and line 114 (`warn` on every
++rejected placement).
++
++**What's wrong:** Both lines run on each remote call, so any client can fill
++the server output by firing the remote over and over. That buries real errors
++and costs time on every placement.
++
++**What to do instead:** Remove the `print`, or put it behind a debug
++constant. Send rejection reasons back to the client (the placing player wants
++to see "OutOfReach"), not to `warn`. Consider a simple per-player rate limit
++on all three remotes.
++
++---
++
++## 9. Function and data shape
++
++**Where:** `placeBlock` (lines 59-82), `PRICES` (lines 14-20),
++`getOwnerName` (line 50), remote creation (lines 24-34).
++
++- **`placeBlock` takes five parameters, two of them switch booleans.** The
++  call `placeBlock(plr, center, bt, autoAnchor, true)` doesn't say what
++  `true` means. Remove `log` (see item 8). Pass `anchored` in an options table
++  (`options: { Anchored: boolean? }?`), or always anchor (see item 7).
++- **`PRICES` repeats the block list from `BlockTypes`.** It's typed
++  `{ [string]: number }`, so adding a block type to `BlockTypes` without a
++  price only shows up later as a runtime error. Type it as
++  `{ [BlockTypes.BlockType]: number }`, so a missing or misspelled entry is a
++  type error. Or move prices into `BlockStyle` / a `BlockPrices` field in
++  `BlockTypes`, so the list lives in one place.
++- **`getOwnerName` has no return type and returns different numbers of values
++  on different paths** (see item 3). If it's kept, give it `: string?` and end
++  with `return nil`.
++- **Remotes are created at runtime.** Client scripts have to `WaitForChild`
++  each name, and nothing shares the names. Define the remotes in
++  `default.project.json` (or create them from one shared module that both
++  sides require), so a typo is caught in one place.
++
++---
++
++## 10. Style (Roblox Lua style guide)
++
++All low impact, and easiest to fix in the same pass as the items above.
++StyLua is configured (`stylua.toml`), so run it after editing.
++
++- **Line 1:** add `--!strict`. Several items above (the untyped
++  `getOwnerName` return, the cast at line 66) are things strict mode would
++  surface. The header comment moves to line 2.
++- **Lines 3-8, 10-22:** bind services, requires, and constants with `const`.
++- **Names:** spell them out. Rename `plr` to `player`, `amt` to `amount`,
++  `bt` to `blockType`, `pos` to `position`, and `p` to `otherPlayer`.
++- **Yielding functions:** after item 2 they may disappear, but any function
++  that calls the DataStore takes an `Async` suffix
++  (`loadCoinsAsync`).
++- **Handlers:** consider named local functions (`onBuyBlocks`,
++  `onPlaceBlock`, `onRemoveBlock`, `onPlayerAdded`, `onPlayerRemoving`). The
++  connections then read as a list at the bottom, and `onPlayerAdded` can be
++  reused for the existing-players loop in item 5.
++- **Booleans:** `showReceipts` and `autoAnchor` read fine as settings. If
++  they become fields, name them as questions (`ShouldShowReceipts`) or keep
++  them matched to the attribute names.

@@ -1,0 +1,171 @@
+diff --git a/src/ServerScriptService/Stories/BlockTile.story.luau b/src/ServerScriptService/Stories/BlockTile.story.luau
+index 3c474c6..18df1d0 100644
+--- a/src/ServerScriptService/Stories/BlockTile.story.luau
++++ b/src/ServerScriptService/Stories/BlockTile.story.luau
+@@ -8,68 +8,102 @@ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
+ local source = Vide.source
++local Ordered = UILabs.Ordered
+ 
+ local blockNames = {}
+ for _, blockType in BlockTypes.List do
+ 	table.insert(blockNames, blockType.Name)
+ end
+ 
++-- Groups and the controls inside them are wrapped in Ordered so the panel keeps the same
++-- order on every reload (plain table keys come out in no fixed order).
+ local CONTROLS = {
+-	HighlightThickness = UILabs.Slider(3, 1, 8, 1),
+-	Locked = false,
+-	Backdrop = Color3.fromRGB(40, 40, 46),
+-	Block = UILabs.Choose(blockNames),
+-	TileSize = UILabs.Slider(64, 32, 128, 1),
+-	ShowCount = true,
+-	-- Empty shows the block type's own display name.
+-	NameOverride = "",
+-	CornerRadius = UILabs.Slider(8, 0, 32, 1),
+-	Count = UILabs.Slider(20, 0, 999, 1),
+-	Centered = true,
+-	HighlightColor = Color3.fromRGB(255, 200, 60),
+-	ShowName = true,
+-	Selected = false,
++	Content = Ordered(
++		UILabs.ControlGroup({
++			Block = Ordered(UILabs.Choose(blockNames), 1),
++			-- Empty shows the block type's own display name.
++			NameOverride = Ordered("", 2),
++			ShowName = Ordered(true, 3),
++			Count = Ordered(UILabs.Slider(20, 0, 999, 1), 4),
++			ShowCount = Ordered(true, 5),
++		}),
++		1
++	),
++	State = Ordered(
++		UILabs.ControlGroup({
++			Selected = Ordered(false, 1),
++			Locked = Ordered(false, 2),
++		}),
++		2
++	),
++	Appearance = Ordered(
++		UILabs.ControlGroup({
++			TileSize = Ordered(UILabs.Slider(64, 32, 128, 1), 1),
++			CornerRadius = Ordered(UILabs.Slider(8, 0, 32, 1), 2),
++			HighlightColor = Ordered(Color3.fromRGB(255, 200, 60), 3),
++			HighlightThickness = Ordered(UILabs.Slider(3, 1, 8, 1), 4),
++		}),
++		3
++	),
++	Story = Ordered(
++		UILabs.ControlGroup({
++			Backdrop = Ordered(Color3.fromRGB(40, 40, 46), 1),
++			Centered = Ordered(true, 2),
++		}),
++		4
++	),
+ }
+ 
+ type StoryProps = {
+ 	controls: {
+-		HighlightThickness: () -> number,
+-		Locked: () -> boolean,
+-		Backdrop: () -> Color3,
+-		Block: () -> string,
+-		TileSize: () -> number,
+-		ShowCount: () -> boolean,
+-		NameOverride: () -> string,
+-		CornerRadius: () -> number,
+-		Count: () -> number,
+-		Centered: () -> boolean,
+-		HighlightColor: () -> Color3,
+-		ShowName: () -> boolean,
+-		Selected: () -> boolean,
++		Content: {
++			Block: () -> string,
++			NameOverride: () -> string,
++			ShowName: () -> boolean,
++			Count: () -> number,
++			ShowCount: () -> boolean,
++		},
++		State: {
++			Selected: () -> boolean,
++			Locked: () -> boolean,
++		},
++		Appearance: {
++			TileSize: () -> number,
++			CornerRadius: () -> number,
++			HighlightColor: () -> Color3,
++			HighlightThickness: () -> number,
++		},
++		Story: {
++			Backdrop: () -> Color3,
++			Centered: () -> boolean,
++		},
+ 	},
+ 	target: Frame,
+ }
+ 
+ local function story(props: StoryProps)
+-	local controls = props.controls
++	local content = props.controls.Content
++	local state = props.controls.State
++	local appearance = props.controls.Appearance
++	local storySettings = props.controls.Story
+ 	local clicks = source(0)
+ 
+ 	local function blockType(): BlockTypes.BlockType
+-		return BlockTypes.ByName[controls.Block()]
++		return BlockTypes.ByName[content.Block()]
+ 	end
+ 
+ 	return create("Frame")({
+ 		Name = "Backdrop",
+ 		Size = UDim2.fromScale(1, 1),
+-		BackgroundColor3 = controls.Backdrop,
++		BackgroundColor3 = storySettings.Backdrop,
+ 
+ 		create("Frame")({
+ 			Name = "Holder",
+ 			AnchorPoint = function()
+-				return if controls.Centered() then Vector2.new(0.5, 0.5) else Vector2.zero
++				return if storySettings.Centered() then Vector2.new(0.5, 0.5) else Vector2.zero
+ 			end,
+ 			Position = function()
+-				return if controls.Centered()
++				return if storySettings.Centered()
+ 					then UDim2.fromScale(0.5, 0.5)
+ 					else UDim2.fromOffset(16, 16)
+ 			end,
+@@ -78,21 +112,21 @@ local function story(props: StoryProps)
+ 
+ 			BlockTile({
+ 				Name = function()
+-					local override = controls.NameOverride()
++					local override = content.NameOverride()
+ 					return if override ~= "" then override else blockType().DisplayName
+ 				end,
+ 				Color = function()
+ 					return blockType().Color
+ 				end,
+-				Count = controls.Count,
+-				ShowName = controls.ShowName,
+-				ShowCount = controls.ShowCount,
+-				IsSelected = controls.Selected,
+-				IsLocked = controls.Locked,
+-				Size = controls.TileSize,
+-				CornerRadius = controls.CornerRadius,
+-				HighlightColor = controls.HighlightColor,
+-				HighlightThickness = controls.HighlightThickness,
++				Count = content.Count,
++				ShowName = content.ShowName,
++				ShowCount = content.ShowCount,
++				IsSelected = state.Selected,
++				IsLocked = state.Locked,
++				Size = appearance.TileSize,
++				CornerRadius = appearance.CornerRadius,
++				HighlightColor = appearance.HighlightColor,
++				HighlightThickness = appearance.HighlightThickness,
+ 				Select = function()
+ 					clicks(clicks() + 1)
+ 					print(`Tile clicked {clicks()} times`)

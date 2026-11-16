@@ -1,0 +1,1710 @@
+diff --git a/docs/figma/inventory-assets.md b/docs/figma/inventory-assets.md
+new file mode 100644
+index 0000000..4d5b006
+--- /dev/null
++++ b/docs/figma/inventory-assets.md
+@@ -0,0 +1,145 @@
++# Inventory panel: baked images
++
++These are the visuals from the inventory panel design (`design/figma/inventory-panel.json`,
++screen `12:340`, Slot set `20:1`) that are uploaded as images instead of built from UI objects.
++Everything else is built natively (see the end of this file).
++
++All ids live in `src/StarterPlayer/StarterPlayerScripts/UI/InventoryAssets.luau` and are
++placeholders (`rbxassetid://0`) for now. Until a real id is in, the panel draws a fallback: a
++rounded swatch in the block's color instead of Block Art, an "X" text glyph on the close button,
++and no lock icon or hex pattern.
++
++**Export scale: 2x.** The UI is authored at 1080p and `Screen.MaxScale` grows it up to 2x on a 4K
++screen, so 2x keeps every image sharp at its largest. Every sheet is under 1024 px per side, so
++Roblox stores it at full resolution.
++
++**Every export:** PNG with a transparent background, and alpha bleed on (the edge color carried
++into the transparent pixels). Without it, Roblox turns transparent pixels black on upload and soft
++edges get a dark fringe when scaled. Upload under the account or group that owns the experience.
++
++| # | Asset | Figma source | Export size | Upload as |
++|---|---|---|---|---|
++| 1 | Hex Pattern tile | `40:78` (group of 35 `Hexagon` vectors) | 224 x 384 | One image |
++| 2 | Block Art sheet | `Block Art` in each slot: `40:0`, `40:4`, `40:8`, `40:12`, `40:16`, `40:20`, `40:24`, `40:28`, `40:33`, `40:38` | 800 x 320 | One sheet, 10 cells |
++| 3 | Icon sheet | `Icon/Close` `40:80`, `Icon/Lock` `40:30` | 128 x 64 | One sheet, 2 cells |
++
++## 1. Hex Pattern tile
++
++**What it is.** The faint honeycomb behind the panel's content: white hexagons, 112 x 128 each,
++2 px centered strokes, in rows 96 apart with every other row shifted 56, at 6% group opacity.
++
++**Why baked.** It's 35 vectors of decoration that never changes. Built from UI objects it would be
++dozens of frames, each costing layout and draw work every frame; one tiled image is a single small
++texture.
++
++**Export.** One seamless tile, the smallest piece that repeats: **112 x 192 at 1x, exported at 2x
++= 224 x 384.**
++
++- The pattern repeats every 112 px across and 192 px down, so any 112 x 192 window is seamless.
++  Use the window that starts at the pattern's origin in Roblox: frame coordinates **x 602 to 714,
++  y 352 to 544** (the panel's top-left at 600, 350, plus the 2 px border the pattern sits inside).
++- In Figma: draw a 112 x 192 frame at that spot with **Clip content** on, put copies of every
++  hexagon that overlaps it inside, and set their opacity to **100%** (the 6% is applied in
++  Roblox). Keep the strokes white, 2 px, centered. Export the frame at 2x.
++- Check the seams by laying four copies of the PNG in a 2 x 2 grid: the lines should run on
++  without a break or a doubled stroke.
++
++**Drawn in Roblox.** `HexPattern`, an `ImageLabel` under the panel, behind the content:
++
++- `ScaleType = Tile`, `TileSize = UDim2.fromOffset(112, 192)` (offsets, so the pattern keeps its
++  density at any panel size)
++- `ImageColor3` white, `ImageTransparency = 0.94` (the 6% group opacity)
++- Inset 2 px on every side, inside the panel border, with its own `UICorner` of 14 (the panel's
++  16 minus the inset), since a parent's `UICorner` doesn't clip children
++
++## 2. Block Art sheet
++
++**What it is.** The picture of each block type in its slot: 56 x 56, image fill with **Fit**, with
++a drop shadow (black, 40% alpha, offset 0, 4, blur 8). Ten block types, all shown together.
++
++**Why baked.** Block art is illustration, and the shadow follows the art's shape, which
++`UIShadow` can't do (it shadows only the frame's box). So the shadow is baked into each picture.
++The ten show together every time the panel opens, so they share one sheet: one fetch, one texture,
++and they appear at once.
++
++**Export.**
++
++- Each cell is **80 x 80 at 1x = 160 x 160 at 2x**: the 56 x 56 art at **(12, 8)** in the cell
++  (24, 16 at 2x), so the shadow has 8 px above and to the sides and 16 px below it before the cell
++  edge. The shadow reaches at most 12 px below the art, so cell edges stay transparent and
++  neighbors can't bleed into each other.
++- Export the art with its shadow at **100% opacity**. Ice, Lamp, and Gold sit inside a locked
++  slot's Content frame at 40% opacity in the file; export the `Block Art` rectangle itself, or set
++  that frame to 100% first. Roblox applies the dimming.
++- Lay the cells on a **5 x 2 grid, 800 x 320**, in hotbar order (the order of `BlockTypes.List`):
++
++  | Cell | Block | Node | Rect offset (px) |
++  |---|---|---|---|
++  | 0 | Brick | `40:0` | 0, 0 |
++  | 1 | Dirt | `40:4` | 160, 0 |
++  | 2 | Grass | `40:8` | 320, 0 |
++  | 3 | Window | `40:12` | 480, 0 |
++  | 4 | Wood | `40:16` | 640, 0 |
++  | 5 | Stone | `40:20` | 0, 160 |
++  | 6 | Sand | `40:24` | 160, 160 |
++  | 7 | Ice | `40:28` | 320, 160 |
++  | 8 | Lamp | `40:33` | 480, 160 |
++  | 9 | Gold | `40:38` | 640, 160 |
++
++  Every rect is 160 x 160. Keep its own colors (it's multicolor art, not tinted).
++
++**Drawn in Roblox.** `BlockArt`, an `ImageLabel` in each slot:
++
++- `Size` 80 x 80 at **(8, 8)** in the 96 x 96 slot, which puts the 56 px art at (20, 16) as in
++  the design
++- `ImageRectOffset` from the table, `ImageRectSize = (160, 160)`, `ScaleType = Fit`
++- `ImageTransparency = 0.6` on a locked slot (the Locked variant's 40% content opacity), else 0
++
++Adding a block type means adding a cell: an 11th fits on a third row (800 x 480). Re-uploading
++gives a new id; update `BLOCK_SHEET_ID` and `BLOCK_CELLS`.
++
++## 3. Icon sheet
++
++**What it is.** The two glyphs: the close cross (20 x 20, in the round close button) and the
++padlock (24 x 24, on locked slots). Both are filled with Text/Primary (`#F5F6FA`) and show on the
++panel together.
++
++**Why baked.** Icons are vector shapes that Roblox UI objects can't draw. One color each, so they
++are exported **white** and tinted in Roblox, which lets one image serve any color or state.
++
++**Export.**
++
++- Two **64 x 64** cells side by side: **128 x 64**, white glyphs on transparent.
++- Each glyph fills the **60 x 60 square at its cell's center** (2 px clear on every side, so
++  neighbors don't bleed in when scaled): close at 3x (20 to 60), lock at 2.5x (24 to 60). Both
++  are above the 2x minimum.
++
++  | Cell | Icon | Node | Rect offset (px) | Rect size (px) |
++  |---|---|---|---|---|
++  | 0 | Close | `40:80` | 2, 2 | 60, 60 |
++  | 1 | Lock | `40:30` | 66, 2 | 60, 60 |
++
++**Drawn in Roblox.** An `ImageLabel` each, `ScaleType = Fit`, `ImageColor3 = Text/Primary`:
++
++- Close: 20 x 20, centered in the 44 x 44 close button
++- Lock: 24 x 24, centered across the slot and 10 px above its center (as in the design), shown
++  only on locked slots
++
++## Built natively (not images)
++
++For reference, everything else in the design is UI objects, because each one is something Roblox
++draws directly or changes with state:
++
++| Visual | Built with |
++|---|---|
++| Panel fill `#171A26` | `BackgroundColor3`, transparency 0.04 (see background blur) |
++| Panel 16 px corners, 2 px inside border `#3A4060` | `UICorner`, `UIStroke` `Inner` |
++| Panel drop shadow (0, 12, blur 32, 45%) | `UIShadow`, not shown behind the see-through panel |
++| Panel background blur 24 | Not possible per frame in Roblox: the fill is more opaque instead (Figma alpha 0.92, used 0.96) |
++| Slot vertical gradient `#2B3150` to `#20253B`, 12 px corners | `UIGradient` (rotation 90), `UICorner` |
++| Slot border: 1 px inside `#3A4060`; selected 3 px outside `#FFC83C` | One `UIStroke`, bound to the state |
++| Selected glow (`#FFC83C`, 55%, blur 16, spread 2) | `UIShadow` that fades in and out |
++| Text shadows on title and counts | `UIShadow` in text mode |
++| Close button (white 8%, circle) | `TextButton` with `UICorner` of 50% |
++| Equip button gradient `#FFD25A` to `#FF9F1C`, inner shadow (0, -3, 25%) | `UIGradient`, inset `UIShadow` |
++| All text | `TextLabel`s in Builder Sans, which Roblox ships |
+diff --git a/src/ServerScriptService/Stories/GameUI.storybook.luau b/src/ServerScriptService/Stories/GameUI.storybook.luau
+new file mode 100644
+index 0000000..25d83e2
+--- /dev/null
++++ b/src/ServerScriptService/Stories/GameUI.storybook.luau
+@@ -0,0 +1,6 @@
++--!strict
++
++return {
++	name = "Game UI",
++	storyRoots = { script.Parent },
++}
+diff --git a/src/ServerScriptService/Stories/InventoryPanel.story.luau b/src/ServerScriptService/Stories/InventoryPanel.story.luau
+new file mode 100644
+index 0000000..a81ef10
+--- /dev/null
++++ b/src/ServerScriptService/Stories/InventoryPanel.story.luau
+@@ -0,0 +1,133 @@
++--!strict
++
++local UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++local Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++local BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++local InventoryPanel = require("@game/StarterPlayer/StarterPlayerScripts/UI/InventoryPanel")
++
++local create = Vide.create
++local show = Vide.show
++local source = Vide.source
++
++-- By hotbar position, the counts the design shows
++local SAMPLE_COUNTS = { 48, 120, 64, 0, 35, 999, 12, 0, 0, 0 }
++-- The last block types unlock at these levels, as in the game
++local LATE_UNLOCK_LEVELS = { 4, 6, 10 }
++local LONG_NAME_SUFFIX = " Reinforced Display Block Deluxe"
++local HUGE_COUNT = 99999
++
++local CONTROLS = {
++	Inventory = UILabs.Ordered(
++		UILabs.ControlGroup({
++			-- Player level: block types above it show locked
++			Level = UILabs.Ordered(UILabs.Slider(3, 1, 12, 1), 1),
++			Counts = UILabs.Ordered(UILabs.Choose({ "Sample", "Empty", "Huge" }), 2),
++			LongNames = UILabs.Ordered(false, 3),
++		}),
++		1
++	),
++}
++
++type StoryProps = {
++	controls: {
++		Inventory: {
++			Level: () -> number,
++			Counts: () -> string,
++			LongNames: () -> boolean,
++		},
++	},
++	target: Frame,
++}
++
++local function unlockLevel(position: number): number
++	local lateIndex = position - (#BlockTypes.List - #LATE_UNLOCK_LEVELS)
++	return LATE_UNLOCK_LEVELS[lateIndex] or 1
++end
++
++local function count(position: number, mode: string): number
++	if mode == "Empty" then
++		return 0
++	elseif mode == "Huge" then
++		return HUGE_COUNT
++	end
++	return SAMPLE_COUNTS[position] or 0
++end
++
++local function story(props: StoryProps)
++	local inventory = props.controls.Inventory
++	local firstName = BlockTypes.List[1].Name
++	local pickedName = source(firstName)
++	local equippedName = source(firstName)
++	local isOpen = source(true)
++
++	local function slots(): { InventoryPanel.SlotData }
++		local list = {}
++		for position, blockType in BlockTypes.List do
++			local level = unlockLevel(position)
++			local suffix = if inventory.LongNames() then LONG_NAME_SUFFIX else ""
++			table.insert(
++				list,
++				table.freeze({
++					Name = blockType.Name,
++					DisplayName = blockType.DisplayName .. suffix,
++					Color = blockType.Color,
++					Count = count(position, inventory.Counts()),
++					UnlockLevel = level,
++					IsLocked = inventory.Level() < level,
++				})
++			)
++		end
++		return list
++	end
++
++	local panelSize = InventoryPanel.size(#BlockTypes.List)
++
++	return create("Frame")({
++		Name = "Backdrop",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundColor3 = Color3.fromRGB(90, 110, 90),
++
++		create("Frame")({
++			Name = "Dock",
++			AnchorPoint = Vector2.new(0.5, 0.5),
++			Position = UDim2.fromScale(0.5, 0.5),
++			Size = UDim2.fromOffset(panelSize.X, panelSize.Y),
++			BackgroundTransparency = 1,
++
++			show(isOpen, function(): Instance
++				return InventoryPanel.build({
++					Slots = slots,
++					PickedName = pickedName,
++					EquippedName = equippedName,
++					SlotPicked = function(name: string)
++						pickedName(name)
++					end,
++					Equipped = function(name: string)
++						print(`Equipped {name}`)
++						equippedName(name)
++					end,
++					Closed = function()
++						isOpen(false)
++					end,
++				})
++			end, function(): Instance
++				local button = InventoryPanel.buildOpenButton(function()
++					isOpen(true)
++				end)
++				button.AnchorPoint = Vector2.new(0.5, 0.5)
++				button.Position = UDim2.fromScale(0.5, 0.5)
++				return button
++			end),
++		}),
++	})
++end
++
++return {
++	summary = "The inventory panel (Figma 12:340). Click slots to pick, Equip to equip, X to "
++		.. "close and the INVENTORY button to reopen.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/ServerScriptService/Stories/InventorySlot.story.luau b/src/ServerScriptService/Stories/InventorySlot.story.luau
+new file mode 100644
+index 0000000..71b17e2
+--- /dev/null
++++ b/src/ServerScriptService/Stories/InventorySlot.story.luau
+@@ -0,0 +1,91 @@
++--!strict
++
++local UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++local Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++local BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++local InventorySlot = require("@game/StarterPlayer/StarterPlayerScripts/UI/InventorySlot")
++
++local create = Vide.create
++
++local BLOCK_NAMES = {}
++for _, blockType in BlockTypes.List do
++	table.insert(BLOCK_NAMES, blockType.Name)
++end
++
++local CONTROLS = {
++	Content = UILabs.Ordered(
++		UILabs.ControlGroup({
++			Block = UILabs.Ordered(UILabs.Choose(BLOCK_NAMES), 1),
++			Count = UILabs.Ordered(UILabs.Slider(48, 0, 9999, 1), 2),
++			-- Shown only while locked
++			UnlockLevel = UILabs.Ordered(UILabs.Slider(4, 1, 99, 1), 3),
++		}),
++		1
++	),
++	-- The Figma State variant (Selected, Locked) plus Picked, which the design lacks
++	State = UILabs.Ordered(
++		UILabs.ControlGroup({
++			-- Equipped: the block the player builds with
++			IsSelected = UILabs.Ordered(true, 1),
++			-- Picked in the panel but not equipped yet
++			IsPicked = UILabs.Ordered(false, 2),
++			IsLocked = UILabs.Ordered(false, 3),
++		}),
++		2
++	),
++}
++
++type StoryProps = {
++	controls: {
++		Content: {
++			Block: () -> string,
++			Count: () -> number,
++			UnlockLevel: () -> number,
++		},
++		State: {
++			IsSelected: () -> boolean,
++			IsPicked: () -> boolean,
++			IsLocked: () -> boolean,
++		},
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	local content = props.controls.Content
++	local state = props.controls.State
++
++	local slot = InventorySlot.build({
++		BlockName = content.Block,
++		BlockColor = function()
++			return BlockTypes.ByName[content.Block()].Color
++		end,
++		Count = content.Count,
++		UnlockLevel = content.UnlockLevel,
++		IsSelected = state.IsSelected,
++		IsPicked = state.IsPicked,
++		IsLocked = state.IsLocked,
++		Activated = function()
++			print(`Slot {content.Block()} activated`)
++		end,
++	})
++	slot.AnchorPoint = Vector2.new(0.5, 0.5)
++	slot.Position = UDim2.fromScale(0.5, 0.5)
++
++	return create("Frame")({
++		Name = "Backdrop",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundColor3 = Color3.fromRGB(23, 26, 38),
++
++		slot,
++	})
++end
++
++return {
++	summary = "One inventory slot (Figma Slot, 20:1) in each state, with real block types.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index daf599e..794c39c 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local InventoryScreen = require(script.Parent.UI.InventoryScreen)
+ local Screen = require(script.Parent.UI.Screen)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+@@ -15,6 +16,7 @@ mount(function()
+ 		Name = "GameGui",
+ 
+ 		Screen.uiScale(),
++		InventoryScreen.build(),
+ 	})
+ end, playerGui)
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InventoryAssets.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryAssets.luau
+new file mode 100644
+index 0000000..5d53cf1
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryAssets.luau
+@@ -0,0 +1,100 @@
++--!strict
++--[[
++	Every uploaded image the inventory panel draws, with its sprite rects. How each one
++	is exported is in docs/figma/inventory-assets.md. Until an id is filled in, its
++	getter returns nil (or an empty string) and the panel draws its fallback.
++]]
++
++local PLACEHOLDER_ID = "rbxassetid://0"
++
++-- Block Art sheet: 5 by 2 cells of 160 px, art plus its baked drop shadow, at 2x.
++local BLOCK_SHEET_ID = PLACEHOLDER_ID
++local BLOCK_CELL_SIZE = 160
++local BLOCK_COLUMNS = 5
++local BLOCK_CELLS: { [string]: number? } = {
++	Brick = 0,
++	Dirt = 1,
++	Grass = 2,
++	Window = 3,
++	Wood = 4,
++	Stone = 5,
++	Sand = 6,
++	Ice = 7,
++	Lamp = 8,
++	Gold = 9,
++}
++
++-- Icon sheet: 64 px cells, each glyph in the 60 px square at the cell's center.
++local ICON_SHEET_ID = PLACEHOLDER_ID
++local ICON_CELL_SIZE = 64
++local ICON_GLYPH_SIZE = 60
++local ICON_CELLS: { [string]: number } = {
++	Close = 0,
++	Lock = 1,
++}
++
++local HEX_TILE_ID = PLACEHOLDER_ID
++
++export type Sprite = {
++	Image: string,
++	RectOffset: Vector2,
++	RectSize: Vector2,
++}
++
++export type IconName = "Close" | "Lock"
++
++local Module = {}
++
++-- Display size of one Block Art cell, in UI units: 56 px art with room for its shadow.
++Module.BlockArtSize = Vector2.new(80, 80)
++-- Where the art sits inside its cell, in UI units.
++Module.BlockArtInset = Vector2.new(12, 8)
++
++-- Display size of one hex tile, in UI units. The image is twice this.
++Module.HexTileSize = Vector2.new(112, 192)
++
++--[[
++	The block's art from the Block Art sheet, or nil when the sheet isn't uploaded yet
++	or the block type has no cell.
++]]
++function Module.blockArt(blockName: string): Sprite?
++	local cell = BLOCK_CELLS[blockName]
++	if cell == nil or BLOCK_SHEET_ID == PLACEHOLDER_ID then
++		return nil
++	end
++
++	return {
++		Image = BLOCK_SHEET_ID,
++		RectOffset = Vector2.new(
++			cell % BLOCK_COLUMNS * BLOCK_CELL_SIZE,
++			cell // BLOCK_COLUMNS * BLOCK_CELL_SIZE
++		),
++		RectSize = Vector2.new(BLOCK_CELL_SIZE, BLOCK_CELL_SIZE),
++	}
++end
++
++--[[
++	A white icon to tint with ImageColor3, or nil when the sheet isn't uploaded yet.
++]]
++function Module.icon(name: IconName): Sprite?
++	if ICON_SHEET_ID == PLACEHOLDER_ID then
++		return nil
++	end
++
++	local padding = (ICON_CELL_SIZE - ICON_GLYPH_SIZE) / 2
++	return {
++		Image = ICON_SHEET_ID,
++		RectOffset = Vector2.new(ICON_CELLS[name] * ICON_CELL_SIZE + padding, padding),
++		RectSize = Vector2.new(ICON_GLYPH_SIZE, ICON_GLYPH_SIZE),
++	}
++end
++
++--[[
++	The seamless Hex Pattern tile, or an empty string when it isn't uploaded yet, so
++	nothing tries to load the placeholder.
++]]
++function Module.hexTile(): string
++	return if HEX_TILE_ID == PLACEHOLDER_ID then "" else HEX_TILE_ID
++end
++
++return Module
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InventoryPanel.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryPanel.luau
+new file mode 100644
+index 0000000..37c1b60
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryPanel.luau
+@@ -0,0 +1,477 @@
++--!strict
++--[[
++	The inventory panel, Figma frame "Inventory / Desktop" (12:340, Panel 40:88). It shows
++	what its props give it and reports clicks through callbacks, so a story can render it
++	without the game running. InventoryScreen connects it to the game.
++]]
++
++local Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++local InventoryAssets = require("./InventoryAssets")
++local InventorySlot = require("./InventorySlot")
++local InventoryTheme = require("./InventoryTheme")
++local Shadow = require("./Shadow")
++
++local create = Vide.create
++-- Vide's create types list only common classes; UIStroke and UIPadding aren't among them.
++local createUnlisted: any = Vide.create
++local derive = Vide.derive
++local indexes = Vide.indexes
++local source = Vide.source
++local spring = Vide.spring
++
++local PANEL_WIDTH = 720
++local PADDING_X = 28
++local PADDING_Y = 24
++local SECTION_GAP = 16
++local HEADER_HEIGHT = 44
++local SLOT_GAP = 12
++local FOOTER_HEIGHT = 52
++local CONTENT_WIDTH = PANEL_WIDTH - PADDING_X * 2
++local COLUMNS = math.floor((CONTENT_WIDTH + SLOT_GAP) / (InventorySlot.Size + SLOT_GAP))
++local CLOSE_SIZE = 44
++local CLOSE_ICON_SIZE = 20
++local EQUIP_WIDTH = 200
++local EQUIP_PRESS_DEPTH = 2
++local OPEN_BUTTON_HEIGHT = 52
++local OPEN_BUTTON_PADDING = 20
++
++local Color = InventoryTheme.Color
++local Transparency = InventoryTheme.Transparency
++local Text = InventoryTheme.Text
++
++export type SlotData = {
++	Name: string,
++	DisplayName: string,
++	Color: Color3,
++	Count: number,
++	UnlockLevel: number,
++	IsLocked: boolean,
++}
++
++export type Props = {
++	-- In hotbar order
++	Slots: () -> { SlotData },
++	-- The slot the player has picked in the panel; the footer and Equip act on it
++	PickedName: () -> string,
++	-- The block type the player builds with, drawn as the Selected slot
++	EquippedName: () -> string,
++	SlotPicked: (name: string) -> (),
++	Equipped: (name: string) -> (),
++	Closed: () -> (),
++}
++
++type EquipState = "Ready" | "Equipped" | "Locked"
++
++local EQUIP_LABELS: { [EquipState]: string } = {
++	Ready = "EQUIP",
++	Equipped = "EQUIPPED",
++	Locked = "LOCKED",
++}
++
++local function gridHeight(slotCount: number): number
++	local rows = math.max(1, math.ceil(slotCount / COLUMNS))
++	return rows * InventorySlot.Size + (rows - 1) * SLOT_GAP
++end
++
++local function header(props: Props): Frame
++	local isCloseHovered = source(false)
++	local closeIcon = InventoryAssets.icon("Close")
++
++	return create("Frame")({
++		Name = "Header",
++		LayoutOrder = 1,
++		Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
++		BackgroundTransparency = 1,
++
++		create("TextLabel")({
++			Name = "Title",
++			AnchorPoint = Vector2.new(0, 0.5),
++			Position = UDim2.fromScale(0, 0.5),
++			Size = UDim2.fromOffset(0, Text.HeadingTitle.LineHeight),
++			AutomaticSize = Enum.AutomaticSize.X,
++			BackgroundTransparency = 1,
++			FontFace = Text.HeadingTitle.Font,
++			TextSize = Text.HeadingTitle.Size,
++			TextColor3 = Color.TextPrimary,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			Text = string.upper("Inventory"),
++
++			Shadow.build({
++				Color = Color.Shadow,
++				Transparency = 0.5,
++				Offset = Vector2.new(0, 2),
++				BlurRadius = 0,
++				IsText = true,
++			}),
++		}),
++
++		create("TextButton")({
++			Name = "CloseButton",
++			AnchorPoint = Vector2.new(1, 0.5),
++			Position = UDim2.fromScale(1, 0.5),
++			Size = UDim2.fromOffset(CLOSE_SIZE, CLOSE_SIZE),
++			BackgroundColor3 = Color.White,
++			BackgroundTransparency = function()
++				return if isCloseHovered()
++					then Transparency.CloseButtonHovered
++					else Transparency.CloseButton
++			end,
++			-- The icon sheet isn't uploaded yet: a text glyph stands in.
++			FontFace = Text.CaptionCount.Font,
++			TextSize = Text.ButtonLabel.Size,
++			TextColor3 = Color.TextPrimary,
++			Text = if closeIcon then "" else "X",
++
++			Activated = props.Closed,
++			MouseEnter = function()
++				isCloseHovered(true)
++			end,
++			MouseLeave = function()
++				isCloseHovered(false)
++			end,
++			SelectionGained = function()
++				isCloseHovered(true)
++			end,
++			SelectionLost = function()
++				isCloseHovered(false)
++			end,
++
++			create("UICorner")({
++				CornerRadius = UDim.new(1, 0),
++			}),
++			closeIcon and create("ImageLabel")({
++				Name = "Icon",
++				AnchorPoint = Vector2.new(0.5, 0.5),
++				Position = UDim2.fromScale(0.5, 0.5),
++				Size = UDim2.fromOffset(CLOSE_ICON_SIZE, CLOSE_ICON_SIZE),
++				BackgroundTransparency = 1,
++				ScaleType = Enum.ScaleType.Fit,
++				Image = closeIcon.Image,
++				ImageRectOffset = closeIcon.RectOffset,
++				ImageRectSize = closeIcon.RectSize,
++				ImageColor3 = Color.TextPrimary,
++			}),
++		}),
++	})
++end
++
++local function slotGrid(props: Props): Frame
++	return create("Frame")({
++		Name = "SlotGrid",
++		LayoutOrder = 2,
++		Size = function()
++			return UDim2.new(1, 0, 0, gridHeight(#props.Slots()))
++		end,
++		BackgroundTransparency = 1,
++
++		create("UIGridLayout")({
++			CellSize = UDim2.fromOffset(InventorySlot.Size, InventorySlot.Size),
++			CellPadding = UDim2.fromOffset(SLOT_GAP, SLOT_GAP),
++		}),
++
++		indexes(props.Slots, function(slot, index)
++			return InventorySlot.build({
++				BlockName = function()
++					return slot().Name
++				end,
++				BlockColor = function()
++					return slot().Color
++				end,
++				Count = function()
++					return slot().Count
++				end,
++				UnlockLevel = function()
++					return slot().UnlockLevel
++				end,
++				IsSelected = function()
++					return slot().Name == props.EquippedName()
++				end,
++				IsPicked = function()
++					return slot().Name == props.PickedName()
++				end,
++				IsLocked = function()
++					return slot().IsLocked
++				end,
++				LayoutOrder = index,
++				Activated = function()
++					props.SlotPicked(slot().Name)
++				end,
++			})
++		end),
++	})
++end
++
++local function equipButton(state: () -> EquipState, activated: () -> ()): TextButton
++	local isPressed = source(false)
++
++	local function isReady(): boolean
++		return state() == "Ready"
++	end
++
++	-- Direct feedback to the player's press, so it may bounce a little.
++	local labelPosition = spring(function()
++		local depth = if isPressed() and isReady() then EQUIP_PRESS_DEPTH else 0
++		return UDim2.new(0.5, 0, 0.5, depth)
++	end, 0.15, 0.6)
++
++	return create("TextButton")({
++		Name = "EquipButton",
++		AnchorPoint = Vector2.new(1, 0.5),
++		Position = UDim2.fromScale(1, 0.5),
++		Size = UDim2.new(0, EQUIP_WIDTH, 1, 0),
++		BackgroundColor3 = Color.White,
++		Text = "",
++
++		Activated = activated,
++		MouseButton1Down = function()
++			isPressed(true)
++		end,
++		MouseButton1Up = function()
++			isPressed(false)
++		end,
++		MouseLeave = function()
++			isPressed(false)
++		end,
++
++		create("UICorner")({
++			CornerRadius = UDim.new(0, InventoryTheme.Radius.Button),
++		}),
++		-- Not in the design: a disabled button takes the slot gradient.
++		create("UIGradient")({
++			Color = function()
++				return if isReady()
++					then ColorSequence.new(Color.ButtonTop, Color.ButtonBottom)
++					else ColorSequence.new(Color.SlotTop, Color.SlotBottom)
++			end,
++			Rotation = 90,
++		}),
++		Shadow.build({
++			Color = Color.Shadow,
++			Transparency = 0.75,
++			Offset = Vector2.new(0, -3),
++			BlurRadius = 0,
++			IsInset = true,
++		}),
++
++		create("TextLabel")({
++			Name = "Label",
++			AnchorPoint = Vector2.new(0.5, 0.5),
++			Position = labelPosition,
++			Size = UDim2.new(1, 0, 0, Text.ButtonLabel.LineHeight),
++			BackgroundTransparency = 1,
++			FontFace = Text.ButtonLabel.Font,
++			TextSize = Text.ButtonLabel.Size,
++			TextColor3 = function()
++				return if isReady() then Color.ButtonLabel else Color.TextSecondary
++			end,
++			Text = function()
++				return EQUIP_LABELS[state()]
++			end,
++		}),
++	})
++end
++
++local function footer(props: Props, pickedSlot: () -> SlotData?): Frame
++	local derivedState = derive(function(): EquipState
++		local slot = pickedSlot()
++		if slot and slot.IsLocked then
++			return "Locked"
++		elseif slot and slot.Name ~= props.EquippedName() then
++			return "Ready"
++		end
++		return "Equipped"
++	end)
++
++	-- derive widens the string literals to string, so narrow them back.
++	local function equipState(): EquipState
++		return derivedState() :: EquipState
++	end
++
++	return create("Frame")({
++		Name = "Footer",
++		LayoutOrder = 3,
++		Size = UDim2.new(1, 0, 0, FOOTER_HEIGHT),
++		BackgroundTransparency = 1,
++
++		create("TextLabel")({
++			Name = "SelectedName",
++			AnchorPoint = Vector2.new(0, 0.5),
++			Position = UDim2.fromScale(0, 0.5),
++			Size = UDim2.new(1, -(EQUIP_WIDTH + SECTION_GAP), 0, Text.BodyMedium.LineHeight),
++			BackgroundTransparency = 1,
++			FontFace = Text.BodyMedium.Font,
++			TextSize = Text.BodyMedium.Size,
++			TextColor3 = Color.TextSecondary,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++			Text = function()
++				local slot = pickedSlot()
++				if not slot then
++					return ""
++				elseif slot.IsLocked then
++					return `{slot.DisplayName}: unlocks at Lv {slot.UnlockLevel}`
++				end
++				return slot.DisplayName
++			end,
++		}),
++
++		equipButton(equipState, function()
++			local slot = pickedSlot()
++			if slot and equipState() == "Ready" then
++				props.Equipped(slot.Name)
++			end
++		end),
++	})
++end
++
++local Module = {}
++
++--[[
++	The panel's size in UI units for a number of slots: six to a row, as many rows as
++	they need.
++]]
++function Module.size(slotCount: number): Vector2
++	local height = PADDING_Y * 2
++		+ HEADER_HEIGHT
++		+ SECTION_GAP
++		+ gridHeight(slotCount)
++		+ SECTION_GAP
++		+ FOOTER_HEIGHT
++	return Vector2.new(PANEL_WIDTH, height)
++end
++
++function Module.build(props: Props): Frame
++	local pickedSlot = derive(function(): SlotData?
++		local pickedName = props.PickedName()
++		for _, slot in props.Slots() do
++			if slot.Name == pickedName then
++				return slot
++			end
++		end
++		return nil
++	end)
++
++	local strokeWidth = InventoryTheme.Stroke.Panel
++
++	return create("Frame")({
++		Name = "InventoryPanel",
++		Size = function()
++			local size = Module.size(#props.Slots())
++			return UDim2.fromOffset(size.X, size.Y)
++		end,
++		BackgroundColor3 = Color.SurfacePanel,
++		BackgroundTransparency = Transparency.SurfacePanel,
++		-- Clicks on the panel's background must not reach the world and place a block.
++		Active = true,
++
++		create("UICorner")({
++			CornerRadius = UDim.new(0, InventoryTheme.Radius.Panel),
++		}),
++		createUnlisted("UIStroke")({
++			BorderStrokePosition = Enum.BorderStrokePosition.Inner,
++			Thickness = strokeWidth,
++			Color = Color.Border,
++		}),
++		Shadow.build({
++			Color = Color.Shadow,
++			Transparency = 0.55,
++			Offset = Vector2.new(0, 12),
++			BlurRadius = 32,
++			ShowBehindParent = false,
++		}),
++
++		-- Inset by the stroke so the pattern never draws over the border.
++		create("ImageLabel")({
++			Name = "HexPattern",
++			Position = UDim2.fromOffset(strokeWidth, strokeWidth),
++			Size = UDim2.new(1, -strokeWidth * 2, 1, -strokeWidth * 2),
++			ZIndex = 1,
++			BackgroundTransparency = 1,
++			Image = InventoryAssets.hexTile(),
++			ImageColor3 = Color.White,
++			ImageTransparency = Transparency.HexPattern,
++			ScaleType = Enum.ScaleType.Tile,
++			TileSize = UDim2.fromOffset(
++				InventoryAssets.HexTileSize.X,
++				InventoryAssets.HexTileSize.Y
++			),
++
++			create("UICorner")({
++				CornerRadius = UDim.new(0, InventoryTheme.Radius.Panel - strokeWidth),
++			}),
++		}),
++
++		create("Frame")({
++			Name = "Content",
++			Size = UDim2.fromScale(1, 1),
++			ZIndex = 2,
++			BackgroundTransparency = 1,
++
++			createUnlisted("UIPadding")({
++				PaddingLeft = UDim.new(0, PADDING_X),
++				PaddingRight = UDim.new(0, PADDING_X),
++				PaddingTop = UDim.new(0, PADDING_Y),
++				PaddingBottom = UDim.new(0, PADDING_Y),
++			}),
++			create("UIListLayout")({
++				Padding = UDim.new(0, SECTION_GAP),
++			}),
++
++			header(props),
++			slotGrid(props),
++			footer(props, pickedSlot),
++		}),
++	})
++end
++
++--[[
++	The button that opens the panel again while it's closed. Not in the design: it is
++	built from the panel's own tokens, and stands in until the HUD has an inventory button.
++]]
++function Module.buildOpenButton(activated: () -> ()): TextButton
++	local isHovered = source(false)
++
++	return create("TextButton")({
++		Name = "OpenInventoryButton",
++		Size = UDim2.fromOffset(0, OPEN_BUTTON_HEIGHT),
++		AutomaticSize = Enum.AutomaticSize.X,
++		BackgroundColor3 = Color.SurfacePanel,
++		BackgroundTransparency = Transparency.SurfacePanel,
++		FontFace = Text.ButtonLabel.Font,
++		TextSize = Text.ButtonLabel.Size,
++		TextColor3 = Color.TextPrimary,
++		Text = string.upper("Inventory"),
++
++		Activated = activated,
++		MouseEnter = function()
++			isHovered(true)
++		end,
++		MouseLeave = function()
++			isHovered(false)
++		end,
++		SelectionGained = function()
++			isHovered(true)
++		end,
++		SelectionLost = function()
++			isHovered(false)
++		end,
++
++		create("UICorner")({
++			CornerRadius = UDim.new(0, InventoryTheme.Radius.Button),
++		}),
++		createUnlisted("UIStroke")({
++			BorderStrokePosition = Enum.BorderStrokePosition.Inner,
++			Thickness = InventoryTheme.Stroke.Panel,
++			Color = function()
++				return if isHovered() then Color.Accent else Color.Border
++			end,
++		}),
++		createUnlisted("UIPadding")({
++			PaddingLeft = UDim.new(0, OPEN_BUTTON_PADDING),
++			PaddingRight = UDim.new(0, OPEN_BUTTON_PADDING),
++		}),
++	})
++end
++
++return Module
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InventoryScreen.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryScreen.luau
+new file mode 100644
+index 0000000..2c4e5b8
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryScreen.luau
+@@ -0,0 +1,150 @@
++--!strict
++--[[
++	Connects the inventory panel to the game: block types from BlockTypes, counts and
++	locks from BlockInventory, and the equipped block type from BlockPlacer. Owns whether
++	the panel is open, centers it below the topbar, and shrinks it on screens too small
++	for it.
++]]
++
++local UserInputService = game:GetService("UserInputService")
++
++local Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++local BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++local BlockInventory = require("../BlockInventory")
++local BlockPlacer = require("../BlockPlacer")
++local InventoryPanel = require("./InventoryPanel")
++local Screen = require("./Screen")
++
++local cleanup = Vide.cleanup
++local create = Vide.create
++-- Vide's create types list only common classes, and UIScale isn't one of them.
++local createUnlisted: any = Vide.create
++local show = Vide.show
++local source = Vide.source
++
++local TOGGLE_KEYS = { Enum.KeyCode.B, Enum.KeyCode.ButtonY }
++local EDGE_PADDING = 16
++-- Below half size the panel's text gets too small to read.
++local MINIMUM_FIT_SCALE = 0.5
++
++local function readSlots(): { InventoryPanel.SlotData }
++	local slots = {}
++	for _, blockType in BlockTypes.List do
++		table.insert(
++			slots,
++			table.freeze({
++				Name = blockType.Name,
++				DisplayName = blockType.DisplayName,
++				Color = blockType.Color,
++				Count = BlockInventory.getCount(blockType.Name),
++				UnlockLevel = BlockInventory.getUnlockLevel(blockType.Name),
++				IsLocked = not BlockInventory.isUnlocked(blockType.Name),
++			})
++		)
++	end
++	return slots
++end
++
++local function fitScale(designSize: Vector2): number
++	local usable = Screen.usableSize()
++	local fit = math.min(
++		(usable.X - EDGE_PADDING * 2) / designSize.X,
++		(usable.Y - EDGE_PADDING * 2) / designSize.Y
++	)
++	return math.clamp(fit, MINIMUM_FIT_SCALE, 1)
++end
++
++local Module = {}
++
++--[[
++	The panel's dock, centered in the ScreenGui, and the button that reopens the panel,
++	in the top right while it's closed. Opens with the panel showing. Call it inside a
++	Vide scope and put the result directly in the ScreenGui's children.
++]]
++function Module.build(): { Instance }
++	local isOpen = source(true)
++	local slots = source(readSlots())
++	local equippedName = source(BlockPlacer.getBlockType())
++
++	cleanup(BlockInventory.Changed:Connect(function()
++		slots(readSlots())
++	end))
++	cleanup(BlockPlacer.BlockTypeChanged:Connect(function(name: string)
++		equippedName(name)
++	end))
++	local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
++		if gameProcessedEvent then
++			return
++		end
++		if table.find(TOGGLE_KEYS, input.KeyCode) then
++			isOpen(not isOpen())
++		end
++	end
++	cleanup(UserInputService.InputBegan:Connect(onInputBegan))
++
++	local function designSize(): Vector2
++		return InventoryPanel.size(#slots())
++	end
++
++	local dock = create("Frame")({
++		Name = "InventoryDock",
++		AnchorPoint = Vector2.new(0.5, 0.5),
++		Position = UDim2.fromScale(0.5, 0.5),
++		Size = function()
++			local size = designSize()
++			return UDim2.fromOffset(size.X, size.Y)
++		end,
++		BackgroundTransparency = 1,
++
++		createUnlisted("UIScale")({
++			Scale = function()
++				return fitScale(designSize())
++			end,
++		}),
++
++		show(isOpen, function()
++			-- Each opening starts on the equipped block.
++			local pickedName = source(equippedName())
++			cleanup(BlockPlacer.BlockTypeChanged:Connect(function(name: string)
++				pickedName(name)
++			end))
++
++			return InventoryPanel.build({
++				Slots = slots,
++				PickedName = pickedName,
++				EquippedName = equippedName,
++				SlotPicked = function(name: string)
++					pickedName(name)
++				end,
++				Equipped = function(name: string)
++					BlockPlacer.setBlockType(name)
++				end,
++				Closed = function()
++					isOpen(false)
++				end,
++			})
++		end),
++	})
++
++	local openButtonDock = create("Frame")({
++		Name = "OpenInventoryDock",
++		AnchorPoint = Vector2.new(1, 0),
++		Position = UDim2.new(1, -EDGE_PADDING, 0, EDGE_PADDING),
++		AutomaticSize = Enum.AutomaticSize.XY,
++		BackgroundTransparency = 1,
++
++		show(function()
++			return not isOpen()
++		end, function()
++			return InventoryPanel.buildOpenButton(function()
++				isOpen(true)
++			end)
++		end),
++	})
++
++	return { dock, openButtonDock }
++end
++
++return Module
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InventorySlot.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InventorySlot.luau
+new file mode 100644
+index 0000000..e3ddb1a
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InventorySlot.luau
+@@ -0,0 +1,260 @@
++--!strict
++--[[
++	One inventory slot, the Figma Slot component set (20:1). Its State variant becomes two
++	props the game sets: IsSelected (the Selected variant, the block the player builds
++	with) and IsLocked (the Locked variant). IsPicked marks the slot the player has
++	picked in the panel but not equipped yet, which the design has no variant for. Hover
++	is the slot's own state.
++]]
++
++local Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++local InventoryAssets = require("./InventoryAssets")
++local InventoryTheme = require("./InventoryTheme")
++local Shadow = require("./Shadow")
++
++local create = Vide.create
++-- Vide's create types list only common classes, and UIStroke isn't one of them.
++local createUnlisted: any = Vide.create
++local effect = Vide.effect
++local read = Vide.read
++local source = Vide.source
++local spring = Vide.spring
++
++local SLOT_SIZE = 96
++local ART_SIZE = 56
++-- Block Art's top-left inside the slot
++local ART_POSITION = Vector2.new(20, 16)
++local SWATCH_RADIUS = 8
++local COUNT_RIGHT = 8
++local COUNT_BOTTOM = 6
++local UNLOCK_BOTTOM = 8
++local LOCK_ICON_SIZE = 24
++-- The lock's center sits this far above the slot's center
++local LOCK_ICON_RISE = 10
++local GLOW_PERIOD = 0.25
++
++local Color = InventoryTheme.Color
++local Transparency = InventoryTheme.Transparency
++local Text = InventoryTheme.Text
++
++export type Props = {
++	BlockName: string | () -> string,
++	-- Drawn as a swatch while the Block Art sheet isn't uploaded
++	BlockColor: Color3 | () -> Color3,
++	Count: number | () -> number,
++	UnlockLevel: number | () -> number,
++	IsSelected: boolean | () -> boolean,
++	IsPicked: (boolean | () -> boolean)?,
++	IsLocked: boolean | () -> boolean,
++	LayoutOrder: number?,
++	Activated: () -> (),
++}
++
++local Module = {}
++
++Module.Size = SLOT_SIZE
++
++function Module.build(props: Props): TextButton
++	local isHovered = source(false)
++
++	local function isSelected(): boolean
++		return read(props.IsSelected)
++	end
++
++	local function isPicked(): boolean
++		return read(props.IsPicked) == true
++	end
++
++	local function isLocked(): boolean
++		return read(props.IsLocked)
++	end
++
++	local function sprite(): InventoryAssets.Sprite?
++		return InventoryAssets.blockArt(read(props.BlockName))
++	end
++
++	local function contentTransparency(): number
++		return if isLocked() then Transparency.LockedContent else 0
++	end
++
++	local glowTransparency = spring(function()
++		return if isSelected() then 0.45 else 1
++	end, GLOW_PERIOD)
++
++	-- Selected: Accent at 55% alpha, blur 16, spread 2
++	local glow = Shadow.build({
++		Color = Color.Accent,
++		Transparency = 1,
++		Offset = Vector2.zero,
++		BlurRadius = 16,
++		Spread = 2,
++		ShowBehindParent = false,
++	})
++	if glow then
++		local glowShadow: any = glow
++		effect(function()
++			glowShadow.Transparency = glowTransparency()
++		end)
++	end
++
++	local artOrigin = ART_POSITION - InventoryAssets.BlockArtInset
++	local lockIcon = InventoryAssets.icon("Lock")
++
++	return create("TextButton")({
++		Name = "Slot",
++		Size = UDim2.fromOffset(SLOT_SIZE, SLOT_SIZE),
++		LayoutOrder = props.LayoutOrder,
++		BackgroundColor3 = Color.White,
++		Text = "",
++
++		Activated = props.Activated,
++		MouseEnter = function()
++			isHovered(true)
++		end,
++		MouseLeave = function()
++			isHovered(false)
++		end,
++		SelectionGained = function()
++			isHovered(true)
++		end,
++		SelectionLost = function()
++			isHovered(false)
++		end,
++
++		create("UICorner")({
++			CornerRadius = UDim.new(0, InventoryTheme.Radius.Slot),
++		}),
++		create("UIGradient")({
++			Color = ColorSequence.new(Color.SlotTop, Color.SlotBottom),
++			Rotation = 90,
++		}),
++		createUnlisted("UIStroke")({
++			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++			BorderStrokePosition = function()
++				return if isSelected()
++					then Enum.BorderStrokePosition.Outer
++					else Enum.BorderStrokePosition.Inner
++			end,
++			Thickness = function()
++				if isSelected() then
++					return InventoryTheme.Stroke.SlotSelected
++				elseif isPicked() then
++					return InventoryTheme.Stroke.SlotPicked
++				end
++				return InventoryTheme.Stroke.Slot
++			end,
++			Color = function()
++				if isSelected() or isPicked() then
++					return Color.Accent
++				elseif isHovered() then
++					return Color.TextSecondary
++				end
++				return Color.Border
++			end,
++			Transparency = function()
++				local isPlainHover = isHovered() and not isSelected() and not isPicked()
++				return if isPlainHover then Transparency.SlotHoverBorder else 0
++			end,
++		}),
++		glow,
++
++		create("Frame")({
++			Name = "Swatch",
++			Position = UDim2.fromOffset(ART_POSITION.X, ART_POSITION.Y),
++			Size = UDim2.fromOffset(ART_SIZE, ART_SIZE),
++			BackgroundColor3 = props.BlockColor,
++			BackgroundTransparency = contentTransparency,
++			Visible = function()
++				return sprite() == nil
++			end,
++
++			create("UICorner")({
++				CornerRadius = UDim.new(0, SWATCH_RADIUS),
++			}),
++		}),
++
++		create("ImageLabel")({
++			Name = "BlockArt",
++			Position = UDim2.fromOffset(artOrigin.X, artOrigin.Y),
++			Size = UDim2.fromOffset(InventoryAssets.BlockArtSize.X, InventoryAssets.BlockArtSize.Y),
++			BackgroundTransparency = 1,
++			ScaleType = Enum.ScaleType.Fit,
++			Image = function()
++				local art = sprite()
++				return if art then art.Image else ""
++			end,
++			ImageRectOffset = function()
++				local art = sprite()
++				return if art then art.RectOffset else Vector2.zero
++			end,
++			ImageRectSize = function()
++				local art = sprite()
++				return if art then art.RectSize else Vector2.zero
++			end,
++			ImageTransparency = contentTransparency,
++			Visible = function()
++				return sprite() ~= nil
++			end,
++		}),
++
++		create("TextLabel")({
++			Name = "Count",
++			AnchorPoint = Vector2.new(1, 1),
++			Position = UDim2.new(1, -COUNT_RIGHT, 1, -COUNT_BOTTOM),
++			Size = UDim2.fromOffset(0, Text.CaptionCount.LineHeight),
++			AutomaticSize = Enum.AutomaticSize.X,
++			BackgroundTransparency = 1,
++			FontFace = Text.CaptionCount.Font,
++			TextSize = Text.CaptionCount.Size,
++			TextColor3 = Color.TextPrimary,
++			TextXAlignment = Enum.TextXAlignment.Right,
++			Text = function()
++				return `x{read(props.Count)}`
++			end,
++			Visible = function()
++				return not isLocked()
++			end,
++
++			Shadow.build({
++				Color = Color.Shadow,
++				Transparency = 0.4,
++				Offset = Vector2.new(0, 1),
++				BlurRadius = 2,
++				IsText = true,
++			}),
++		}),
++
++		create("ImageLabel")({
++			Name = "LockIcon",
++			AnchorPoint = Vector2.new(0.5, 0.5),
++			Position = UDim2.new(0.5, 0, 0.5, -LOCK_ICON_RISE),
++			Size = UDim2.fromOffset(LOCK_ICON_SIZE, LOCK_ICON_SIZE),
++			BackgroundTransparency = 1,
++			ScaleType = Enum.ScaleType.Fit,
++			Image = if lockIcon then lockIcon.Image else "",
++			ImageRectOffset = if lockIcon then lockIcon.RectOffset else Vector2.zero,
++			ImageRectSize = if lockIcon then lockIcon.RectSize else Vector2.zero,
++			ImageColor3 = Color.TextPrimary,
++			Visible = isLocked,
++		}),
++
++		create("TextLabel")({
++			Name = "UnlockLabel",
++			AnchorPoint = Vector2.new(0.5, 1),
++			Position = UDim2.new(0.5, 0, 1, -UNLOCK_BOTTOM),
++			Size = UDim2.fromOffset(0, Text.UnlockLabel.LineHeight),
++			AutomaticSize = Enum.AutomaticSize.X,
++			BackgroundTransparency = 1,
++			FontFace = Text.UnlockLabel.Font,
++			TextSize = Text.UnlockLabel.Size,
++			TextColor3 = Color.TextPrimary,
++			Text = function()
++				return `Lv {read(props.UnlockLevel)}`
++			end,
++			Visible = isLocked,
++		}),
++	})
++end
++
++return Module
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InventoryTheme.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryTheme.luau
+new file mode 100644
+index 0000000..a32deac
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryTheme.luau
+@@ -0,0 +1,102 @@
++--!strict
++--[[
++	Design tokens for the inventory panel, taken from the Figma file "Block Builder - UI"
++	(design/figma/inventory-panel.json, screen 12:340 and the Slot set 20:1). Named as the
++	design names them. Each color comes with a transparency, which is 1 minus the Figma
++	alpha. Sizes are offsets at the 1080p reference size.
++]]
++
++local BUILDER_SANS = "rbxasset://fonts/families/BuilderSans.json"
++
++export type TextStyle = {
++	Font: Font,
++	Size: number,
++	LineHeight: number,
++}
++
++local Module = {}
++
++Module.Color = table.freeze({
++	-- Surface/Panel
++	SurfacePanel = Color3.fromRGB(23, 26, 38),
++	-- Panel border, slot border, and the disabled button's lower stop
++	Border = Color3.fromRGB(58, 64, 96),
++	-- Text/Primary
++	TextPrimary = Color3.fromRGB(245, 246, 250),
++	-- Body text in the footer
++	TextSecondary = Color3.fromRGB(199, 204, 224),
++	SlotTop = Color3.fromRGB(43, 49, 80),
++	SlotBottom = Color3.fromRGB(32, 37, 59),
++	-- Selected slot ring and glow
++	Accent = Color3.fromRGB(255, 200, 60),
++	ButtonTop = Color3.fromRGB(255, 210, 90),
++	ButtonBottom = Color3.fromRGB(255, 159, 28),
++	ButtonLabel = Color3.fromRGB(59, 35, 0),
++	Shadow = Color3.new(0, 0, 0),
++	White = Color3.new(1, 1, 1),
++})
++
++Module.Transparency = table.freeze({
++	-- Figma alpha is 0.92 with a 24 px background blur. Roblox can't blur what lies
++	-- behind one frame, so the fill is made more opaque to stand in for it.
++	SurfacePanel = 0.04,
++	-- White at 8% alpha
++	CloseButton = 0.92,
++	-- Not in the design: twice the resting alpha
++	CloseButtonHovered = 0.84,
++	-- Hex Pattern group opacity 6%
++	HexPattern = 0.94,
++	-- Content of a locked slot is at 40% opacity
++	LockedContent = 0.6,
++	-- Not in the design: the slot border on hover, in TextSecondary
++	SlotHoverBorder = 0.5,
++})
++
++Module.Text = table.freeze({
++	-- Heading/Title. The design adds +2 letter spacing, which Roblox can't draw.
++	HeadingTitle = table.freeze({
++		Font = Font.new(BUILDER_SANS, Enum.FontWeight.Bold),
++		Size = 28,
++		LineHeight = 34,
++	}),
++	-- Body/Medium
++	BodyMedium = table.freeze({
++		Font = Font.new(BUILDER_SANS, Enum.FontWeight.Medium),
++		Size = 18,
++		LineHeight = 24,
++	}),
++	-- Caption/Count
++	CaptionCount = table.freeze({
++		Font = Font.new(BUILDER_SANS, Enum.FontWeight.Bold),
++		Size = 16,
++		LineHeight = 20,
++	}),
++	-- Unlock Label on locked slots (no named style in the file)
++	UnlockLabel = table.freeze({
++		Font = Font.new(BUILDER_SANS, Enum.FontWeight.Bold),
++		Size = 14,
++		LineHeight = 18,
++	}),
++	-- Equip Button label (no named style in the file)
++	ButtonLabel = table.freeze({
++		Font = Font.new(BUILDER_SANS, Enum.FontWeight.ExtraBold),
++		Size = 20,
++		LineHeight = 24,
++	}),
++})
++
++Module.Radius = table.freeze({
++	Panel = 16,
++	Slot = 12,
++	Button = 12,
++})
++
++Module.Stroke = table.freeze({
++	Panel = 2,
++	Slot = 1,
++	-- Not in the design: the slot picked in the panel while another is equipped
++	SlotPicked = 2,
++	SlotSelected = 3,
++})
++
++return Module
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+index a3a371b..b1b96ec 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+@@ -4,40 +4,88 @@
+ 	never shrinks it below 1, so phones get the authored sizes.
+ ]]
+ 
++local GuiService = game:GetService("GuiService")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
+ local Workspace = game:GetService("Workspace")
+ 
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+-local cleanup = Vide.cleanup
++local batch = Vide.batch
+ local create = Vide.create
+ local source = Vide.source
+ 
+ local REFERENCE_HEIGHT = 1080
+ local MAX_SCALE = 2
++-- ViewportSize can read (1, 1) before the first frame, which would pass for a tiny phone.
++local FALLBACK_VIEWPORT = Vector2.new(1920, 1080)
+ 
+ local Screen = {}
+ 
+ Screen.ReferenceHeight = REFERENCE_HEIGHT
+ Screen.MaxScale = MAX_SCALE
+ 
++local viewportSize = source(FALLBACK_VIEWPORT)
++local topInset = source(0)
++local cameraConnection: RBXScriptConnection? = nil
++
++local function refresh()
++	local camera = Workspace.CurrentCamera
++	local inset = GuiService:GetGuiInset()
++	batch(function()
++		if camera and camera.ViewportSize.X > 1 and camera.ViewportSize.Y > 1 then
++			viewportSize(camera.ViewportSize)
++		end
++		topInset(inset.Y)
++	end)
++end
++
++local function watchCamera()
++	if cameraConnection then
++		cameraConnection:Disconnect()
++	end
++	local camera = Workspace.CurrentCamera
++	if camera then
++		cameraConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(refresh)
++	end
++	refresh()
++end
++
++--[[
++	How much the whole UI grows on this screen. Reads sources, so a binding that calls it
++	follows the window.
++]]
++function Screen.scale(): number
++	local size = viewportSize()
++	return math.clamp(math.min(size.X, size.Y) / REFERENCE_HEIGHT, 1, MAX_SCALE)
++end
++
++--[[
++	The part of the screen below the Roblox topbar, in UI units (before the scale).
++]]
++function Screen.usableSize(): Vector2
++	local size = viewportSize()
++	return Vector2.new(size.X, size.Y - topInset()) / Screen.scale()
++end
++
+ --[[
+ 	A UIScale bound to the viewport's short side. Call it inside a Vide scope and put the result
+ 	directly under the ScreenGui.
+ ]]
+ function Screen.uiScale(): UIScale
+-	local camera = Workspace.CurrentCamera
+-	local viewportSize = source(camera.ViewportSize)
+-	cleanup(camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+-		viewportSize(camera.ViewportSize)
+-	end))
+-
+ 	return create("UIScale")({
+-		Scale = function()
+-			local size = viewportSize()
+-			return math.clamp(math.min(size.X, size.Y) / REFERENCE_HEIGHT, 1, MAX_SCALE)
+-		end,
++		Scale = Screen.scale,
+ 	})
+ end
+ 
++-- UI Labs loads a fresh copy of this module on every reload, and an engine connection would
++-- keep each copy alive until Studio closes, so edit mode reads the screen once.
++if RunService:IsRunning() then
++	watchCamera()
++	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
++	GuiService:GetPropertyChangedSignal("TopbarInset"):Connect(refresh)
++else
++	refresh()
++end
++
+ return Screen
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Shadow.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Shadow.luau
+new file mode 100644
+index 0000000..820eef7
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Shadow.luau
+@@ -0,0 +1,62 @@
++--!strict
++--[[
++	Builds the UIShadow for a Figma drop shadow or inner shadow. Every shadow in the UI
++	goes through here, so a change to UIShadow's properties is a one-place fix.
++]]
++
++export type Spec = {
++	Color: Color3,
++	-- 1 minus the Figma alpha
++	Transparency: number,
++	Offset: Vector2,
++	BlurRadius: number,
++	Spread: number?,
++	-- Shadow the text glyphs instead of the box
++	IsText: boolean?,
++	-- Figma's inner shadow
++	IsInset: boolean?,
++	-- false for a see-through layer, so the shadow doesn't tint what shows through it
++	ShowBehindParent: boolean?,
++}
++
++local Module = {}
++
++local hasWarned = false
++
++--[[
++	A new UIShadow for the spec, or nil if the engine rejects it. A rejected shadow
++	warns once and leaves the UI without it instead of breaking the whole screen.
++]]
++function Module.build(spec: Spec): Instance?
++	-- Expected failures: UIShadow missing on this engine version, or a property name
++	-- or type here that differs from the shipped API.
++	local success, result = pcall(function()
++		local shadow: any = Instance.new("UIShadow" :: any)
++		shadow.Color = spec.Color
++		shadow.Transparency = spec.Transparency
++		shadow.Offset = spec.Offset
++		shadow.BlurRadius = spec.BlurRadius
++		shadow.Spread = spec.Spread or 0
++		if spec.IsText then
++			shadow.Mode = "Text"
++		end
++		if spec.IsInset then
++			shadow.Inset = true
++		end
++		if spec.ShowBehindParent ~= nil then
++			shadow.ShowBehindParent = spec.ShowBehindParent
++		end
++		return shadow
++	end)
++
++	if success then
++		return result
++	end
++	if not hasWarned then
++		hasWarned = true
++		warn(`UIShadow could not be built, shadows are off: {result}`)
++	end
++	return nil
++end
++
++return Module

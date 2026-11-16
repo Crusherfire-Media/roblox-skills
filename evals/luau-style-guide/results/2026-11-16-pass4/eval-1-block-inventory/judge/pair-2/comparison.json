@@ -1,0 +1,116 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts implement the rules and handle timing well. A passes every static check, uses an optional table type, and names its yielding function with Async. B fails luau-lsp in its own code (missing casts at lines 49 and 65), uses a table type that isn't optional, and gives no sign that `loadCounts` yields. B's extra runtime validation doesn't make up for code that won't pass type checking.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Implements the rules",
+          "score": 5,
+          "note": "It loads `player_{UserId}` from the BlockInventory store and starts new players and failed loads at 20 per type. `TakeBlock` stops at 0, `ReturnBlock` stops at `MAX_HELD`, `GiveBlocks` ignores the cap, `GetCount` reads a count, and `onPlayerRemoving` drops the player's counts."
+        },
+        {
+          "criterion": "Handles timing",
+          "score": 5,
+          "note": "Every function returns \"NotLoaded\" or nil for a player with no counts. `loadCountsAsync` discards a load that finishes after the player left (`player.Parent ~= Players`). Players already in the server are loaded through `task.spawn`, and requiring the module never yields."
+        },
+        {
+          "criterion": "Reports expected failures",
+          "score": 5,
+          "note": "Running out and not being loaded come back as typed reasons (\"OutOfBlocks\", \"NotLoaded\", \"AtCapacity\"). `assert` is used only for a bad amount, and the `GetAsync` call is wrapped in pcall with the starting counts as fallback."
+        },
+        {
+          "criterion": "Types catch mistakes",
+          "score": 5,
+          "note": "The table is `{ [Player]: Counts? }`, parameters take `BlockType`, each function has its own typed failure union, and the loop variable is cast as needed."
+        },
+        {
+          "criterion": "Call sites read clearly",
+          "score": 5,
+          "note": "Going past the cap is a separate function (`GiveBlocks`), names are spelled out, and the function that yields is named `loadCountsAsync`."
+        },
+        {
+          "criterion": "Scope and merge-ready",
+          "score": 5,
+          "note": "It's a single module that reuses BlockTypes and passes all three tools. Only the `const` style convention is missed."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Implements the rules",
+          "score": 5,
+          "note": "It loads from the BlockInventory store (named through `DATA_STORE_NAME`) under `getDataStoreKey`, starts at 20, caps `returnBlock` at `MAX_COUNT`, lets `grantBlocks` go past it, and drops counts on leave."
+        },
+        {
+          "criterion": "Handles timing",
+          "score": 5,
+          "note": "The `loadingPlayers` table makes sure a load that finishes after the player left is thrown away. Players already in the server are loaded, and requiring the module doesn't yield."
+        },
+        {
+          "criterion": "Reports expected failures",
+          "score": 5,
+          "note": "A single `FailureReason` union covers NotLoaded, OutOfBlocks, Full, InvalidBlockType and InvalidAmount, and `GetAsync` is wrapped in pcall with a fallback."
+        },
+        {
+          "criterion": "Types catch mistakes",
+          "score": 2,
+          "note": "The table is `{ [Player]: Counts }`, not optional, and the uncast loop variables at lines 49 and 65 cause luau-lsp errors."
+        },
+        {
+          "criterion": "Call sites read clearly",
+          "score": 4,
+          "note": "`grantBlocks` is a separate function, but `loadCounts` yields with no Async in its name."
+        },
+        {
+          "criterion": "Scope and merge-ready",
+          "score": 2,
+          "note": "It stays in scope, but it fails luau-lsp in its own code and requires BlockTypes through an instance path."
+        }
+      ],
+      "overall_score": 6
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Passes all three static checks",
+        "The per-player table type is optional",
+        "Each function has its own typed failure reasons",
+        "Discards a load that finishes after the player left, and loads players already in the server"
+      ],
+      "weaknesses": [
+        "Doesn't check `blockType` at runtime, though it may come from a client",
+        "Services aren't bound with `const`"
+      ]
+    },
+    "B": {
+      "score": 6,
+      "strengths": [
+        "Tracks loads still in flight explicitly",
+        "Checks block types and amounts at runtime and returns named reasons",
+        "Provides `isLoaded` to check whether a player's counts are ready"
+      ],
+      "weaknesses": [
+        "Two luau-lsp type errors from missing `BlockType` casts",
+        "The per-player table type isn't optional",
+        "The yielding load function isn't named Async",
+        "Doesn't follow the string-require and Module-naming conventions"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 6
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

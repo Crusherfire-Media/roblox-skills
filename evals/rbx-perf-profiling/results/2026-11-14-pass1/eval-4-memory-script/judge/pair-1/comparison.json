@@ -1,0 +1,127 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both scripts miss the main requirement in criterion 3. Neither sums a value-less container's leaves frame by frame. A silently drops those subsystems, while B at least lists them as container-only. B also walks the subtree with a counter iterator and disposes it, disposes the session on its error path, and passes StyLua, which A fails. A's absolute-id-plus-seconds frame label is nice, but it doesn't outweigh those points. B wins.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Open/usage/dispose",
+          "score": 3,
+          "note": "Opens `process.args[2]` with `OpenFromFile` and calls `assert(session, \"could not open \" .. tostring(path))`, but prints no usage line when the argument is missing, and the `assert` on a missing memory counter exits without disposing the session."
+        },
+        {
+          "criterion": "2. Hierarchy walk and paths",
+          "score": 4,
+          "note": "Walks the `FirstChild`/`Sibling` links in `children()` and builds `fullPath` from the `Parent` links, with no hard-coded subsystems."
+        },
+        {
+          "criterion": "3. Container sums / leaf ranking",
+          "score": 2,
+          "note": "`stats(id)` returns nil for a value-less container and that subsystem is silently dropped instead of summing its leaves, though `collect` does rank only leaves."
+        },
+        {
+          "criterion": "4. First/last/peak/growth",
+          "score": 3,
+          "note": "Correct from sorted samples for counters that have values, but summed containers get no peak at all."
+        },
+        {
+          "criterion": "5. Frame id + absolute id",
+          "score": 5,
+          "note": "`frameName` prints `id/abs t=Ns` using `FetchFrameDesc(...).FrameAbsoluteId`."
+        },
+        {
+          "criterion": "6. Fetch only, no Control",
+          "score": 5,
+          "note": "Uses only `FetchCounterSamples`, `FetchCounterDesc` and `FetchFrameDesc`."
+        },
+        {
+          "criterion": "7. Output/format/lint",
+          "score": 3,
+          "note": "The output is readable and topN defaults to 10, but StyLua fails on the long `format` line and the script assumes the values are bytes when it prints MB."
+        }
+      ],
+      "overall_score": 5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Open/usage/dispose",
+          "score": 3,
+          "note": "Opens `args[2]` and uses `assert` on open failure, with no usage line; it does dispose the session before `error` when there is no memory counter, and calls `iter:Dispose()`."
+        },
+        {
+          "criterion": "2. Hierarchy walk and paths",
+          "score": 5,
+          "note": "Uses `CreateCounterIterator` with `RootCounterIds = { rootId }` and builds paths from `ParentId`, using `RelativeLevel` to pick out the subsystems."
+        },
+        {
+          "criterion": "3. Container sums / leaf ranking",
+          "score": 2,
+          "note": "A container subsystem is printed as \"(no samples, container only)\" rather than summed from its leaves, though leaves are filtered with `IsLeaf()`."
+        },
+        {
+          "criterion": "4. First/last/peak/growth",
+          "score": 3,
+          "note": "`summarize` is correct for counters that have values, but summed containers get no figures."
+        },
+        {
+          "criterion": "5. Frame id + absolute id",
+          "score": 5,
+          "note": "`frameLabel` prints `id/abs` using `FrameAbsoluteId`, with caching."
+        },
+        {
+          "criterion": "6. Fetch only, no Control",
+          "score": 5,
+          "note": "Uses only Fetch methods, and disposes the iterator."
+        },
+        {
+          "criterion": "7. Output/format/lint",
+          "score": 4,
+          "note": "Passes StyLua and selene, scales values without assuming a unit, and topN defaults to 10, though the top-N header shows `topN` even when there are fewer leaves."
+        }
+      ],
+      "overall_score": 6
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 5,
+      "strengths": [
+        "Walks the tree through the `Parent`/`FirstChild`/`Sibling` links and builds full paths",
+        "Ranks only leaf counters, so no total is listed next to its own parts",
+        "Frame label includes the absolute id and the seconds into the dump"
+      ],
+      "weaknesses": [
+        "Value-less container subsystems are silently dropped instead of summed from their leaves",
+        "Fails the StyLua check",
+        "Prints no usage line, and the session isn't disposed on the error path",
+        "Assumes the values are bytes when it prints MB"
+      ]
+    },
+    "B": {
+      "score": 6,
+      "strengths": [
+        "Walks the subtree with a counter iterator, as the API intends",
+        "Disposes the iterator, and disposes the session on the error path",
+        "Passes the formatting checks",
+        "Shows container subsystems explicitly instead of dropping them"
+      ],
+      "weaknesses": [
+        "Doesn't sum the leaves of value-less container subsystems",
+        "Prints no usage line when the argument is missing",
+        "Calls `GetState` before `Configure`, which is a minor ordering risk"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 5,
+    "with_skill": 6
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

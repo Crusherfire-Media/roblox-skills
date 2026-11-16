@@ -1,0 +1,434 @@
+diff --git a/docs/placement-spec-cleanup.md b/docs/placement-spec-cleanup.md
+new file mode 100644
+index 0000000..5b41c58
+--- /dev/null
++++ b/docs/placement-spec-cleanup.md
+@@ -0,0 +1,68 @@
++# PlacementRules spec cleanup
++
++`PlacementRules.spec.luau` drops from 31 tests to 19. Every test now goes through the public
++`snap` and `validate` functions, so a refactor that keeps placement working won't turn it red.
++`PlacementRules.luau` is unchanged.
++
++## The two failing tests
++
++- **"rejects a position that isn't a Vector3"** called its matchers with a colon
++  (`expect(ok):toBe(false)`). Jest Roblox matchers are called with `.`. The colon passes the
++  matcher object in as the expected value, so the test could never pass. That case is now a row
++  in the rejection table.
++- **"doesn't mark the cell occupied"** asserted `expect(count).toBeFalsy()` with `count == 0`.
++  In Luau, `0` is truthy, so the test always failed. It is now "leaves occupied unchanged when it
++  accepts", which asserts `occupied` still equals `{}` and also checks the call was accepted.
++  Before, a rejection would also have passed.
++
++## Removed
++
++| Test | Why |
++|---|---|
++| `snap` "snaps positions to cell centers" | Worked out the expected value with the same `floor` formula the code uses, so it could never disagree with the code. |
++| `snap` 6-row table | Several rows covered the same case, and the literals assumed `BlockSize = 4`. Replaced by a 4-row table (below). |
++| `_isFinite` (3 tests) | Tested a private helper. NaN and infinity are now rows in `validate`'s rejection table. The `_isFinite` export is still in the module because this change doesn't touch it. Nothing uses it now, so a later change can remove it. |
++| "calls snap exactly once" | Counted calls to an internal function. Inlining `snap` would break it even though placement still works. |
++| "returns the snapped center" | Got its expected value by calling `snap`. The acceptance table now checks the returned center against independently computed values. |
++| One test per block type (5 tests built at runtime) | Merged into one test that loops over `BlockTypes.List` and lists any type that gets rejected. |
++| "rejects placing twice in the same cell" | Repeated "rejects a cell that is already occupied". It also only passed because the earlier test had left the shared `occupied` table filled in. |
++| Height table (4 rows), reach table (3 rows) | Hard-coded `MaxHeight = 200`, `MaxReach = 24` and `BlockSize = 4`. Their boundary rows moved into the accept and reject tables, using values computed from the module constants. |
++| `BlockTypes` "has the right block types" | Copied catalog colors, materials and transparency field by field. Those are presentation, and they belong to `BlockTypes`, not `PlacementRules`. |
++
++The module-level `occupied` table that several tests shared is gone, so each test now builds its
++own state.
++
++## What the suite covers now
++
++Each rule documented in `PlacementRules.luau`, and the test that covers it:
++
++- **snap** (4 rows): a cell's lower corner is in that cell, the cell resting on the Baseplate has
++  its center at `BlockSize / 2`, a point inside a cell snaps to its center, a cell's upper edge
++  belongs to the next cell, and negative positions snap away from zero. Each row uses different
++  values on X, Y and Z, so swapping two axes would fail.
++- **validate accepts** (3 rows): the cell resting on the Baseplate, the highest cell at or below
++  `MaxHeight`, and a cell exactly `MaxReach` away. Each row passes a position that is off the
++  cell's center and checks that the returned value is the center.
++- **validate accepts every block type** (1 test, listing any type that gets rejected).
++- **validate rejects** (10 rows, each changing one thing in an otherwise valid request): unknown
++  block type name, a name that isn't a string, a position that isn't a Vector3, NaN, infinity, a
++  cell below the Baseplate, a cell above `MaxHeight`, no character (`rootPosition == nil`), a cell
++  just past `MaxReach`, and an occupied cell. **The no-character rule had no test before.**
++- **validate never changes `occupied`** (1 test).
++
++## Assumptions
++
++- **Reason strings are not asserted.** The module documents them as "a short reason for the server
++  log", so their wording isn't something callers rely on. Each rejection row changes only one
++  thing in a valid request, which keeps a row from passing because a different rule rejected it.
++- **Sizes and limits come from the modules.** `BlockSize`, `MaxHeight` and `MaxReach` are read
++  from `BlockTypes` and `PlacementRules`, so changing those numbers doesn't break the spec. The
++  valid request uses `BlockTypes.List[1]`, so renaming a block type doesn't break it either.
++- **The spec uses the style guide's form**: `--!strict`, `const`, and requires by
++  `@game/...` string paths instead of `game:GetService` paths.
++
++## Verification
++
++`luau-lsp analyze`, `selene src` and `stylua --check src` all pass. Specs can't run in this
++environment, so **none of the 19 tests have been run**. Before merging, run
++`Specs/PlacementRules.spec` in Studio, or let CI run it.
+diff --git a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+index c2ccab9..365ae43 100644
+--- a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
++++ b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+@@ -1,209 +1,169 @@
+-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-local ServerScriptService = game:GetService("ServerScriptService")
+-
+-local JestGlobals = require(ServerScriptService.Tests.Packages.JestGlobals)
+-local describe = JestGlobals.describe
+-local expect = JestGlobals.expect
+-local it = JestGlobals.it
+-local jest = JestGlobals.jest
+-
+-local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+-local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
+-
+-local occupied: { [Vector3]: boolean } = {}
++--!strict
++const JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
++const describe = JestGlobals.describe
++const expect = JestGlobals.expect
++const it = JestGlobals.it
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const PlacementRules = require("@game/ReplicatedStorage/Shared/PlacementRules")
++
++-- Sizes come from the modules that own them, so retuning them doesn't break
++-- the spec.
++const SIZE = BlockTypes.BlockSize
++const BLOCK_TYPE_NAME = BlockTypes.List[1].Name
++
++-- The cell resting on the Baseplate at the origin.
++const GROUND_CENTER = Vector3.new(SIZE / 2, SIZE / 2, SIZE / 2)
++-- The highest cell whose center is no higher than MaxHeight.
++const TOP_CENTER = Vector3.new(
++	SIZE / 2,
++	PlacementRules.MaxHeight - (PlacementRules.MaxHeight - SIZE / 2) % SIZE,
++	SIZE / 2
++)
++-- Moves a position off its cell's center but keeps it inside the cell, so the
++-- tests show validate snaps the position.
++const OFF_CENTER = Vector3.new(SIZE / 4, -SIZE / 4, SIZE / 4)
++
++local function cells(x: number, y: number, z: number): Vector3
++	return Vector3.new(x, y, z) * SIZE
++end
+ 
+ describe("PlacementRules", function()
+ 	describe("snap", function()
+-		it("snaps positions to cell centers", function()
+-			local size = BlockTypes.BlockSize
+-			local samples = {
+-				Vector3.new(1, 1, 1),
+-				Vector3.new(5, 9, -3),
+-				Vector3.new(-7, 2, 13),
+-			}
+-			for _, position in samples do
+-				local expected = Vector3.new(
+-					(math.floor(position.X / size) + 0.5) * size,
+-					(math.floor(position.Y / size) + 0.5) * size,
+-					(math.floor(position.Z / size) + 0.5) * size
+-				)
+-				expect(PlacementRules.snap(position)).toEqual(expected)
+-			end
+-		end)
+-
+ 		it.each({
+-			{ X = 1, Y = 1, Z = 1, CenterX = 2, CenterY = 2, CenterZ = 2 },
+-			{ X = 2, Y = 2, Z = 2, CenterX = 2, CenterY = 2, CenterZ = 2 },
+-			{ X = 0, Y = 0, Z = 0, CenterX = 2, CenterY = 2, CenterZ = 2 },
+-			{ X = 3.9, Y = 0, Z = 0, CenterX = 2, CenterY = 2, CenterZ = 2 },
+-			{ X = 4, Y = 0, Z = 0, CenterX = 6, CenterY = 2, CenterZ = 2 },
+-			{ X = -0.1, Y = 0, Z = 0, CenterX = -2, CenterY = 2, CenterZ = 2 },
+-		})("snaps ($X, $Y, $Z) to ($CenterX, $CenterY, $CenterZ)", function(row)
+-			local center = PlacementRules.snap(Vector3.new(row.X, row.Y, row.Z))
+-
+-			expect(center).toEqual(Vector3.new(row.CenterX, row.CenterY, row.CenterZ))
+-		end)
+-	end)
+-
+-	describe("_isFinite", function()
+-		it("rejects NaN", function()
+-			expect(PlacementRules._isFinite(0 / 0)).toBe(false)
+-		end)
+-
+-		it("rejects infinity", function()
+-			expect(PlacementRules._isFinite(math.huge)).toBe(false)
+-		end)
+-
+-		it("accepts zero", function()
+-			expect(PlacementRules._isFinite(0)).toBe(true)
++			{
++				Case = "a cell's lower corner belongs to that cell",
++				Position = cells(0, 0, 0),
++				Center = cells(0.5, 0.5, 0.5),
++			},
++			{
++				Case = "points inside a cell snap to its center",
++				Position = cells(0.99, 0.25, 0.5),
++				Center = cells(0.5, 0.5, 0.5),
++			},
++			{
++				Case = "a cell's upper edge belongs to the next cell",
++				Position = cells(1, 2.5, 0),
++				Center = cells(1.5, 2.5, 0.5),
++			},
++			{
++				Case = "negative positions snap away from zero",
++				Position = cells(-0.01, -1, -1.5),
++				Center = cells(-0.5, -0.5, -1.5),
++			},
++		})("$Case", function(row: { Position: Vector3, Center: Vector3 })
++			const center = PlacementRules.snap(row.Position)
++
++			expect(center).toEqual(row.Center)
+ 		end)
+ 	end)
+ 
+ 	describe("validate", function()
+-		local blockTypeRows = {}
+-		for _, blockType in BlockTypes.List do
+-			table.insert(blockTypeRows, { Name = blockType.Name })
+-		end
+-
+-		it.each(blockTypeRows)("accepts a $Name block", function(row)
+-			local ok = PlacementRules.validate(
+-				row.Name,
+-				Vector3.new(1, 1, 1),
+-				Vector3.new(2, 2, 10),
+-				occupied
+-			)
+-
+-			expect(ok).toBe(true)
+-		end)
+-
+-		it("rejects an unknown block type", function()
+-			local ok, reason =
+-				PlacementRules.validate("Lava", Vector3.new(1, 1, 1), Vector3.new(2, 2, 2), {})
+-
+-			expect(ok).toBe(false)
+-			expect(reason).toBe("unknown block type")
+-		end)
+-
+-		it("rejects a position that isn't a Vector3", function()
+-			local ok, reason = PlacementRules.validate(
+-				"Brick",
+-				{ 1, 1, 1 },
+-				Vector3.new(2, 2, 2),
+-				{}
+-			)
+-
+-			expect(ok):toBe(false)
+-			expect(reason):toBe("position is not a Vector3")
+-		end)
+-
+-		it("rejects NaN positions", function()
+-			local ok, reason =
+-				PlacementRules.validate("Brick", Vector3.new(0 / 0, 1, 1), Vector3.new(2, 2, 2), {})
+-
+-			expect(ok).toBe(false)
+-			expect(reason).toBe("position is not finite")
+-		end)
+-
+-		it("returns the snapped center", function()
+-			local position = Vector3.new(5, 1, -3)
+-
+-			local ok, center = PlacementRules.validate("Brick", position, Vector3.new(2, 2, 2), {})
+-
+-			expect(ok).toBe(true)
+-			expect(center).toEqual(PlacementRules.snap(position))
+-		end)
+-
+-		it("calls snap exactly once", function()
+-			local snapSpy = jest.spyOn(PlacementRules, "snap")
+-
+-			PlacementRules.validate("Brick", Vector3.new(1, 1, 1), Vector3.new(2, 2, 2), {})
+-
+-			expect(snapSpy).toHaveBeenCalledTimes(1)
+-			snapSpy.mockRestore()
+-		end)
+-
+-		it.each({
+-			{ Y = -0.1, Accepted = false },
+-			{ Y = 0, Accepted = true },
+-			{ Y = 196, Accepted = true },
+-			{ Y = 200, Accepted = false },
+-		})("height: Y = $Y accepted is $Accepted", function(row)
+-			local ok = PlacementRules.validate(
+-				"Brick",
+-				Vector3.new(1, row.Y, 1),
+-				Vector3.new(2, row.Y, 2),
+-				{}
+-			)
+-
+-			expect(ok).toBe(row.Accepted)
+-		end)
+-
+ 		it.each({
+-			{ Z = 21, Distance = 20, Accepted = true },
+-			{ Z = 25, Distance = 24, Accepted = true },
+-			{ Z = 29, Distance = 28, Accepted = false },
+-		})("reach: a cell $Distance studs away accepted is $Accepted", function(row)
+-			local ok, reason =
+-				PlacementRules.validate("Brick", Vector3.new(2, 2, row.Z), Vector3.new(2, 2, 2), {})
+-
+-			expect(ok).toBe(row.Accepted)
+-			if not row.Accepted then
+-				expect(reason).toBe("out of reach")
++			{
++				Case = "the cell resting on the Baseplate",
++				Center = GROUND_CENTER,
++				Root = GROUND_CENTER,
++			},
++			{
++				Case = "the highest cell at or below MaxHeight",
++				Center = TOP_CENTER,
++				Root = TOP_CENTER,
++			},
++			{
++				Case = "a cell exactly MaxReach from the root",
++				Center = GROUND_CENTER,
++				Root = GROUND_CENTER + Vector3.new(0, 0, PlacementRules.MaxReach),
++			},
++		})(
++			"accepts $Case and returns its center",
++			function(row: { Center: Vector3, Root: Vector3 })
++				const ok, center =
++					PlacementRules.validate(BLOCK_TYPE_NAME, row.Center + OFF_CENTER, row.Root, {})
++
++				expect(ok).toBe(true)
++				expect(center).toEqual(row.Center)
++			end
++		)
++
++		it("accepts every block type in BlockTypes", function()
++			const rejected = {}
++			for _, blockType in BlockTypes.List do
++				const ok = PlacementRules.validate(blockType.Name, GROUND_CENTER, GROUND_CENTER, {})
++				if not ok then
++					table.insert(rejected, blockType.Name)
++				end
+ 			end
+-		end)
+-
+-		it("rejects a cell that is already occupied", function()
+-			occupied[Vector3.new(2, 2, 2)] = true
+-
+-			local ok, reason = PlacementRules.validate(
+-				"Brick",
+-				Vector3.new(1, 1, 1),
+-				Vector3.new(2, 2, 2),
+-				occupied
+-			)
+ 
+-			expect(ok).toBe(false)
+-			expect(reason).toBe("cell is occupied")
++			expect(rejected).toEqual({})
+ 		end)
+ 
+-		it("rejects placing twice in the same cell", function()
+-			local ok = PlacementRules.validate(
+-				"Dirt",
+-				Vector3.new(3, 3, 3),
+-				Vector3.new(2, 2, 2),
+-				occupied
++		-- Each row breaks exactly one rule of an otherwise valid request. The
++		-- reason strings are only for the server log, so the rows don't pin them.
++		it.each({
++			{
++				Case = "a block type name BlockTypes doesn't have",
++				BlockTypeName = "Lava" :: unknown,
++			},
++			{
++				Case = "a block type name that isn't a string",
++				BlockTypeName = 1 :: unknown,
++			},
++			{
++				Case = "a position that isn't a Vector3",
++				Position = { 1, 1, 1 } :: unknown,
++			},
++			{
++				Case = "a NaN position component",
++				Position = Vector3.new(0 / 0, SIZE / 2, SIZE / 2) :: unknown,
++			},
++			{
++				Case = "an infinite position component",
++				Position = Vector3.new(SIZE / 2, math.huge, SIZE / 2) :: unknown,
++			},
++			{
++				Case = "a cell below the Baseplate",
++				Position = (GROUND_CENTER - Vector3.new(0, SIZE, 0)) :: unknown,
++				Root = GROUND_CENTER - Vector3.new(0, SIZE, 0),
++			},
++			{
++				Case = "a cell above MaxHeight",
++				Position = (TOP_CENTER + Vector3.new(0, SIZE, 0)) :: unknown,
++				Root = TOP_CENTER + Vector3.new(0, SIZE, 0),
++			},
++			{
++				Case = "a player with no character",
++				HasNoCharacter = true,
++			},
++			{
++				Case = "a cell just beyond MaxReach",
++				Root = GROUND_CENTER + Vector3.new(0, 0, PlacementRules.MaxReach + 0.01),
++			},
++			{
++				Case = "a cell that is already occupied",
++				Occupied = { [GROUND_CENTER] = true },
++			},
++		} :: { any })("rejects $Case", function(row)
++			const root = if row.HasNoCharacter then nil else row.Root or GROUND_CENTER
++
++			const ok = PlacementRules.validate(
++				row.BlockTypeName or BLOCK_TYPE_NAME,
++				row.Position or GROUND_CENTER,
++				root,
++				row.Occupied or {}
+ 			)
+ 
+ 			expect(ok).toBe(false)
+ 		end)
+ 
+-		it("doesn't mark the cell occupied", function()
+-			local cells = {}
++		it("leaves occupied unchanged when it accepts", function()
++			const occupied = {}
+ 
+-			PlacementRules.validate("Brick", Vector3.new(1, 1, 1), Vector3.new(2, 2, 2), cells)
++			const ok =
++				PlacementRules.validate(BLOCK_TYPE_NAME, GROUND_CENTER, GROUND_CENTER, occupied)
+ 
+-			local count = 0
+-			for _ in cells do
+-				count += 1
+-			end
+-			expect(count).toBeFalsy()
+-		end)
+-	end)
+-
+-	describe("BlockTypes", function()
+-		it("has the right block types", function()
+-			expect(#BlockTypes.List).toBe(5)
+-			expect(BlockTypes.List[1].Name).toBe("Brick")
+-			expect(BlockTypes.List[1].Color).toEqual(Color3.fromRGB(163, 75, 60))
+-			expect(BlockTypes.List[1].Material).toBe(Enum.Material.Brick)
+-			expect(BlockTypes.List[2].Name).toBe("Dirt")
+-			expect(BlockTypes.List[2].Color).toEqual(Color3.fromRGB(110, 78, 52))
+-			expect(BlockTypes.List[3].Name).toBe("Grass")
+-			expect(BlockTypes.List[3].Color).toEqual(Color3.fromRGB(88, 145, 62))
+-			expect(BlockTypes.List[4].Name).toBe("Window")
+-			expect(BlockTypes.List[4].Transparency).toBe(0.6)
+-			expect(BlockTypes.List[5].Name).toBe("Wood")
+-			expect(BlockTypes.List[5].Material).toBe(Enum.Material.WoodPlanks)
++			expect(ok).toBe(true)
++			expect(occupied).toEqual({})
+ 		end)
+ 	end)
+ end)

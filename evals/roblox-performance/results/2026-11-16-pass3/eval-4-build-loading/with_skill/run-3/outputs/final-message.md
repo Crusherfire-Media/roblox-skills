@@ -1,0 +1,6 @@
+I left all three checker findings unchanged because they come from the checker setup, not from errors in the code. I couldn't confirm that by running the checker on the old file, though: that command was blocked because it needed approval and this session can't give it.
+
+- **`Unknown require` for BlockTypes (line 15) and `Unknown type 'BlockTypes.BlockType'` (line 96):** both lines are the same as in the original file. luau-lsp can only follow a require like `ReplicatedStorage.Shared.BlockTypes` with a Rojo sourcemap, and none is passed here. So it can't load BlockTypes, and any type from that module shows as unknown.
+- **`Unknown type 'SavedBuilds.SavedBlock'` (line 45):** this one is new in my change. `SavedBuilds.luau` does export `SavedBlock`, so it fails for the same reason: without a sourcemap the checker can't read the `script.Parent.SavedBuilds` require. I could copy the type into `Builds.server.luau` to quiet it, but two copies of the save format would drift apart, so I didn't.
+
+To check properly, generate a sourcemap with `rojo sourcemap default.project.json -o sourcemap.json` and run `luau-lsp analyze --sourcemap=sourcemap.json src/ServerScriptService/Builds.server.luau`. If any type errors remain after that, they're real and I'll fix them.

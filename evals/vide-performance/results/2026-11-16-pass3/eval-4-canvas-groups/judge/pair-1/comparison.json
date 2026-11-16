@@ -1,0 +1,123 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "A keeps a per-card CanvasGroup only while that card's shine shows (gated with show, rounded with UICorner, GroupTransparency driven by the shine so it never pops) and leaves the look unchanged. B gets fewer groups but reparents the whole panel's content into and out of a fade CanvasGroup, risks a pop when closing starts, and rebuilds the shine with a gradient that may not look the same.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Few CanvasGroups when idle",
+          "score": 5,
+          "note": "Cards are `create(\"Frame\")` and the `ShineClip` CanvasGroup exists only under `show(isShining, ...)`, so only the panel's group remains when nothing is hovered."
+        },
+        {
+          "criterion": "Shine clipped by a temporary rounded CanvasGroup",
+          "score": 5,
+          "note": "`show(isShining, ...)` builds a `ShineClip` CanvasGroup with `UICorner` CARD_RADIUS that exists only while hovered or `shine() > 0.01`."
+        },
+        {
+          "criterion": "Temporary group never pops",
+          "score": 5,
+          "note": "`GroupTransparency = 1 - shine()`: the group is created at shine 0 (fully clear) and removed below 0.01, while the stripe's fixed 0.5 keeps its strength at 0.5*shine."
+        },
+        {
+          "criterion": "Card content stays in plain Frames",
+          "score": 5,
+          "note": "The swatch, labels and hit area stay as direct children of the card Frame; only the shine stripe lives in the temporary group."
+        },
+        {
+          "criterion": "Look unchanged",
+          "score": 5,
+          "note": "The panel CanvasGroup fade, the card UICorner and layout, the stripe position, rotation and width, and the click/select behavior are all unchanged."
+        },
+        {
+          "criterion": "Doc",
+          "score": 4,
+          "note": "Gives before/after counts (41 → 1, 2 while hovering), a counting snippet, a white-flash check and phone low-quality steps, but no count with the catalog closed."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Typed, minimal diff; luau-lsp, selene and StyLua all pass."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Few CanvasGroups when idle",
+          "score": 5,
+          "note": "Cards are Frames and the `Fader` group is parented only while `fade() < 1`, giving 0 groups when idle."
+        },
+        {
+          "criterion": "Shine clipped by a temporary rounded CanvasGroup",
+          "score": 3,
+          "note": "Drops the CanvasGroup and clips a UIGradient on a full-card overlay with a UICorner instead; it clips, but the stripe geometry is redone with trig."
+        },
+        {
+          "criterion": "Temporary group never pops",
+          "score": 2,
+          "note": "The `Fader` group appears at nearly full opacity as soon as closing starts and takes the whole panel, a likely pop on low-end devices; the shine has no temporary group."
+        },
+        {
+          "criterion": "Card content stays in plain Frames",
+          "score": 2,
+          "note": "`Panel` (holding every card) is reparented via `Parent = if isFading() then fader else root`, moving all card content into and out of a temporary CanvasGroup."
+        },
+        {
+          "criterion": "Look unchanged",
+          "score": 3,
+          "note": "The gradient Offset/rotation conversion may change the stripe's lean and sweep; the doc itself says 'If the lean looks different...'."
+        },
+        {
+          "criterion": "Doc",
+          "score": 4,
+          "note": "Clear explanation, counts (41 → 0, 1 during a fade), a snippet and device steps; no count with the catalog closed or while hovering."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 3,
+          "note": "Checks pass, but reparenting the whole panel and the trig gradient math add complexity and risk."
+        }
+      ],
+      "overall_score": 6
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Follows the intended pattern exactly: a show-gated rounded CanvasGroup per shining card",
+        "GroupTransparency driven by shine strength prevents pops",
+        "Minimal, readable change that keeps the look the same"
+      ],
+      "weaknesses": [
+        "The doc omits the count with the catalog closed"
+      ]
+    },
+    "B": {
+      "score": 6,
+      "strengths": [
+        "Reaches 0 CanvasGroups when idle",
+        "Clever gradient-on-rounded-overlay clipping",
+        "Honest notes about uncertainty"
+      ],
+      "weaknesses": [
+        "Reparents the entire panel, including all cards, into and out of a CanvasGroup on every fade",
+        "Possible pop when Fader appears at full opacity on close",
+        "The shine geometry may look different from before"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 6
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

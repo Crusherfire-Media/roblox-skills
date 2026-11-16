@@ -1,0 +1,3 @@
+I'm leaving this one alone because my change didn't cause it. The `Unknown require: game/ReplicatedStorage/Shared/BlockTypes` error is on line 10, `local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)`. That line is the same as in the last commit, and my edit touched only the name check and the removed `VALID_NAMES` list.
+
+The most likely cause is that the project's `sourcemap.json` doesn't list `Shared/BlockTypes`, so the type checker can't find the module. It's a project setup issue, not a code bug. Regenerating the sourcemap with Rojo should clear it; I didn't regenerate it because that's outside this review. The type checker reported nothing else.

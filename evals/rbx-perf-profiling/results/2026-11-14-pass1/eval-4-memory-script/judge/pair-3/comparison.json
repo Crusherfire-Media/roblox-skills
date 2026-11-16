@@ -1,0 +1,126 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both correctly walk the memory subtree, sum leaves for container subsystems, rank leaves in the top-N, and show id/abs frames. A passes StyLua, anchors the memory lookup at the root, and prints raw units. B fails StyLua, assumes the counters are bytes and converts to MB without support, and uses the iterator state less safely. A is the cleaner merge.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Open/args/errors/dispose",
+          "score": 3,
+          "note": "Uses OpenFromFile(process.args[2]) and error(`could not open {path}`), disposes session on all paths, but prints no usage line when the arg is missing."
+        },
+        {
+          "criterion": "2. Hierarchy walk & paths",
+          "score": 5,
+          "note": "FindCounterId(\"/memory\") then getChildren via FirstChild/Sibling and getPath via Parent links; no hard-coded subsystems."
+        },
+        {
+          "criterion": "3. Own samples vs leaf sum; top-N leaves",
+          "score": 5,
+          "note": "readSeries then readSummedSeries over collectLeaves aligned by FrameId; top list uses collectLeaves(memoryId) only."
+        },
+        {
+          "criterion": "4. Stats from samples, summed peak",
+          "score": 5,
+          "note": "summarize computes first/last/peak/growth over the (summed) series, so peak is of the sum."
+        },
+        {
+          "criterion": "5. Frame id + absolute id",
+          "score": 5,
+          "note": "formatFrame prints id/FrameAbsoluteId with a cache and range check."
+        },
+        {
+          "criterion": "6. Fetch only, no Control",
+          "score": 5,
+          "note": "Only FetchCounterSamples/FetchCounterDesc/FetchFrameDesc; no Get*** or Control."
+        },
+        {
+          "criterion": "7. Output, sorting, default, lint",
+          "score": 5,
+          "note": "Aligned tables sorted by growth, topN defaults to 10, header shows the actual count, selene and StyLua pass."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Open/args/errors/dispose",
+          "score": 3,
+          "note": "assert(session, \"could not open \"..tostring(path)); disposes the iterator and session, but prints no usage line."
+        },
+        {
+          "criterion": "2. Hierarchy walk & paths",
+          "score": 4,
+          "note": "children()/fullPath via desc links plus a CounterIterator rooted at memoryId; the bare FindCounterId(\"memory\") can match a nested node."
+        },
+        {
+          "criterion": "3. Own samples vs leaf sum; top-N leaves",
+          "score": 5,
+          "note": "seriesFor falls back to the per-FrameId sum of leavesUnder; top list filters state:IsLeaf()."
+        },
+        {
+          "criterion": "4. Stats from samples, summed peak",
+          "score": 5,
+          "note": "stats() runs over the sorted summed series, so the peak frame is the sum's."
+        },
+        {
+          "criterion": "5. Frame id + absolute id",
+          "score": 5,
+          "note": "frameName prints id/FrameAbsoluteId, guarded with pcall."
+        },
+        {
+          "criterion": "6. Fetch only, no Control",
+          "score": 5,
+          "note": "Only Fetch*** calls; iterator disposed; no Control."
+        },
+        {
+          "criterion": "7. Output, sorting, default, lint",
+          "score": 2,
+          "note": "StyLua fails on long print lines, values are assumed to be bytes and divided by MB, and the header prints topN even when fewer counters exist."
+        }
+      ],
+      "overall_score": 6.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Correct handling of container vs valued subsystems",
+        "Root-anchored memory lookup",
+        "Passes selene and StyLua",
+        "Raw units, so it doesn't guess wrong about units"
+      ],
+      "weaknesses": [
+        "No usage message when the argument is missing",
+        "Rebuilds leaf series repeatedly (no sample cache)"
+      ]
+    },
+    "B": {
+      "score": 6.5,
+      "strengths": [
+        "Sample and path caching",
+        "Uses a counter iterator rooted at memory and disposes it",
+        "Clear column layout"
+      ],
+      "weaknesses": [
+        "Fails StyLua",
+        "Unverified bytes-to-MB conversion could mislabel every value",
+        "GetState called before Configure/Step instead of inside the loop",
+        "Bare 'memory' mask isn't anchored at the root"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 6.5
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

@@ -1,0 +1,150 @@
+diff --git a/src/ServerScriptService/Modules/Catalogs/BlockTypes.luau b/src/ServerScriptService/Modules/Catalogs/BlockTypes.luau
+index 7fce00d..2660cb6 100644
+--- a/src/ServerScriptService/Modules/Catalogs/BlockTypes.luau
++++ b/src/ServerScriptService/Modules/Catalogs/BlockTypes.luau
+@@ -5,6 +5,7 @@
+ export type BlockType = {
+ 	Name: string,
+ 	DisplayName: string,
++	Price: number,
+ 	Color: Color3,
+ 	Material: Enum.Material,
+ 	Transparency: number,
+@@ -17,6 +18,7 @@ local LIST: { BlockType } = table.freeze({
+ 	table.freeze({
+ 		Name = "Brick",
+ 		DisplayName = "Brick",
++		Price = 5,
+ 		Color = Color3.fromRGB(163, 75, 60),
+ 		Material = Enum.Material.Brick,
+ 		Transparency = 0,
+@@ -24,6 +26,7 @@ local LIST: { BlockType } = table.freeze({
+ 	table.freeze({
+ 		Name = "Dirt",
+ 		DisplayName = "Dirt",
++		Price = 1,
+ 		Color = Color3.fromRGB(110, 78, 52),
+ 		Material = Enum.Material.Ground,
+ 		Transparency = 0,
+@@ -31,6 +34,7 @@ local LIST: { BlockType } = table.freeze({
+ 	table.freeze({
+ 		Name = "Grass",
+ 		DisplayName = "Grass",
++		Price = 2,
+ 		Color = Color3.fromRGB(88, 145, 62),
+ 		Material = Enum.Material.Grass,
+ 		Transparency = 0,
+@@ -38,6 +42,7 @@ local LIST: { BlockType } = table.freeze({
+ 	table.freeze({
+ 		Name = "Window",
+ 		DisplayName = "Window",
++		Price = 8,
+ 		Color = Color3.fromRGB(170, 210, 230),
+ 		Material = Enum.Material.Glass,
+ 		Transparency = 0.6,
+@@ -45,6 +50,7 @@ local LIST: { BlockType } = table.freeze({
+ 	table.freeze({
+ 		Name = "Wood",
+ 		DisplayName = "Wood",
++		Price = 3,
+ 		Color = Color3.fromRGB(150, 110, 70),
+ 		Material = Enum.Material.WoodPlanks,
+ 		Transparency = 0,
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.luau
+new file mode 100644
+index 0000000..df5a8ae
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.luau
+@@ -0,0 +1,24 @@
++--!strict
++--[[
++	Makes each block cost its price in coins.
++]]
++
++local CurrencyServerService = require(
++	"@game/ServerScriptService/Modules/Systems/Economy/CurrencySystem/SystemPackage/CurrencyServerService"
++)
++local PlacementServerService = require("../SystemPackage/PlacementServerService")
++
++local PlacementCurrencyMediator = {}
++
++function PlacementCurrencyMediator:Init()
++	PlacementServerService:SetChargeCallback(function(player, blockType)
++		if CurrencyServerService:TrySpend(player, blockType.Price) then
++			return true, nil
++		end
++		local missing = blockType.Price - CurrencyServerService:GetCoins(player)
++		local noun = if missing == 1 then "coin" else "coins"
++		return false, `You need {missing} more {noun} to place {blockType.DisplayName}.`
++	end)
++end
++
++return PlacementCurrencyMediator
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau
+index a35605d..cfbc0af 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau
+@@ -10,6 +10,10 @@ local BlockTypes = require("@game/ServerScriptService/Modules/Catalogs/BlockType
+ local Grid = require("@game/ServerScriptService/Modules/Utilities/Grid")
+ local PlacementNetwork = require("./PlacementNetwork")
+ 
++type BlockType = BlockTypes.BlockType
++-- Returns whether the player paid for the block, and a reason to show them when they did not.
++type ChargeCallback = (player: Player, blockType: BlockType) -> (boolean, string?)
++
+ local BLOCK_SIZE = BlockTypes.BlockSize
+ -- How far from the player's character a block may be placed, in studs.
+ local MAX_REACH = 64
+@@ -35,6 +39,7 @@ local blocksFolder: Folder? = nil
+ local lastPlacedAt: { [Player]: number } = {}
+ local occupied: { [Vector3]: boolean } = {}
+ local blockCounts: { [Player]: number } = {}
++local chargeCallback: ChargeCallback? = nil
+ 
+ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+ 	if typeof(blockTypeName) ~= "string" or typeof(position) ~= "Vector3" then
+@@ -70,6 +75,17 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 		return
+ 	end
+ 
++	-- Charge last, so a request refused by any other check costs nothing.
++	if chargeCallback then
++		local isPaid, reason = chargeCallback(player, blockType)
++		if not isPaid then
++			if reason then
++				placementRejected:Fire(player, reason)
++			end
++			return
++		end
++	end
++
+ 	lastPlacedAt[player] = now
+ 	occupied[cell] = true
+ 	blockCounts[player] = (blockCounts[player] or 0) + 1
+@@ -94,6 +110,15 @@ function PlacementServerService:GetBlockCount(player: Player): number
+ 	return blockCounts[player] or 0
+ end
+ 
++--[[
++	Sets the function that charges a player for each block, called after every other check
++	passes and right before the block is placed. It must not yield, so nothing else can claim
++	the cell between charging and placing. With no callback set, blocks are free.
++]]
++function PlacementServerService:SetChargeCallback(callback: ChargeCallback?)
++	chargeCallback = callback
++end
++
+ function PlacementServerService:Init()
+ 	local folder = Instance.new("Folder")
+ 	folder.Name = "Blocks"

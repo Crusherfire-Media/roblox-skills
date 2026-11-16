@@ -1,0 +1,118 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are correct and complete. Each raycasts every frame with the right exclusions, offsets along the normal, reuses PlacementRules, tears down fully, and has a typed class and an options table. B's failed 'disconnects' check isn't a real defect, because UnbindFromRenderStep stops the per-frame update just as fully. B adds a few extras: a guard against destroying twice, rejection reasons, and an inset to avoid z-fighting. But it breaks the project's conventions (Module table, const services, PascalCase method names), and its stand-in empty folder makes every spot look placeable until PlacedBlocks replicates. A is simpler, follows the conventions, and returns a clean Vector3? answer, so it's slightly more ready to merge.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "`_Update` runs on RenderStepped. It raycasts from the mouse with the character and `_Part` excluded, snaps `result.Position + result.Normal * (BlockSize/2)`, unparents the part on a miss, styles it from `BlockTypes.Styles`, and lerps toward red when `PlacementRules.check` fails against PlacedBlocks."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "`Destroy` disconnects `_RenderConnection` and destroys `_Part`. The class makes no other connections, so no frame update can run after teardown."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 5,
+          "note": "The `Fields` type with `typeof(setmetatable({} :: Fields, Module))` declares every field, all set in one literal in `new`. The part has CanCollide and CanQuery off and is also in the raycast filter."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "`new(blockType: BlockType, options: Options?): GhostPreview` is typed, and `GetPlacement(): Vector3?` returns nil consistently whenever the spot isn't placeable."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "An `Options` table carries `Transparency` and `RaycastDistance`, with defaults in the named constants `DEFAULT_TRANSPARENCY` and `DEFAULT_RAYCAST_DISTANCE`."
+        },
+        {
+          "criterion": "Scope / merge-ready",
+          "score": 5,
+          "note": "One class file, nothing out of scope, all tools pass, and it follows the repo conventions (a `Module` table and `const` services)."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "`_update` raycasts with the character and part filtered, steps half a block out along the normal before `snap`, hides the ghost on a miss with transparency 1, styles from BlockTypes, and tints with BLOCKED_COLOR when `check` fails."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "`destroy` calls `UnbindFromRenderStep` with a unique bind name, destroys the part, and sets `_destroyed`, which `_update` checks. The failed 'disconnects' check only reflects that it uses BindToRenderStep instead of a connection."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 5,
+          "note": "`Fields` with `typeof(setmetatable(...))` declares every field, all set together in `new`. The part is non-colliding, has CanQuery off, and is filtered from the raycast."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "`getPlacement(): (boolean, Vector3?, string?)` is a typed boolean plus optional position, with reason 'NoTarget' on a miss, and every method is typed."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "An `Options` table carries `Transparency` and `MaxDistance`, with defaults in `DEFAULT_TRANSPARENCY` and `DEFAULT_MAX_DISTANCE`."
+        },
+        {
+          "criterion": "Scope / merge-ready",
+          "score": 4,
+          "note": "Stays in scope and the tools pass, but it breaks repo conventions: the class table is named `GhostPreview` instead of `Module`, services use `local` instead of `const`, and method names are camelCase."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Clean, minimal design that does everything the task asks",
+        "Vector3? from GetPlacement is a simple, consistent answer for the controller",
+        "Follows the project conventions",
+        "Rebuilds the raycast filter only when the character changes"
+      ],
+      "weaknesses": [
+        "Every spot shows as blocked until PlacedBlocks replicates (documented, but a little odd)",
+        "SetBlockType only shows on the next frame",
+        "Destroy has no explicit guard against being called twice, though calling it again is harmless"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Destroy is idempotent behind a `_destroyed` guard",
+        "Updates right after the camera moves, so the ghost doesn't lag the view",
+        "Returns the rejection reason from check",
+        "Slight inset avoids z-fighting with neighboring blocks"
+      ],
+      "weaknesses": [
+        "Doesn't follow the project conventions (Module naming, const)",
+        "If PlacedBlocks hasn't replicated yet, the stand-in empty folder makes every spot look placeable",
+        "Builds a new filter table every frame",
+        "The hidden ghost stays parented in workspace"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

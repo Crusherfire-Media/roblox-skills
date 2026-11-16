@@ -1,0 +1,118 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts follow the inventory rules, handle timing safely and return failure reasons. B is a little more careful at runtime: it retries failed loads and guards against loading the same player twice. A wins anyway, because B gives up the type safety the rubric asks for: `blockType: unknown`, `{ [string]: number }` counts, and a per-player table that isn't optional. B also breaks the project's require-path and module-naming conventions, and its yielding loader's name doesn't say it yields. A uses the closed `BlockType` type and `Counts?`, follows the conventions, and names its yielding loader `loadCountsAsync`.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Implements the rules",
+          "score": 5,
+          "note": "It uses `DATA_STORE_NAME = \"BlockInventory\"` with the key `player_{UserId}` and starts everyone at 20 through `buildCounts(nil)`. `TakeBlock` refuses at `count <= 0` and `ReturnBlock` refuses at `MAX_HELD_COUNT`, while `GrantBlocks` has no cap. It also has `GetCount` and clears a player's counts in `onPlayerRemoving`. The failed 'uses the BlockInventory DataStore' check comes from the name being stored in a constant."
+        },
+        {
+          "criterion": "Handles timing",
+          "score": 4,
+          "note": "Calls for a player who isn't loaded return `NotLoaded` or nil. The `player.Parent ~= Players` check after the load keeps counts from being stored for a player who already left. Players already in the server are loaded with `task.spawn`, and requiring the module never yields. It has no guard against loading the same player twice, but that is a minor gap."
+        },
+        {
+          "criterion": "Reports expected failures",
+          "score": 5,
+          "note": "It returns typed reasons (`TakeFailure` is \"NotLoaded\" | \"OutOfBlocks\", plus `AtLimit`). It throws only for caller mistakes: an unknown block type or a grant amount that isn't a positive whole number. The DataStore load is wrapped in pcall and falls back to the starting counts."
+        },
+        {
+          "criterion": "Types catch mistakes",
+          "score": 5,
+          "note": "Parameters are typed `blockType: BlockType`, the table is `{ [Player]: Counts? }`, and every public function has a typed return. The `blockType :: BlockType` cast in `buildCounts` is the expected workaround for the checker."
+        },
+        {
+          "criterion": "Call sites read clearly",
+          "score": 5,
+          "note": "Going past the cap has its own function, `GrantBlocks`. Names are spelled out in full, and `loadCountsAsync` signals that it yields."
+        },
+        {
+          "criterion": "Scope and merge readiness",
+          "score": 5,
+          "note": "It is a single module that reuses BlockTypes, all three tools pass, and it follows the project conventions (a string require path and a table named `Module`)."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Implements the rules",
+          "score": 5,
+          "note": "It uses `STORE_NAME = \"BlockInventory\"` with the key `player_{UserId}` and starts everyone at 20. `take` refuses at 0 and `giveBack` stops at `MAX_COUNT`, while `grant` has no cap. It also has `getCount` and clears a player's counts in `unloadPlayer`."
+        },
+        {
+          "criterion": "Handles timing",
+          "score": 5,
+          "note": "The `loadingPlayers` table throws away loads that finish after the player left, and it also prevents loading the same player twice. Players already in the server are spawned for loading, and `GetDataStore` at require time doesn't yield."
+        },
+        {
+          "criterion": "Reports expected failures",
+          "score": 5,
+          "note": "It returns a single `Failure` union (NotLoaded, NoneLeft, AtLimit, InvalidAmount, UnknownBlockType) and never throws. `GetAsync` is called under pcall, with retries."
+        },
+        {
+          "criterion": "Types catch mistakes",
+          "score": 2,
+          "note": "`blockType` is typed `unknown`, `Counts` is `{ [string]: number }`, and `countsByPlayer` is `{ [Player]: Counts }` without the optional marker. A misspelled block type is therefore not a type error, and a missing player isn't flagged by the checker."
+        },
+        {
+          "criterion": "Call sites read clearly",
+          "score": 4,
+          "note": "Going past the cap has its own function, `grant`. However, the yielding loaders `loadPlayer` and `fetchSave` don't have `Async` in their names."
+        },
+        {
+          "criterion": "Scope and merge readiness",
+          "score": 4,
+          "note": "It is a single module that reuses BlockTypes and passes all three tools. It breaks two project conventions: it requires by instance path (`require(ReplicatedStorage.Shared.BlockTypes)`) and names the returned table `BlockInventory` instead of `Module`."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Uses the closed `BlockType` type and an optional `Counts?` table, so type mistakes are caught",
+        "Separate `GrantBlocks` function for gifts that can pass 99",
+        "Checks after the load that the player is still in the server",
+        "Typed failure reasons for each function",
+        "The yielding loader is named with `Async`"
+      ],
+      "weaknesses": [
+        "No guard against loading the same player twice",
+        "Throwing on an unknown block type could surprise a caller passing raw remote input, though the type system covers this",
+        "No retry when the load fails"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Thorough timing handling with `loadingPlayers` and protection against double loads",
+        "Retries a failed load",
+        "Never throws; every outcome is a named failure"
+      ],
+      "weaknesses": [
+        "Block types are typed `unknown` or `string` instead of `BlockType`",
+        "The per-player table type is not optional",
+        "Requires by instance path instead of a string path, and the returned table isn't named `Module`",
+        "The yielding loader's name doesn't say it yields"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 7
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

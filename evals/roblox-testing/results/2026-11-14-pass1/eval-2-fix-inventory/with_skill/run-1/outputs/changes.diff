@@ -1,0 +1,73 @@
+diff --git a/src/ServerScriptService/Inventory/BlockInventory.luau b/src/ServerScriptService/Inventory/BlockInventory.luau
+index daa89f7..c8bee2f 100644
+--- a/src/ServerScriptService/Inventory/BlockInventory.luau
++++ b/src/ServerScriptService/Inventory/BlockInventory.luau
+@@ -4,7 +4,7 @@
+ ]]
+ 
+ export type Inventory = {
+-	Counts: { [string]: number },
++	Counts: { [string]: number? },
+ }
+ 
+ local BlockInventory = {}
+@@ -45,11 +45,11 @@ end
+ 	Otherwise changes nothing and returns false.
+ ]]
+ function BlockInventory.take(inventory: Inventory, name: string, amount: number): boolean
+-	local current = inventory.Counts[name]
+-	if current and current < amount then
++	local current = inventory.Counts[name] or 0
++	if current < amount then
+ 		return false
+ 	end
+-	inventory.Counts[name] = (current or 0) - amount
++	inventory.Counts[name] = current - amount
+ 	return true
+ end
+ 
+diff --git a/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+new file mode 100644
+index 0000000..5e788ef
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+@@ -0,0 +1,39 @@
++--!strict
++const JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
++const describe = JestGlobals.describe
++const expect = JestGlobals.expect
++const it = JestGlobals.it
++
++const BlockInventory = require("@game/ServerScriptService/Inventory/BlockInventory")
++
++type RefusalRow = {
++	Case: string,
++	Held: number?,
++	Amount: number,
++	Left: number,
++}
++
++const REFUSAL_ROWS: { RefusalRow } = {
++	{ Case = "a type the inventory never held", Held = nil, Amount = 1, Left = 0 },
++	{ Case = "more than the inventory holds", Held = 2, Amount = 3, Left = 2 },
++}
++
++describe("BlockInventory", function()
++	it.each(REFUSAL_ROWS)("refuses to take $Case and changes nothing", function(row: RefusalRow)
++		local inventory = BlockInventory.new({ Window = row.Held })
++
++		local wasTaken = BlockInventory.take(inventory, "Window", row.Amount)
++
++		expect(wasTaken).toBe(false)
++		expect(BlockInventory.count(inventory, "Window")).toBe(row.Left)
++	end)
++
++	it("takes the last blocks of a type, leaving zero", function()
++		local inventory = BlockInventory.new({ Brick = 1 })
++
++		local wasTaken = BlockInventory.take(inventory, "Brick", 1)
++
++		expect(wasTaken).toBe(true)
++		expect(BlockInventory.count(inventory, "Brick")).toBe(0)
++	end)
++end)

@@ -1,0 +1,134 @@
+diff --git a/PR_DESCRIPTION.md b/PR_DESCRIPTION.md
+new file mode 100644
+index 0000000..5de1ca7
+--- /dev/null
++++ b/PR_DESCRIPTION.md
+@@ -0,0 +1,49 @@
++# Add t and use it to check PlaceBlock arguments
++
++## Summary
++
++- Adds the `t` runtime type checker (`osyrisrblx/t`, pinned to `=3.1.1`, the latest release on
++  the Wally index) to `pesde.toml` under the alias `t`. It installs from Wally through pesde like
++  the other packages, into `roblox_packages`, which mounts at `ReplicatedStorage.Packages`.
++- `BlockPlacement.server.luau` now checks the PlaceBlock remote's arguments with one
++  `t.tuple(t.string, isVector3WithoutNaN)` check, which later remotes can follow.
++- Lists `t` in the README's package table.
++
++## Checks kept
++
++Every check the handler made before still runs, in the same order:
++
++| Check | Before | Now |
++|---|---|---|
++| Block type name is a string | `typeof(...) ~= "string"` | `t.string` in the tuple |
++| Position is a Vector3 | `typeof(...) ~= "Vector3"` | `t.Vector3` inside `isVector3WithoutNaN` |
++| Position has no NaN component | `position ~= position` | Same comparison inside `isVector3WithoutNaN`, since `t.Vector3` only checks the type |
++| Block type exists | `BlockTypes.ByName` lookup | Unchanged |
++| Rate limit, character present, cell above ground and free, within reach | Handler code | Unchanged |
++
++The block type lookup stays a lookup instead of `t.keyOf`, because the handler needs the
++`BlockType` it returns anyway. t's checks don't narrow Luau types, so the handler casts
++`blockTypeName :: string` and `position :: Vector3` after the check passes.
++
++## Before testing
++
++1. **Run `pesde install`** at the repo root (stop `rojo serve` first, start it again after). Until
++   then `ReplicatedStorage.Packages.t` doesn't exist and the BlockPlacement script errors at its
++   `require`.
++2. **Commit the updated `pesde.lock`** that the install writes. This PR changes `pesde.toml` but
++   not the lock file, because the install couldn't run while it was written.
++3. Regenerate the sourcemap so luau-lsp can type `t`:
++   `rojo sourcemap default.project.json -o sourcemap.json --include-non-scripts`.
++
++## Not yet verified
++
++The install, `luau-lsp analyze`, `selene`, `stylua --check`, and a playtest have not been run on
++this change. Please run the README's Checks after installing, then playtest:
++
++- Place a block normally: it appears.
++- With the command bar switched to the client during a playtest, call
++  `PlaceBlock:FireServer(...)` with bad arguments: a number as the
++  name, a string as the position, `Vector3.new(0 / 0, 0, 0)`, and an unknown block name. None
++  places a block or errors on the server.
++
++🤖 Generated with [Claude Code](https://claude.com/claude-code)
+diff --git a/README.md b/README.md
+index 9e549e3..5b1bda3 100644
+--- a/README.md
++++ b/README.md
+@@ -33,6 +33,7 @@ All of them come from Wally through pesde. Require each one through its link, ne
+ | CharmSync (`littensy/charm-sync`) | 0.4.1 | `require(ReplicatedStorage.Packages.CharmSync)` |
+ | UI Labs utilities (`pepeeltoro41/ui-labs`) | 2.4.2 | `require(ReplicatedStorage.Packages.UILabs)` |
+ | Module Loader (`crusherfire/module-loader`) | 4.0.1 | `require(ReplicatedStorage.Packages.ModuleLoader)` |
++| t (`osyrisrblx/t`) | 3.1.1 | `require(ReplicatedStorage.Packages.t)` |
+ | Jest Roblox (`roblox/jest`) | 3.20.1 | `require(ServerScriptService.Tests.Packages.Jest)` |
+ | Jest globals (`roblox/jest-globals`) | 3.20.1 | `require(ServerScriptService.Tests.Packages.JestGlobals)` |
+ 
+diff --git a/pesde.toml b/pesde.toml
+index d196787..e10bc52 100644
+--- a/pesde.toml
++++ b/pesde.toml
+@@ -23,6 +23,7 @@ VideCharm = { wally = "littensy/vide-charm", version = "=0.4.1" }
+ CharmSync = { wally = "littensy/charm-sync", version = "=0.4.1" }
+ UILabs = { wally = "pepeeltoro41/ui-labs", version = "=2.4.2" }
+ ModuleLoader = { wally = "crusherfire/module-loader", version = "=4.0.1" }
++t = { wally = "osyrisrblx/t", version = "=3.1.1" }
+ 
+ [dev_dependencies]
+ scripts_rojo = { name = "pesde/scripts_rojo", version = "^0.2.0", target = "lune" }
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index 812f4f9..4a9062f 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -7,6 +7,8 @@ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local Workspace = game:GetService("Workspace")
+ 
++local t = require(ReplicatedStorage.Packages.t)
++
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ 
+ local BLOCK_SIZE = BlockTypes.BlockSize
+@@ -34,16 +36,26 @@ local function snapToCell(position: Vector3): Vector3
+ 	return Vector3.new(snapAxis(position.X), snapAxis(position.Y), snapAxis(position.Z))
+ end
+ 
+-local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+-	if typeof(blockTypeName) ~= "string" or typeof(position) ~= "Vector3" then
+-		return
++local function isVector3WithoutNaN(value: unknown): (boolean, string?)
++	local isVector3, message = t.Vector3(value)
++	if not isVector3 then
++		return false, message
++	end
++	-- t.Vector3 checks only the type. NaN is the only value not equal to itself.
++	if value ~= value then
++		return false, "Vector3 has a NaN component"
+ 	end
+-	-- NaN is the only value not equal to itself.
+-	if position ~= position then
++	return true, nil
++end
++
++local isPlaceBlockArguments = t.tuple(t.string, isVector3WithoutNaN)
++
++local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
++	if not isPlaceBlockArguments(blockTypeName, position) then
+ 		return
+ 	end
+ 
+-	local blockType = BlockTypes.ByName[blockTypeName]
++	local blockType = BlockTypes.ByName[blockTypeName :: string]
+ 	if not blockType then
+ 		return
+ 	end
+@@ -59,7 +71,7 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 		return
+ 	end
+ 
+-	local cell = snapToCell(position)
++	local cell = snapToCell(position :: Vector3)
+ 	if cell.Y < 0 or occupied[cell] then
+ 		return
+ 	end

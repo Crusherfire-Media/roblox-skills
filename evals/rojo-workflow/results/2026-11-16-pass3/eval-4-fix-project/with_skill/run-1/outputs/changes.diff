@@ -1,0 +1,133 @@
+diff --git a/default.project.json b/default.project.json
+index 71017cf..8ceb2fc 100644
+--- a/default.project.json
++++ b/default.project.json
+@@ -1,6 +1,9 @@
+-﻿{
++{
+   "name": "eval-sandbox",
+   "servePort": 34872,
++  "globIgnorePaths": [
++    "src/ServerScriptService/Tests"
++  ],
+   "tree": {
+     "$className": "DataModel",
+     "ReplicatedStorage": {
+@@ -10,16 +13,16 @@
+       },
+       "Packages": {
+         "$path": "roblox_packages"
+-      },
+-      "TestPackages": {
+-        "$path": "test_packages/roblox_packages"
+       }
+     },
+     "ServerScriptService": {
+       "$className": "ServerScriptService",
+       "$path": "src/ServerScriptService",
+       "Tests": {
+-        "$path": "src/ServerScriptService/Tests"
++        "$path": "src/ServerScriptService/Tests",
++        "Packages": {
++          "$path": "test_packages/roblox_packages"
++        }
+       }
+     },
+     "StarterGui": {
+@@ -30,7 +33,7 @@
+       "$className": "StarterPlayer",
+       "StarterPlayerScripts": {
+         "$className": "StarterPlayerScripts",
+-        "$path": "src/StarterPlayer/StarterPlayerScript"
++        "$path": "src/StarterPlayer/StarterPlayerScripts"
+       }
+     },
+     "Players": {
+diff --git a/docs/rojo-workflow.md b/docs/rojo-workflow.md
+new file mode 100644
+index 0000000..e66bf67
+--- /dev/null
++++ b/docs/rojo-workflow.md
+@@ -0,0 +1,82 @@
++# Working day to day with Rojo
++
++Git is the source of truth for this game. Code lives in files under `src/`, and `rojo serve`
++syncs those files into your own dev place in Studio. The place is a build of the repo, so it is
++never the master copy. The Layout table in the [README](../README.md) shows which folder
++becomes which instance.
++
++## Setup (once)
++
++1. Install the tools: `rokit install` (from `rokit.toml`).
++2. Install the packages: `pesde install`. Run it again in `test_packages/` for Jest. Do this
++   again whenever `pesde.toml` or `pesde.lock` changes, including after a pull.
++3. Make your own dev place: publish a copy of the place to your own account or group. Never
++   serve into a shared or live place.
++4. Add your dev place id to `servePlaceIds` in `default.project.json` (in your own change, or
++   locally). Rojo then refuses to sync into any other place.
++
++## Daily loop
++
++1. Pull `main` and create your branch. Stop `rojo serve` first: a checkout, pull, rebase, stash,
++   or `pesde install` rewrites many watched files at once, and Rojo can crash on that.
++2. Start `rojo serve` from the repo root (port 34872). In Studio, open your dev place and click
++   **Connect** in the Rojo plugin.
++3. Edit files in your editor. Each save syncs into Studio.
++4. Use Studio to look, playtest, and run the Jest specs (`ServerScriptService.Tests.Specs`).
++5. Before you push, run the checks in the README (`rojo sourcemap`, `luau-lsp analyze`, `selene`,
++   `stylua --check`). Then read `git status` and `git diff`: they should show only the files you
++   meant to change.
++
++## Where changes go
++
++| You want to... | Do it in |
++|---|---|
++| Change a script or module | Its `.luau` file under `src/` |
++| Add a Script, LocalScript, or ModuleScript | A new file in the right `src/` folder (`.server.luau`, `.client.luau`, `.luau`) |
++| Add a spec | `src/ServerScriptService/Tests/Specs/<Name>.spec.luau` |
++| Set attributes or tags on a synced instance | A `<Name>.meta.json` beside the file (`init.meta.json` for a folder) |
++| Add a library | `pesde.toml`, then `pesde install`. Never edit `roblox_packages/` |
++| Change how folders map into the place | `default.project.json`. See the last section |
++
++**Don't edit synced instances in Studio.** A script edit, property, attribute, or new child made
++in Studio under a synced folder is overwritten by the next sync, and Git never sees it. If you
++built something real in Studio (a model or GUI), export it into the repo as an `.rbxm`
++(**Save to File**) and commit that.
++
++## What to check while serving
++
++- **Studio still receives changes.** Rojo 7.7.0 and 7.7.1 can crash when a file or folder is
++  deleted, moved, or renamed while serving. After you do any of those, look at the terminal for
++  `Rojo crashed!`. If it stopped, restart `rojo serve` and click **Connect** again.
++- **The new code arrived before you test.** Open the script in Studio and confirm your edit is
++  there. If an error's line number didn't move with your edit, you are still running old code.
++- **You're connected to the right place and branch.** The place runs whatever the connected
++  server's folder has checked out. A merged pull request changes nothing there until you pull.
++- **One server per place.** If you use a second worktree, give it its own port
++  (`rojo serve --port <port>`). Point the plugin at only one server at a time.
++
++## Keeping `default.project.json` healthy
++
++This file maps every folder into the place. A bad merge here breaks sync, the sourcemap, type
++checking, and Jest for everyone.
++
++- **The README's Layout table is the spec.** Any change to a mount updates the table in the same
++  pull request.
++- **Resolve conflicts by hand against the table.** Don't take "both sides" blindly. Things to
++  watch for:
++  - Duplicated nodes, such as `TestPackages` landing in `ReplicatedStorage`. Test packages go in
++    `ServerScriptService.Tests.Packages`.
++  - Typos in `$path`, such as `StarterPlayerScript` for `StarterPlayerScripts`. A `$path`
++    that doesn't exist makes `rojo serve` and `rojo sourcemap` fail.
++  - Dropped settings, such as `globIgnorePaths`. It stops `src/ServerScriptService/Tests` from
++    being mapped a second time under `ServerScriptService`, so keep it.
++- **Save as UTF-8 without a BOM.** Rojo fails with `Failed to parse JSONC` on a file that starts
++  with a byte order mark. Windows PowerShell 5.1's `Set-Content` and `Out-File` add one, so save
++  from your editor. To check, run `head -c 3 default.project.json | od -An -tx1`: the output must
++  not be `ef bb bf`.
++- **Verify before you commit.** Run
++  `rojo sourcemap default.project.json -o sourcemap.json --include-non-scripts`. It must succeed,
++  and `sourcemap.json` should show the tree from the Layout table, including
++  `ServerScriptService.Tests.Packages.Jest`. Then reconnect `rojo serve` and confirm the specs
++  still find their packages.
++- **Get a review** for any project-file change, even a one-liner.

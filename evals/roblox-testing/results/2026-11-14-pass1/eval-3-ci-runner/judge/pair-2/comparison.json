@@ -1,0 +1,125 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Attempt A's task script raises an error when specs fail, as criterion 1 requires, and its Luau file passes all three checks. Attempt B's script returns normally when specs fail, leaving the pass/fail decision to the workflow's JSON parsing, and its own code fails the luau-lsp type check and the StyLua format check. Both workflows pin the task to the uploaded version, poll it under their own deadlines, use concurrency groups, and generate a CI project file with LoadStringEnabled. B's reporting extras don't make up for its weaker criterion-1 result and its check failures.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. run-specs.luau runs runCLI and errors on failure",
+          "score": 5,
+          "note": "Calls runCLI(...):awaitStatus() and errors when status == \"Rejected\" or when results.success is false, listing the failures."
+        },
+        {
+          "criterion": "2. Toolchain, packages, build, upload",
+          "score": 5,
+          "note": "Installs Rokit, runs `rokit install` and `pesde install --locked`, runs `rojo build ci.project.json`, and uploads through the universes/v1 versions endpoint with versionType=Saved."
+        },
+        {
+          "criterion": "3. Single pinned task, polling, logs, fail unless COMPLETE",
+          "score": 5,
+          "note": "create_task uses versions/{version}/luau-execution-session-tasks; wait_for_task has a 480 s deadline; logs are printed and the job exits 1 unless the task is COMPLETE."
+        },
+        {
+          "criterion": "4. Open Cloud limits",
+          "score": 5,
+          "note": "Job-level concurrency group with cancel-in-progress, a 429 retry limited to 3 attempts that honors retry-after, and timeout-minutes: 20."
+        },
+        {
+          "criterion": "5. LoadStringEnabled in CI build",
+          "score": 5,
+          "note": "jq writes LoadStringEnabled = true into a generated ci.project.json, which is then built; default.project.json is unchanged."
+        },
+        {
+          "criterion": "6. Secrets handling",
+          "score": 5,
+          "note": "Secrets reach the Python step only through env and are never echoed; no IDs are hard-coded."
+        },
+        {
+          "criterion": "7. Checks and validity",
+          "score": 5,
+          "note": "luau-lsp, selene, and StyLua all pass; the YAML is valid."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. run-specs.luau runs runCLI and errors on failure",
+          "score": 2,
+          "note": "Errors only when status ~= \"Resolved\"; when specs fail it returns a JSON string normally, so the task ends COMPLETE, which this criterion rules out."
+        },
+        {
+          "criterion": "2. Toolchain, packages, build, upload",
+          "score": 5,
+          "note": "Uses setup-rokit, `pesde install --locked`, `rojo build ci.project.json`, and uploads with curl and versionType=Saved."
+        },
+        {
+          "criterion": "3. Single pinned task, polling, logs, fail unless COMPLETE",
+          "score": 5,
+          "note": "Uses the versions/${PLACE_VERSION} endpoint, a 900 s deadline, paginated logs, and fails when the state isn't COMPLETE (plus checks success)."
+        },
+        {
+          "criterion": "4. Open Cloud limits",
+          "score": 4,
+          "note": "Has a concurrency group and timeout-minutes; curl --retry 3 retries the task POST on 429 and recent curl honors Retry-After, but the retry behavior is implicit."
+        },
+        {
+          "criterion": "5. LoadStringEnabled in CI build",
+          "score": 5,
+          "note": "jq merges LoadStringEnabled: true into a generated ci.project.json, and the script also checks up front that loadstring is available."
+        },
+        {
+          "criterion": "6. Secrets handling",
+          "score": 5,
+          "note": "Secrets come from job env, with a check for missing secrets that prints only names; nothing is hard-coded."
+        },
+        {
+          "criterion": "7. Checks and validity",
+          "score": 2,
+          "note": "luau-lsp reports a TypeError at run-specs.luau line 38 (pcall(loadstring, ...)), and StyLua reports a formatting diff."
+        }
+      ],
+      "overall_score": 6
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "The task script errors on a rejected run or a failed run, so the task ends FAILED",
+        "The task is pinned to the uploaded version and polled under its own deadline, with logs printed",
+        "Honors 429 retry-after with a retry limit",
+        "All Luau checks pass"
+      ],
+      "weaknesses": [
+        "Writes jq's `$properties` path without handling the case where it is missing (jq creates it anyway, so this is minor)",
+        "Concurrency group uses github.ref rather than the PR number (still works)"
+      ]
+    },
+    "B": {
+      "score": 6,
+      "strengths": [
+        "Detailed failure annotations and a job summary",
+        "Fails when no tests run",
+        "Checks secrets up front and lists the read scope the key needs"
+      ],
+      "weaknesses": [
+        "The task script returns normally when specs fail, so pass/fail depends on the workflow parsing JSON",
+        "Type error and StyLua failure in its own code",
+        "Large inline bash in the workflow is harder to maintain"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 6
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

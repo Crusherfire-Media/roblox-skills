@@ -1,0 +1,237 @@
+diff --git a/tools/profiling/memory.luau b/tools/profiling/memory.luau
+new file mode 100644
+index 0000000..30b2191
+--- /dev/null
++++ b/tools/profiling/memory.luau
+@@ -0,0 +1,231 @@
++-- Usage: lute memory.luau <file.gprx> [topN]
++-- Frames print as id/abs: id is what LibMP scripts take (FetchFrameDesc,
++-- RewindTo), abs is the absolute frame id shown in the MicroProfiler UI.
++-- Values are printed as stored in the dump, without unit conversion.
++local process = require("@lute/process")
++local LibMP = require("./LibMP")
++
++local path = process.args[2]
++local topN = tonumber(process.args[3]) or 10
++
++local session = LibMP.Session.OpenFromFile(path)
++assert(session, "could not open " .. tostring(path))
++
++local minId, maxId = session:GetFrameIdMin(), session:GetFrameIdMax()
++print(("frames %d..%d (%d)"):format(minId, maxId, maxId - minId + 1))
++
++local memoryId = session:FindCounterId("/memory")
++if memoryId == 0 then
++	memoryId = session:FindCounterId("memory")
++end
++if memoryId == 0 then
++	session:Dispose()
++	error("no memory counter in " .. path)
++end
++
++local descCache = {}
++local function getDesc(counterId)
++	local desc = descCache[counterId]
++	if not desc then
++		desc = session:FetchCounterDesc(counterId)
++		descCache[counterId] = desc
++	end
++	return desc
++end
++
++local function getChildren(counterId)
++	local children = {}
++	local childId = getDesc(counterId).FirstChild
++	while childId ~= 0 do
++		table.insert(children, childId)
++		childId = getDesc(childId).Sibling
++	end
++	return children
++end
++
++local pathCache = {}
++local function getPath(counterId)
++	local cached = pathCache[counterId]
++	if cached then
++		return cached
++	end
++	local desc = getDesc(counterId)
++	local result = desc.CounterName
++	if desc.Parent ~= 0 then
++		result = getPath(desc.Parent) .. "/" .. result
++	end
++	pathCache[counterId] = result
++	return result
++end
++
++local function collectLeaves(counterId, leaves)
++	local children = getChildren(counterId)
++	if #children == 0 then
++		table.insert(leaves, counterId)
++	end
++	for _, childId in children do
++		collectLeaves(childId, leaves)
++	end
++	return leaves
++end
++
++local samplesCache = {}
++local function getSamples(counterId)
++	local samples = samplesCache[counterId]
++	if not samples then
++		samples = session:FetchCounterSamples(counterId) or {}
++		table.sort(samples, function(a, b)
++			return a.FrameId < b.FrameId
++		end)
++		samplesCache[counterId] = samples
++	end
++	return samples
++end
++
++--[[
++	A container node can have no samples of its own. Its value per frame is
++	then the sum of its leaves, holding each leaf at its last known value on
++	frames where it has no sample, so a missing sample does not read as a drop.
++]]
++local function sumLeafSamples(leafIds)
++	local frameSet = {}
++	local valuesByLeaf = {}
++	for _, leafId in leafIds do
++		local values = {}
++		for _, sample in getSamples(leafId) do
++			values[sample.FrameId] = sample.Value
++			frameSet[sample.FrameId] = true
++		end
++		valuesByLeaf[leafId] = values
++	end
++
++	local frameIds = {}
++	for frameId in frameSet do
++		table.insert(frameIds, frameId)
++	end
++	table.sort(frameIds)
++
++	local current = {}
++	local summed = {}
++	for _, frameId in frameIds do
++		local total = 0
++		for _, leafId in leafIds do
++			local value = valuesByLeaf[leafId][frameId]
++			if value then
++				current[leafId] = value
++			end
++			total += current[leafId] or 0
++		end
++		table.insert(summed, { FrameId = frameId, Value = total })
++	end
++	return summed
++end
++
++local function summarize(samples)
++	if #samples == 0 then
++		return nil
++	end
++	local peak = samples[1]
++	for _, sample in samples do
++		if sample.Value > peak.Value then
++			peak = sample
++		end
++	end
++	local first, last = samples[1], samples[#samples]
++	return {
++		First = first.Value,
++		Last = last.Value,
++		Peak = peak.Value,
++		PeakFrameId = peak.FrameId,
++		Growth = last.Value - first.Value,
++	}
++end
++
++local function formatFrame(frameId)
++	if frameId >= minId and frameId <= maxId then
++		local desc = session:FetchFrameDesc(frameId)
++		if desc then
++			return ("%d/%d"):format(frameId, desc.FrameAbsoluteId)
++		end
++	end
++	return ("%d/?"):format(frameId)
++end
++
++local function byGrowth(a, b)
++	return a.Stats.Growth > b.Stats.Growth
++end
++
++local function printTable(rows)
++	local nameWidth = 4
++	for _, row in rows do
++		nameWidth = math.max(nameWidth, #row.Name)
++	end
++	local rowFormat = "  %-" .. nameWidth .. "s  %14s  %14s  %14s  %14s  %s"
++	print(rowFormat:format("name", "first", "last", "peak", "growth", "peak frame"))
++	for _, row in rows do
++		local stats = row.Stats
++		print(
++			rowFormat:format(
++				row.Name,
++				("%.1f"):format(stats.First),
++				("%.1f"):format(stats.Last),
++				("%.1f"):format(stats.Peak),
++				("%+.1f"):format(stats.Growth),
++				formatFrame(stats.PeakFrameId)
++			)
++		)
++	end
++end
++
++local memoryPath = getPath(memoryId)
++local totalStats = summarize(getSamples(memoryId))
++if totalStats then
++	print(("\n%s total:"):format(memoryPath))
++	printTable({ { Name = memoryPath, Stats = totalStats } })
++end
++
++local subsystems = {}
++local skipped = {}
++for _, childId in getChildren(memoryId) do
++	local name = getDesc(childId).CounterName
++	local stats = summarize(getSamples(childId))
++	if not stats then
++		local leaves = collectLeaves(childId, {})
++		if #leaves > 1 or leaves[1] ~= childId then
++			stats = summarize(sumLeafSamples(leaves))
++			name ..= (" (sum of %d)"):format(#leaves)
++		end
++	end
++	if stats then
++		table.insert(subsystems, { Name = name, Stats = stats })
++	else
++		table.insert(skipped, name)
++	end
++end
++table.sort(subsystems, byGrowth)
++
++print(("\nsubsystems under %s, by growth (first to last):"):format(memoryPath))
++printTable(subsystems)
++if #skipped > 0 then
++	print("  no samples: " .. table.concat(skipped, ", "))
++end
++
++local leafRows = {}
++for _, leafId in collectLeaves(memoryId, {}) do
++	if leafId ~= memoryId then
++		local stats = summarize(getSamples(leafId))
++		if stats then
++			table.insert(leafRows, { Name = getPath(leafId), Stats = stats })
++		end
++	end
++end
++table.sort(leafRows, byGrowth)
++
++local shown = {}
++for i = 1, math.min(topN, #leafRows) do
++	table.insert(shown, leafRows[i])
++end
++print(("\ntop %d counters under %s by growth:"):format(#shown, memoryPath))
++printTable(shown)
++
++session:Dispose()

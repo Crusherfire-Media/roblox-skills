@@ -1,0 +1,126 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts catch the planted reach bug and pass every static check. A is stronger: it checks exact rejection reasons, uses hand-worked literal expected values, and checks that occupied is unchanged after both accepted and rejected calls. B is cleaner, but it only checks booleans, computes expected values by scaling with SIZE, checks mutation only on accept, and its @game string requires may fail at runtime.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Spec at path, nothing else changed",
+          "score": 5,
+          "note": "Only adds src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau; PlacementRules.luau untouched."
+        },
+        {
+          "criterion": "Jest Roblox usage",
+          "score": 5,
+          "note": "describe/it/expect come from require(script.Parent.Parent.Packages.JestGlobals), PlacementRules is required by its ReplicatedStorage path, and every matcher uses a dot (expect(ok).toBe(false))."
+        },
+        {
+          "criterion": "Rule coverage",
+          "score": 5,
+          "note": "Covers unknown type, non-Vector3, NaN/inf, height, nil root ('no character'), reach, occupied, snap centers, and an occupied-unchanged test for both accept and reject."
+        },
+        {
+          "criterion": "Both sides of boundaries",
+          "score": 4,
+          "note": "Reach tests at 24-0.01, exactly 24, and 24.01; height tests at Y 0 vs -0.01 and 199.9->198 vs 200->202; somewhat redundant (each NaN/inf axis, many non-Vector3 types), though grouped into single tests."
+        },
+        {
+          "criterion": "Catches planted bug",
+          "score": 5,
+          "note": "'accepts a cell exactly MaxReach away' expects ok == true, has a BUG comment naming `distance >= MaxReach` vs the doc, and is left failing on purpose."
+        },
+        {
+          "criterion": "Independent expected values / no shared state",
+          "score": 4,
+          "note": "Mostly literals (snap (5,-1,101) -> 6,-2,102), but a few use HALF derived from BlockSize; no shared mutable state (`cell` is an immutable Vector3)."
+        },
+        {
+          "criterion": "Static checks pass",
+          "score": 5,
+          "note": "luau-lsp, selene, and StyLua all pass."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Spec at path, nothing else changed",
+          "score": 5,
+          "note": "Only the spec file is added."
+        },
+        {
+          "criterion": "Jest Roblox usage",
+          "score": 4,
+          "note": "Takes describe/it/expect from JestGlobals with dot matchers and well-formed it.each rows, but uses `@game/...` string requires, which may not resolve under Jest Roblox's runtime."
+        },
+        {
+          "criterion": "Rule coverage",
+          "score": 4,
+          "note": "Every rule appears, but bad-input rows only assert isAllowed == false without a reason, so a rejection by the wrong rule would still pass; occupied-unchanged is only checked on accept."
+        },
+        {
+          "criterion": "Both sides of boundaries",
+          "score": 5,
+          "note": "Height rows Y=0/-0.01 and MaxHeight±SIZE/2, reach rows ±0.01 plus an exact test; variations are compact it.each rows."
+        },
+        {
+          "criterion": "Catches planted bug",
+          "score": 5,
+          "note": "'accepts a cell exactly MaxReach from the character' expects true, with a comment explaining >= vs >."
+        },
+        {
+          "criterion": "Independent expected values / no shared state",
+          "score": 3,
+          "note": "Centers are computed as `Vector3.new(1.5,0.5,2.5) * SIZE` and the height rows use `MaxHeight - SIZE/2`, rather than literals."
+        },
+        {
+          "criterion": "Static checks pass",
+          "score": 5,
+          "note": "luau-lsp, selene, and StyLua all pass."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Checks exact reason strings, so it proves which rule rejected",
+        "Thorough boundary coverage for reach and height with hand-worked literals",
+        "Planted bug test is left failing with a clear comment",
+        "Occupied-unchanged check covers both accepted and rejected calls; also tests the order of checks"
+      ],
+      "weaknesses": [
+        "Verbose, with some redundant variations (every NaN axis, many non-Vector3 types)",
+        "Some expected values use HALF derived from BlockSize"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Concise, well-organised it.each tables",
+        "Correct boundary rows and a commented failing test for the planted bug",
+        "Test titles that read clearly"
+      ],
+      "weaknesses": [
+        "Never asserts reason strings, so a rejection by the wrong rule still passes",
+        "Expected values are scaled by SIZE rather than written as literals",
+        "Mutation check only covers the accept path",
+        "String requires with the @game alias are a runtime risk under Jest"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 9,
+    "with_skill": 7
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

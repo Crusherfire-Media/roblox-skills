@@ -1,0 +1,1503 @@
+diff --git a/src/ServerScriptService/Stories/Components/menuButton.story.luau b/src/ServerScriptService/Stories/Components/menuButton.story.luau
+new file mode 100644
+index 0000000..03a8a84
+--- /dev/null
++++ b/src/ServerScriptService/Stories/Components/menuButton.story.luau
+@@ -0,0 +1,109 @@
++--!strict
++
++const UserInputService = game:GetService("UserInputService")
++
++const UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const menuButton = require("@game/StarterPlayer/StarterPlayerScripts/UI/Components/menuButton")
++
++const create = Vide.create
++
++const CONTROLS = {
++	Content = UILabs.Ordered(
++		UILabs.ControlGroup({
++			Text = UILabs.Ordered("Delete my blocks", 1),
++			-- Shows the gamepad Y glyph beside the text.
++			HasIcon = UILabs.Ordered(false, 2),
++		}),
++		1
++	),
++	State = UILabs.Ordered(
++		UILabs.ControlGroup({
++			IsDisabled = UILabs.Ordered(false, 1),
++		}),
++		2
++	),
++	Layout = UILabs.Ordered(
++		UILabs.ControlGroup({
++			Width = UILabs.Ordered(UILabs.Slider(256, 56, 480, 4), 1),
++			Height = UILabs.Ordered(UILabs.Slider(56, 44, 96, 4), 2),
++		}),
++		3
++	),
++}
++
++type StoryProps = {
++	controls: {
++		Content: {
++			Text: () -> string,
++			HasIcon: () -> boolean,
++		},
++		State: {
++			IsDisabled: () -> boolean,
++		},
++		Layout: {
++			Width: () -> number,
++			Height: () -> number,
++		},
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	local controls = props.controls
++
++	local function size(): UDim2
++		return UDim2.fromOffset(controls.Layout.Width(), controls.Layout.Height())
++	end
++
++	local function icon(): string?
++		return if controls.Content.HasIcon()
++			then UserInputService:GetImageForKeyCode(Enum.KeyCode.ButtonY)
++			else nil
++	end
++
++	return create("Frame")({
++		Name = "MenuButtonStory",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundColor3 = Color3.fromRGB(30, 33, 38),
++
++		create("UIListLayout")({
++			Padding = UDim.new(0, 16),
++			HorizontalAlignment = Enum.HorizontalAlignment.Center,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++		}),
++
++		menuButton({
++			Name = "Neutral",
++			LayoutOrder = 1,
++			Text = controls.Content.Text,
++			Icon = icon,
++			Size = size,
++			Disabled = controls.State.IsDisabled,
++			Activated = function()
++				print("Neutral button activated")
++			end,
++		}),
++
++		menuButton({
++			Name = "Danger",
++			LayoutOrder = 2,
++			Style = "Danger",
++			Text = controls.Content.Text,
++			Icon = icon,
++			Size = size,
++			Disabled = controls.State.IsDisabled,
++			Activated = function()
++				print("Danger button activated")
++			end,
++		}),
++	})
++end
++
++return {
++	summary = "The menu button in both styles, with and without a gamepad glyph.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/ServerScriptService/Stories/Components/settingsPanel.story.luau b/src/ServerScriptService/Stories/Components/settingsPanel.story.luau
+new file mode 100644
+index 0000000..8d07cfa
+--- /dev/null
++++ b/src/ServerScriptService/Stories/Components/settingsPanel.story.luau
+@@ -0,0 +1,92 @@
++--!strict
++
++const UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const settingsPanel =
++	require("@game/StarterPlayer/StarterPlayerScripts/UI/Components/settingsPanel")
++
++const create = Vide.create
++const indexes = Vide.indexes
++const source = Vide.source
++
++const CONTROLS = {
++	Layout = UILabs.Ordered(
++		UILabs.ControlGroup({
++			-- Side by side, for short phone screens.
++			IsCompact = UILabs.Ordered(false, 1),
++			-- The room the panel fits into, in UI units; below its size it shrinks.
++			RoomWidth = UILabs.Ordered(UILabs.Slider(1920, 320, 1920, 10), 2),
++			RoomHeight = UILabs.Ordered(UILabs.Slider(1080, 240, 1080, 10), 3),
++		}),
++		1
++	),
++	Volume = UILabs.Ordered(
++		UILabs.ControlGroup({
++			-- Changing either starts the panel over.
++			Music = UILabs.Ordered(UILabs.Slider(0.5, 0, 1, 0.1), 1),
++			Effects = UILabs.Ordered(UILabs.Slider(0.8, 0, 1, 0.1), 2),
++		}),
++		2
++	),
++}
++
++type StoryProps = {
++	controls: {
++		Layout: {
++			IsCompact: () -> boolean,
++			RoomWidth: () -> number,
++			RoomHeight: () -> number,
++		},
++		Volume: {
++			Music: () -> number,
++			Effects: () -> number,
++		},
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	local layout = props.controls.Layout
++	local volume = props.controls.Volume
++
++	return create("Frame")({
++		Name = "SettingsPanelStory",
++		Size = UDim2.fromScale(1, 1),
++		-- A bright backdrop, like sky or baseplate, to judge the panel against.
++		BackgroundColor3 = Color3.fromRGB(150, 200, 240),
++
++		indexes(function()
++			return { [`{volume.Music()}/{volume.Effects()}`] = true }
++		end, function()
++			local musicVolume = source(volume.Music())
++			local effectsVolume = source(volume.Effects())
++
++			return settingsPanel({
++				IsCompact = layout.IsCompact,
++				Room = function()
++					return Vector2.new(layout.RoomWidth(), layout.RoomHeight())
++				end,
++				AnchorPoint = Vector2.new(0.5, 0.5),
++				Position = UDim2.fromScale(0.5, 0.5),
++				MusicVolume = musicVolume,
++				SetMusicVolume = musicVolume,
++				EffectsVolume = effectsVolume,
++				SetEffectsVolume = effectsVolume,
++				DeleteBlocks = function()
++					print("Delete blocks")
++				end,
++				Close = function()
++					print("Close")
++				end,
++			})
++		end),
++	})
++end
++
++return {
++	summary = "The settings panel in both layouts, including the delete confirmation.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/ServerScriptService/Stories/Components/volumeSlider.story.luau b/src/ServerScriptService/Stories/Components/volumeSlider.story.luau
+new file mode 100644
+index 0000000..1ea11b7
+--- /dev/null
++++ b/src/ServerScriptService/Stories/Components/volumeSlider.story.luau
+@@ -0,0 +1,66 @@
++--!strict
++
++const UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const volumeSlider = require("@game/StarterPlayer/StarterPlayerScripts/UI/Components/volumeSlider")
++
++const create = Vide.create
++const indexes = Vide.indexes
++const source = Vide.source
++
++const CONTROLS = {
++	Label = UILabs.Ordered("Sound effects", 1),
++	-- Changing it starts the slider over at the new value.
++	StartValue = UILabs.Ordered(UILabs.Slider(0.5, 0, 1, 0.05), 2),
++	Width = UILabs.Ordered(UILabs.Slider(512, 240, 640, 4), 3),
++}
++
++type StoryProps = {
++	controls: {
++		Label: () -> string,
++		StartValue: () -> number,
++		Width: () -> number,
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	local controls = props.controls
++
++	return create("Frame")({
++		Name = "VolumeSliderStory",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundColor3 = Color3.fromRGB(30, 33, 38),
++
++		create("UIListLayout")({
++			HorizontalAlignment = Enum.HorizontalAlignment.Center,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++		}),
++
++		indexes(function()
++			return { [controls.StartValue()] = true }
++		end, function(_, startValue: number)
++			local value = source(startValue)
++
++			return volumeSlider({
++				Label = controls.Label,
++				Value = value,
++				SetValue = function(newValue: number)
++					print(`Volume set to {newValue}`)
++					value(newValue)
++				end,
++				Size = function()
++					return UDim2.fromOffset(controls.Width(), 92)
++				end,
++			})
++		end),
++	})
++end
++
++return {
++	summary = "A volume slider; drag or tap the track, or use the step buttons.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/ServerScriptService/Stories/GameUI.storybook.luau b/src/ServerScriptService/Stories/GameUI.storybook.luau
+new file mode 100644
+index 0000000..25d83e2
+--- /dev/null
++++ b/src/ServerScriptService/Stories/GameUI.storybook.luau
+@@ -0,0 +1,6 @@
++--!strict
++
++return {
++	name = "Game UI",
++	storyRoots = { script.Parent },
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index d6fde35..f8871be 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,8 +1,18 @@
+-local Players = game:GetService("Players")
++--!strict
+ 
+-local BlockPlacer = require(script.Parent.BlockPlacer)
++const Players = game:GetService("Players")
++const RunService = game:GetService("RunService")
+ 
+-local localPlayer = Players.LocalPlayer
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const BlockPlacer = require("./BlockPlacer")
++const SettingsMenu = require("./UI/SettingsMenu")
++
++Vide.strict = RunService:IsStudio()
++
++const localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
+ 
++SettingsMenu.startAsync()
++-- Yields until the server's remotes exist, so it goes after the UI is mounted.
+ BlockPlacer.start()
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Components/menuButton.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Components/menuButton.luau
+new file mode 100644
+index 0000000..3fa6498
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Components/menuButton.luau
+@@ -0,0 +1,151 @@
++--!strict
++--[[
++	An opaque text button with hover, pressed, and disabled looks. Gamepad focus
++	uses Roblox's selection outline. A disabled button stays selectable so
++	gamepad focus never drops when a button disables under it.
++]]
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const Theme = require("../Theme")
++
++const create = Vide.create
++const read = Vide.read
++const source = Vide.source
++
++const ICON_SIZE = 32
++const ICON_GAP = 8
++const PADDING = 12
++
++export type ButtonStyle = "Neutral" | "Danger"
++
++type StyleColors = {
++	Normal: Color3,
++	Hover: Color3,
++	Pressed: Color3,
++}
++
++export type MenuButtonProps = {
++	Name: string?,
++	Text: string | () -> string,
++	Size: UDim2 | () -> UDim2,
++	Activated: () -> (),
++	Style: ButtonStyle?,
++	Disabled: (boolean | () -> boolean)?,
++	-- An image id shown left of the text, such as a gamepad button glyph.
++	Icon: (() -> string?)?,
++	AnchorPoint: Vector2?,
++	Position: (UDim2 | () -> UDim2)?,
++	LayoutOrder: number?,
++}
++
++const STYLES: { [ButtonStyle]: StyleColors } = table.freeze({
++	Neutral = table.freeze({
++		Normal = Theme.Neutral,
++		Hover = Theme.NeutralHover,
++		Pressed = Theme.NeutralPressed,
++	}),
++	Danger = table.freeze({
++		Normal = Theme.Danger,
++		Hover = Theme.DangerHover,
++		Pressed = Theme.DangerPressed,
++	}),
++})
++
++local function menuButton(props: MenuButtonProps): TextButton
++	const style: ButtonStyle = props.Style or "Neutral"
++	const colors = STYLES[style]
++	local isHovered = source(false)
++	local isPressed = source(false)
++
++	local function isDisabled(): boolean
++		return read(props.Disabled) == true
++	end
++
++	local function icon(): string?
++		return if props.Icon then props.Icon() else nil
++	end
++
++	return create("TextButton")({
++		Name = props.Name or "MenuButton",
++		Size = props.Size,
++		AnchorPoint = props.AnchorPoint,
++		Position = props.Position,
++		LayoutOrder = props.LayoutOrder,
++		Selectable = true,
++		BackgroundColor3 = function()
++			if isDisabled() then
++				return Theme.Disabled
++			elseif isPressed() then
++				return colors.Pressed
++			elseif isHovered() then
++				return colors.Hover
++			end
++			return colors.Normal
++		end,
++
++		Activated = function()
++			if not isDisabled() then
++				props.Activated()
++			end
++		end,
++		MouseEnter = function()
++			isHovered(true)
++		end,
++		MouseLeave = function()
++			isHovered(false)
++			isPressed(false)
++		end,
++		MouseButton1Down = function()
++			isPressed(true)
++		end,
++		MouseButton1Up = function()
++			isPressed(false)
++		end,
++
++		create("UICorner")({ CornerRadius = Theme.ButtonCornerRadius }),
++		create("UIPadding")({
++			PaddingLeft = UDim.new(0, PADDING),
++			PaddingRight = UDim.new(0, PADDING),
++		}),
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			HorizontalAlignment = Enum.HorizontalAlignment.Center,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++			Padding = UDim.new(0, ICON_GAP),
++		}),
++
++		create("ImageLabel")({
++			Name = "Icon",
++			LayoutOrder = 1,
++			Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE),
++			BackgroundTransparency = 1,
++			ScaleType = Enum.ScaleType.Fit,
++			Visible = function()
++				return icon() ~= nil
++			end,
++			Image = function()
++				return icon() or ""
++			end,
++		}),
++
++		create("TextLabel")({
++			Name = "Label",
++			LayoutOrder = 2,
++			Size = function()
++				local iconWidth = if icon() then ICON_SIZE + ICON_GAP else 0
++				return UDim2.new(1, -iconWidth, 1, 0)
++			end,
++			BackgroundTransparency = 1,
++			FontFace = Theme.Font,
++			TextSize = Theme.ButtonTextSize,
++			TextWrapped = true,
++			Text = props.Text,
++			TextColor3 = function()
++				return if isDisabled() then Theme.TextDisabled else Theme.Text
++			end,
++		}),
++	}) :: TextButton
++end
++
++return menuButton
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Components/settingsPanel.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Components/settingsPanel.luau
+new file mode 100644
+index 0000000..a71c697
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Components/settingsPanel.luau
+@@ -0,0 +1,332 @@
++--!strict
++--[[
++	The settings panel: music and sound effects volume, and deleting every block
++	the player built behind a confirmation. The panel is fully opaque so it
++	reads over any part of the world, and it never moves; the screen that
++	mounts it decides whether anything fades.
++
++	It shrinks to fit the room it is given, down to half size. The compact
++	layout puts the two sections side by side for short, wide phone screens.
++]]
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const Theme = require("../Theme")
++const menuButton = require("./menuButton")
++const volumeSlider = require("./volumeSlider")
++
++const create = Vide.create
++const derive = Vide.derive
++const read = Vide.read
++const show = Vide.show
++const source = Vide.source
++
++const HEADER_HEIGHT = 56
++const CLOSE_BUTTON_WIDTH = 140
++const SLIDER_HEIGHT = 92
++const SLIDER_GAP = 16
++const VOLUME_COLUMN_HEIGHT = SLIDER_HEIGHT * 2 + SLIDER_GAP
++const BUTTON_HEIGHT = 56
++const BUTTON_GAP = 8
++const IDLE_DELETE_BUTTON_WIDTH = 256
++const STROKE_THICKNESS = 2
++const EDGE_PADDING = 16
++const MINIMUM_FIT_SCALE = 0.5
++
++type DeleteState = "Idle" | "Confirming" | "Done"
++
++type Metrics = {
++	Size: Vector2,
++	Padding: number,
++	HeaderGap: number,
++	SectionGap: number,
++	BodyDirection: Enum.FillDirection,
++	VolumeWidth: number,
++	DeleteSize: Vector2,
++}
++
++export type SettingsPanelProps = {
++	IsCompact: boolean | () -> boolean,
++	-- Room the panel may fill, in UI units; it scales down to fit.
++	Room: Vector2 | () -> Vector2,
++	MusicVolume: () -> number,
++	SetMusicVolume: (value: number) -> (),
++	EffectsVolume: () -> number,
++	SetEffectsVolume: (value: number) -> (),
++	DeleteBlocks: () -> (),
++	Close: () -> (),
++	-- Moves gamepad focus; the panel calls it with the control that should
++	-- have focus when it opens and when the delete confirmation changes.
++	Focus: ((target: GuiObject) -> ())?,
++	-- Glyph for the button that closes the panel, shown on the Close button.
++	CloseIcon: (() -> string?)?,
++	AnchorPoint: Vector2?,
++	Position: UDim2?,
++}
++
++const REGULAR: Metrics = table.freeze({
++	Size = Vector2.new(560, 456),
++	Padding = 24,
++	HeaderGap = 16,
++	SectionGap = 24,
++	BodyDirection = Enum.FillDirection.Vertical,
++	VolumeWidth = 512,
++	DeleteSize = Vector2.new(512, 112),
++})
++
++const COMPACT: Metrics = table.freeze({
++	Size = Vector2.new(628, 300),
++	Padding = 16,
++	HeaderGap = 12,
++	SectionGap = 16,
++	BodyDirection = Enum.FillDirection.Horizontal,
++	VolumeWidth = 300,
++	DeleteSize = Vector2.new(280, VOLUME_COLUMN_HEIGHT),
++})
++
++const DELETE_MESSAGES: { [DeleteState]: string } = table.freeze({
++	Idle = "Removes every block you built.",
++	Confirming = "Delete all your blocks? You can't undo this.",
++	Done = "Your blocks were deleted.",
++})
++
++local function settingsPanel(props: SettingsPanelProps): Frame
++	local deleteState = source("Idle" :: DeleteState)
++	local shouldFocusDeleteButton = false
++
++	local metrics = derive(function(): Metrics
++		return if read(props.IsCompact) then COMPACT else REGULAR
++	end)
++
++	local function focus(target: GuiObject)
++		if props.Focus then
++			props.Focus(target)
++		end
++	end
++
++	local musicSlider = volumeSlider({
++		Name = "Music",
++		Label = "Music",
++		LayoutOrder = 1,
++		Size = UDim2.new(1, 0, 0, SLIDER_HEIGHT),
++		Value = props.MusicVolume,
++		SetValue = props.SetMusicVolume,
++		FirstControl = focus,
++	})
++
++	local function idleButtons(): { GuiObject }
++		local deleteButton = menuButton({
++			Name = "DeleteBlocks",
++			Text = "Delete my blocks",
++			Style = "Danger",
++			Size = function()
++				return if read(props.IsCompact)
++					then UDim2.fromScale(1, 1)
++					else UDim2.new(0, IDLE_DELETE_BUTTON_WIDTH, 1, 0)
++			end,
++			Activated = function()
++				deleteState("Confirming")
++			end,
++		})
++		if shouldFocusDeleteButton then
++			shouldFocusDeleteButton = false
++			focus(deleteButton)
++		end
++		return { deleteButton }
++	end
++
++	local function confirmButtons(): { GuiObject }
++		local halfWidth = UDim2.new(0.5, -BUTTON_GAP / 2, 1, 0)
++		-- The safe choice comes first and takes focus.
++		local keepButton = menuButton({
++			Name = "KeepBlocks",
++			Text = "Keep blocks",
++			LayoutOrder = 1,
++			Size = halfWidth,
++			Activated = function()
++				shouldFocusDeleteButton = true
++				deleteState("Idle")
++			end,
++		})
++		local confirmButton = menuButton({
++			Name = "ConfirmDelete",
++			Text = "Delete blocks",
++			Style = "Danger",
++			LayoutOrder = 2,
++			Size = halfWidth,
++			Activated = function()
++				props.DeleteBlocks()
++				shouldFocusDeleteButton = true
++				deleteState("Done")
++			end,
++		})
++		focus(keepButton)
++		return { keepButton, confirmButton }
++	end
++
++	local panel = create("Frame")({
++		Name = "SettingsPanel",
++		AnchorPoint = props.AnchorPoint,
++		Position = props.Position,
++		BackgroundColor3 = Theme.Panel,
++		Size = function()
++			local size = metrics().Size
++			return UDim2.fromOffset(size.X, size.Y)
++		end,
++		Active = true,
++		SelectionGroup = true,
++		SelectionBehaviorUp = Enum.SelectionBehavior.Stop,
++		SelectionBehaviorDown = Enum.SelectionBehavior.Stop,
++		SelectionBehaviorLeft = Enum.SelectionBehavior.Stop,
++		SelectionBehaviorRight = Enum.SelectionBehavior.Stop,
++
++		create("UICorner")({ CornerRadius = Theme.CornerRadius }),
++		create("UIStroke")({
++			Color = Theme.Outline,
++			Thickness = STROKE_THICKNESS,
++		}),
++		create("UIScale")({
++			Scale = function()
++				local design = metrics().Size
++				local room: Vector2 = read(props.Room)
++				local fit = math.min(
++					(room.X - EDGE_PADDING * 2) / design.X,
++					(room.Y - EDGE_PADDING * 2) / design.Y
++				)
++				return math.clamp(fit, MINIMUM_FIT_SCALE, 1)
++			end,
++		}),
++		create("UIPadding")({
++			PaddingTop = function()
++				return UDim.new(0, metrics().Padding)
++			end,
++			PaddingBottom = function()
++				return UDim.new(0, metrics().Padding)
++			end,
++			PaddingLeft = function()
++				return UDim.new(0, metrics().Padding)
++			end,
++			PaddingRight = function()
++				return UDim.new(0, metrics().Padding)
++			end,
++		}),
++
++		create("Frame")({
++			Name = "Header",
++			BackgroundTransparency = 1,
++			Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
++
++			create("TextLabel")({
++				Name = "Title",
++				BackgroundTransparency = 1,
++				Size = UDim2.new(1, -CLOSE_BUTTON_WIDTH, 1, 0),
++				FontFace = Theme.FontBold,
++				TextSize = Theme.TitleTextSize,
++				TextColor3 = Theme.Text,
++				TextXAlignment = Enum.TextXAlignment.Left,
++				Text = "Settings",
++			}),
++
++			menuButton({
++				Name = "Close",
++				Text = "Close",
++				Icon = props.CloseIcon,
++				AnchorPoint = Vector2.new(1, 0),
++				Position = UDim2.fromScale(1, 0),
++				Size = UDim2.new(0, CLOSE_BUTTON_WIDTH, 1, 0),
++				Activated = props.Close,
++			}),
++		}),
++
++		create("Frame")({
++			Name = "Body",
++			BackgroundTransparency = 1,
++			Position = function()
++				return UDim2.fromOffset(0, HEADER_HEIGHT + metrics().HeaderGap)
++			end,
++			Size = function()
++				return UDim2.new(1, 0, 1, -(HEADER_HEIGHT + metrics().HeaderGap))
++			end,
++
++			create("UIListLayout")({
++				FillDirection = function()
++					return metrics().BodyDirection
++				end,
++				Padding = function()
++					return UDim.new(0, metrics().SectionGap)
++				end,
++			}),
++
++			create("Frame")({
++				Name = "Volume",
++				LayoutOrder = 1,
++				BackgroundTransparency = 1,
++				Size = function()
++					return UDim2.fromOffset(metrics().VolumeWidth, VOLUME_COLUMN_HEIGHT)
++				end,
++
++				create("UIListLayout")({
++					Padding = UDim.new(0, SLIDER_GAP),
++				}),
++
++				musicSlider,
++				volumeSlider({
++					Name = "Effects",
++					Label = "Sound effects",
++					LayoutOrder = 2,
++					Size = UDim2.new(1, 0, 0, SLIDER_HEIGHT),
++					Value = props.EffectsVolume,
++					SetValue = props.SetEffectsVolume,
++				}),
++			}),
++
++			create("Frame")({
++				Name = "DeleteBlocks",
++				LayoutOrder = 2,
++				BackgroundTransparency = 1,
++				Size = function()
++					local size = metrics().DeleteSize
++					return UDim2.fromOffset(size.X, size.Y)
++				end,
++
++				create("TextLabel")({
++					Name = "Message",
++					BackgroundTransparency = 1,
++					Size = UDim2.new(1, 0, 1, -(BUTTON_HEIGHT + BUTTON_GAP)),
++					FontFace = Theme.Font,
++					TextSize = Theme.BodyTextSize,
++					TextWrapped = true,
++					TextXAlignment = Enum.TextXAlignment.Left,
++					TextYAlignment = Enum.TextYAlignment.Bottom,
++					TextColor3 = function()
++						return if deleteState() == "Idle" then Theme.TextMuted else Theme.Text
++					end,
++					Text = function()
++						return DELETE_MESSAGES[deleteState()]
++					end,
++				}),
++
++				create("Frame")({
++					Name = "Buttons",
++					BackgroundTransparency = 1,
++					AnchorPoint = Vector2.new(0, 1),
++					Position = UDim2.fromScale(0, 1),
++					Size = UDim2.new(1, 0, 0, BUTTON_HEIGHT),
++
++					create("UIListLayout")({
++						FillDirection = Enum.FillDirection.Horizontal,
++						Padding = UDim.new(0, BUTTON_GAP),
++					}),
++
++					show(function()
++						return deleteState() == "Confirming"
++					end, confirmButtons, idleButtons),
++				}),
++			}),
++		}),
++	}) :: Frame
++
++	return panel
++end
++
++return settingsPanel
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Components/volumeSlider.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Components/volumeSlider.luau
+new file mode 100644
+index 0000000..f3c68bc
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Components/volumeSlider.luau
+@@ -0,0 +1,206 @@
++--!strict
++--[[
++	A labeled 0 to 1 slider with its value shown as a percentage. Mouse and touch
++	drag or tap the track; gamepad and anyone who finds dragging hard use the
++	step buttons on either side, so the track itself is never selectable.
++	The label sits on top and the controls fill the rest of the given height.
++]]
++
++const UserInputService = game:GetService("UserInputService")
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const Theme = require("../Theme")
++const menuButton = require("./menuButton")
++
++const cleanup = Vide.cleanup
++const create = Vide.create
++
++const LABEL_HEIGHT = 28
++const ROW_GAP = 8
++const STEP_BUTTON_WIDTH = 56
++const TRACK_GAP = 12
++const BAR_HEIGHT = 12
++const KNOB_SIZE = 28
++const STEP = 0.1
++const VALUE_TEXT_WIDTH = 80
++const CONTROLS_TOP = LABEL_HEIGHT + ROW_GAP
++
++export type VolumeSliderProps = {
++	Name: string?,
++	Label: string | () -> string,
++	Value: () -> number,
++	SetValue: (value: number) -> (),
++	Size: UDim2 | () -> UDim2,
++	LayoutOrder: number?,
++	-- Receives the first control in focus order, for a default gamepad selection.
++	FirstControl: ((control: GuiObject) -> ())?,
++}
++
++local function stepped(value: number, direction: number): number
++	return math.clamp(math.round((value + direction * STEP) / STEP) * STEP, 0, 1)
++end
++
++local function isPointerPress(input: InputObject): boolean
++	return input.UserInputType == Enum.UserInputType.MouseButton1
++		or input.UserInputType == Enum.UserInputType.Touch
++end
++
++local function volumeSlider(props: VolumeSliderProps): Frame
++	local dragInput: InputObject? = nil
++
++	local bar = create("Frame")({
++		Name = "Bar",
++		AnchorPoint = Vector2.new(0, 0.5),
++		Position = UDim2.new(0, KNOB_SIZE / 2, 0.5, 0),
++		Size = UDim2.new(1, -KNOB_SIZE, 0, BAR_HEIGHT),
++		BackgroundColor3 = Theme.Track,
++
++		create("UICorner")({ CornerRadius = UDim.new(0.5, 0) }),
++
++		create("Frame")({
++			Name = "Fill",
++			BackgroundColor3 = Theme.TrackFill,
++			Size = function()
++				return UDim2.fromScale(props.Value(), 1)
++			end,
++
++			create("UICorner")({ CornerRadius = UDim.new(0.5, 0) }),
++		}),
++
++		create("Frame")({
++			Name = "Knob",
++			AnchorPoint = Vector2.new(0.5, 0.5),
++			Size = UDim2.fromOffset(KNOB_SIZE, KNOB_SIZE),
++			Position = function()
++				return UDim2.fromScale(props.Value(), 0.5)
++			end,
++			BackgroundColor3 = Theme.Knob,
++
++			create("UICorner")({ CornerRadius = UDim.new(0.5, 0) }),
++			create("UIStroke")({
++				Color = Theme.Panel,
++				Thickness = 2,
++			}),
++		}),
++	}) :: Frame
++
++	-- Both are real pixels, so the ratio holds under any UIScale.
++	local function setFromScreenX(x: number)
++		local width = bar.AbsoluteSize.X
++		if width <= 0 then
++			return
++		end
++		local ratio = math.clamp((x - bar.AbsolutePosition.X) / width, 0, 1)
++		props.SetValue(math.round(ratio * 100) / 100)
++	end
++
++	cleanup(UserInputService.InputChanged:Connect(function(input: InputObject)
++		if not dragInput then
++			return
++		end
++		const isMouseDrag = dragInput.UserInputType == Enum.UserInputType.MouseButton1
++			and input.UserInputType == Enum.UserInputType.MouseMovement
++		if isMouseDrag or input == dragInput then
++			setFromScreenX(input.Position.X)
++		end
++	end))
++	cleanup(UserInputService.InputEnded:Connect(function(input: InputObject)
++		if not dragInput then
++			return
++		end
++		const isMouseRelease = input.UserInputType == Enum.UserInputType.MouseButton1
++			and dragInput.UserInputType == Enum.UserInputType.MouseButton1
++		if isMouseRelease or input == dragInput then
++			dragInput = nil
++		end
++	end))
++
++	local track = create("TextButton")({
++		Name = "Track",
++		Selectable = false,
++		BackgroundTransparency = 1,
++		Position = UDim2.fromOffset(STEP_BUTTON_WIDTH + TRACK_GAP, CONTROLS_TOP),
++		Size = UDim2.new(1, -2 * (STEP_BUTTON_WIDTH + TRACK_GAP), 1, -CONTROLS_TOP),
++
++		InputBegan = function(input: InputObject)
++			if isPointerPress(input) then
++				dragInput = input
++				setFromScreenX(input.Position.X)
++			end
++		end,
++
++		bar,
++	})
++	-- Its InputBegan handler reaches its own child, which would keep it alive.
++	cleanup(track)
++
++	local lowerButton = menuButton({
++		Name = "Lower",
++		Text = "-",
++		Position = UDim2.fromOffset(0, CONTROLS_TOP),
++		Size = UDim2.new(0, STEP_BUTTON_WIDTH, 1, -CONTROLS_TOP),
++		Disabled = function()
++			return props.Value() <= 0
++		end,
++		Activated = function()
++			props.SetValue(stepped(props.Value(), -1))
++		end,
++	})
++	if props.FirstControl then
++		props.FirstControl(lowerButton)
++	end
++
++	return create("Frame")({
++		Name = props.Name or "VolumeSlider",
++		LayoutOrder = props.LayoutOrder,
++		BackgroundTransparency = 1,
++		Size = props.Size,
++
++		create("TextLabel")({
++			Name = "Label",
++			Size = UDim2.new(1, -VALUE_TEXT_WIDTH, 0, LABEL_HEIGHT),
++			BackgroundTransparency = 1,
++			FontFace = Theme.FontBold,
++			TextSize = Theme.BodyTextSize,
++			TextColor3 = Theme.Text,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++			Text = props.Label,
++		}),
++
++		create("TextLabel")({
++			Name = "Value",
++			AnchorPoint = Vector2.new(1, 0),
++			Position = UDim2.fromScale(1, 0),
++			Size = UDim2.fromOffset(VALUE_TEXT_WIDTH, LABEL_HEIGHT),
++			BackgroundTransparency = 1,
++			FontFace = Theme.Font,
++			TextSize = Theme.BodyTextSize,
++			TextColor3 = Theme.TextMuted,
++			TextXAlignment = Enum.TextXAlignment.Right,
++			Text = function()
++				return `{math.round(props.Value() * 100)}%`
++			end,
++		}),
++
++		lowerButton,
++		track,
++
++		menuButton({
++			Name = "Raise",
++			Text = "+",
++			AnchorPoint = Vector2.new(1, 0),
++			Position = UDim2.new(1, 0, 0, CONTROLS_TOP),
++			Size = UDim2.new(0, STEP_BUTTON_WIDTH, 1, -CONTROLS_TOP),
++			Disabled = function()
++				return props.Value() >= 1
++			end,
++			Activated = function()
++				props.SetValue(stepped(props.Value(), 1))
++			end,
++		}),
++	}) :: Frame
++end
++
++return volumeSlider
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+new file mode 100644
+index 0000000..72dd0fd
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau
+@@ -0,0 +1,121 @@
++--!strict
++--[[
++	Facts about the player's screen and Roblox settings, kept as Vide sources so
++	UI rebinds when the window, the device, the input, or a setting changes.
++	UI sizes are authored for a screen 1080 tall; see uiScale.
++]]
++
++const GuiService = game:GetService("GuiService")
++const RunService = game:GetService("RunService")
++const UserInputService = game:GetService("UserInputService")
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const batch = Vide.batch
++const source = Vide.source
++
++const REFERENCE_SHORT_SIDE = 1080
++const MINIMUM_SCALE = 1
++const MAXIMUM_SCALE = 3
++-- TVs are read from a couch, so they get a quarter more.
++const LARGE_DISPLAY_BOOST = 1.25
++-- In UI units: phones held sideways are 360 to 440 tall, tablets start near 600.
++const PHONE_SHORT_SIDE = 600
++const FALLBACK_VIEWPORT = Vector2.new(1920, 1080)
++
++local Module = {}
++
++local realViewport = source(FALLBACK_VIEWPORT)
++local realInset = source(Vector2.zero)
++local preferredInput = source(Enum.PreferredInput.KeyboardAndMouse)
++local isLargeDisplay = source(false)
++local preferredTransparency = source(1)
++local isReducedMotion = source(false)
++local viewportConnection: RBXScriptConnection? = nil
++
++local function refresh()
++	local camera = workspace.CurrentCamera
++	local topLeftInset = GuiService:GetGuiInset()
++	batch(function()
++		-- ViewportSize can read (1, 1) before the first frame, which would pass
++		-- for a tiny phone, so the fallback stays until a real size arrives.
++		if camera and camera.ViewportSize.X > 1 and camera.ViewportSize.Y > 1 then
++			realViewport(camera.ViewportSize)
++		end
++		realInset(topLeftInset)
++		preferredInput(UserInputService.PreferredInput)
++		isLargeDisplay(GuiService.ViewportDisplaySize == Enum.DisplaySize.Large)
++		preferredTransparency(GuiService.PreferredTransparency)
++		isReducedMotion(GuiService.ReducedMotionEnabled)
++	end)
++end
++
++local function watchCamera()
++	if viewportConnection then
++		viewportConnection:Disconnect()
++	end
++	local camera = workspace.CurrentCamera
++	if camera then
++		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(refresh)
++	end
++	refresh()
++end
++
++--[[
++	How much the whole UI grows on this screen. Bind it to a UIScale under every
++	ScreenGui the game builds. Never below 1: small screens change layout
++	instead of shrinking text and buttons.
++]]
++function Module.uiScale(): number
++	local view = realViewport()
++	local boost = if isLargeDisplay() then LARGE_DISPLAY_BOOST else 1
++	return math.clamp(
++		math.min(view.X, view.Y) / REFERENCE_SHORT_SIDE * boost,
++		MINIMUM_SCALE,
++		MAXIMUM_SCALE
++	)
++end
++
++--[[
++	The part of the viewport below the Roblox topbar, in UI units.
++]]
++function Module.usableSize(): Vector2
++	local scale = Module.uiScale()
++	local view = realViewport() / scale
++	return Vector2.new(view.X, view.Y - realInset().Y / scale)
++end
++
++function Module.isPhone(): boolean
++	local view = realViewport() / Module.uiScale()
++	return math.min(view.X, view.Y) < PHONE_SHORT_SIDE
++end
++
++function Module.isGamepad(): boolean
++	return preferredInput() == Enum.PreferredInput.Gamepad
++end
++
++--[[
++	The player's Roblox background transparency setting: 1 by default, 0 when
++	they want fully opaque backgrounds. Multiply see-through backgrounds by it.
++]]
++function Module.transparencyMultiplier(): number
++	return preferredTransparency()
++end
++
++function Module.isReducedMotion(): boolean
++	return isReducedMotion()
++end
++
++if RunService:IsRunning() then
++	watchCamera()
++	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
++	GuiService:GetPropertyChangedSignal("TopbarInset"):Connect(refresh)
++	GuiService:GetPropertyChangedSignal("ViewportDisplaySize"):Connect(refresh)
++	GuiService:GetPropertyChangedSignal("PreferredTransparency"):Connect(refresh)
++	GuiService:GetPropertyChangedSignal("ReducedMotionEnabled"):Connect(refresh)
++	UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(refresh)
++else
++	refresh()
++end
++
++return Module
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/SettingsMenu.luau b/src/StarterPlayer/StarterPlayerScripts/UI/SettingsMenu.luau
+new file mode 100644
+index 0000000..8e919fc
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/SettingsMenu.luau
+@@ -0,0 +1,287 @@
++--!strict
++--[[
++	The settings menu: an on-screen Settings button and the panel it opens,
++	connected to GameAudio and BlockPlacer. Mouse and touch use the buttons;
++	on a gamepad, Y opens and closes the menu and B closes it.
++]]
++
++const ContextActionService = game:GetService("ContextActionService")
++const GuiService = game:GetService("GuiService")
++const Players = game:GetService("Players")
++const UserInputService = game:GetService("UserInputService")
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const BlockPlacer = require("../BlockPlacer")
++const GameAudio = require("../GameAudio")
++const Screen = require("./Screen")
++const Theme = require("./Theme")
++const menuButton = require("./Components/menuButton")
++const settingsPanel = require("./Components/settingsPanel")
++
++const cleanup = Vide.cleanup
++const create = Vide.create
++const effect = Vide.effect
++const mount = Vide.mount
++const show = Vide.show
++const source = Vide.source
++const spring = Vide.spring
++
++const TOGGLE_ACTION = "ToggleSettingsMenu"
++const CLOSE_ACTION = "CloseSettingsMenu"
++const TOGGLE_KEY = Enum.KeyCode.ButtonY
++const CLOSE_KEY = Enum.KeyCode.ButtonB
++
++const OPEN_BUTTON_SIZE = UDim2.fromOffset(176, 64)
++-- Right edge at middle height: clear of the thumbstick, the jump button, the
++-- topbar, and the player list on every device.
++const OPEN_BUTTON_POSITION = UDim2.new(1, -16, 0.5, 0)
++
++-- Scaled by the player's background transparency setting, down to fully
++-- opaque.
++const SCRIM_TRANSPARENCY = 0.4
++-- Seconds. Only the scrim fades; nothing slides or grows.
++const FADE_PERIOD = 0.2
++
++const BUTTON_DISPLAY_ORDER = 10
++const SCRIM_DISPLAY_ORDER = 20
++const PANEL_DISPLAY_ORDER = 21
++
++type OpenedBy = "Button" | "Shortcut"
++
++local Module = {}
++
++local hasStarted = false
++local isOpen = source(false)
++local openedBy: OpenedBy = "Button"
++local openButton: GuiObject? = nil
++local panelFocusTarget: GuiObject? = nil
++local musicVolume = source(GameAudio.getMusicVolume())
++local effectsVolume = source(GameAudio.getEffectsVolume())
++
++local function selectIfGamepad(target: GuiObject?)
++	-- Deferred: a control built this frame is not on screen yet, and selecting
++	-- it now would be ignored.
++	task.defer(function()
++		if UserInputService.PreferredInput ~= Enum.PreferredInput.Gamepad then
++			return
++		end
++		GuiService.SelectedObject = if target and target.Parent then target else nil
++	end)
++end
++
++local function focusPanel(target: GuiObject)
++	panelFocusTarget = target
++	selectIfGamepad(target)
++end
++
++local function open(by: OpenedBy)
++	openedBy = by
++	musicVolume(GameAudio.getMusicVolume())
++	effectsVolume(GameAudio.getEffectsVolume())
++	isOpen(true)
++end
++
++local function close()
++	if not isOpen() then
++		return
++	end
++	isOpen(false)
++	panelFocusTarget = nil
++	-- A player who opened with Y goes straight back to moving; one who
++	-- navigated to the button gets focus back on it.
++	selectIfGamepad(if openedBy == "Button" then openButton else nil)
++end
++
++local function setMusicVolume(volume: number)
++	GameAudio.setMusicVolume(volume)
++	musicVolume(GameAudio.getMusicVolume())
++end
++
++local function setEffectsVolume(volume: number)
++	GameAudio.setEffectsVolume(volume)
++	effectsVolume(GameAudio.getEffectsVolume())
++end
++
++local function gamepadGlyph(keyCode: Enum.KeyCode): () -> string?
++	return function()
++		return if Screen.isGamepad() then UserInputService:GetImageForKeyCode(keyCode) else nil
++	end
++end
++
++local function onToggleAction(
++	_actionName: string,
++	inputState: Enum.UserInputState,
++	_input: InputObject
++): Enum.ContextActionResult
++	if inputState ~= Enum.UserInputState.Begin then
++		return Enum.ContextActionResult.Pass
++	end
++	if isOpen() then
++		close()
++	else
++		open("Shortcut")
++	end
++	return Enum.ContextActionResult.Sink
++end
++
++local function onCloseAction(
++	_actionName: string,
++	inputState: Enum.UserInputState,
++	_input: InputObject
++): Enum.ContextActionResult
++	if inputState ~= Enum.UserInputState.Begin then
++		return Enum.ContextActionResult.Pass
++	end
++	close()
++	return Enum.ContextActionResult.Sink
++end
++
++--[[
++	While the menu is open, B closes it, Roblox's touch controls hide so they
++	cannot sit over the panel, taps and clicks place no blocks, and a controller
++	picked up mid-menu gets focus inside the panel.
++]]
++local function syncWhileOpen()
++	effect(function()
++		if not (isOpen() and Screen.isGamepad()) then
++			return
++		end
++		task.defer(function()
++			const target = panelFocusTarget
++			if GuiService.SelectedObject == nil and target and target.Parent then
++				GuiService.SelectedObject = target
++			end
++		end)
++	end)
++
++	effect(function()
++		if not isOpen() then
++			return
++		end
++
++		ContextActionService:BindActionAtPriority(
++			CLOSE_ACTION,
++			onCloseAction,
++			false,
++			Enum.ContextActionPriority.High.Value,
++			CLOSE_KEY
++		)
++		local wasPlacing = BlockPlacer.isEnabled()
++		local hadTouchControls = GuiService.TouchControlsEnabled
++		BlockPlacer.setEnabled(false)
++		GuiService.TouchControlsEnabled = false
++
++		cleanup(function()
++			ContextActionService:UnbindAction(CLOSE_ACTION)
++			BlockPlacer.setEnabled(wasPlacing)
++			GuiService.TouchControlsEnabled = hadTouchControls
++		end)
++	end)
++end
++
++local function buttonGui(): ScreenGui
++	local button = menuButton({
++		Name = "OpenSettings",
++		Text = "Settings",
++		Icon = gamepadGlyph(TOGGLE_KEY),
++		AnchorPoint = Vector2.new(1, 0.5),
++		Position = OPEN_BUTTON_POSITION,
++		Size = OPEN_BUTTON_SIZE,
++		Activated = function()
++			if isOpen() then
++				close()
++			else
++				open("Button")
++			end
++		end,
++	})
++	openButton = button
++
++	return create("ScreenGui")({
++		Name = "SettingsButton",
++		DisplayOrder = BUTTON_DISPLAY_ORDER,
++		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
++
++		create("UIScale")({ Scale = Screen.uiScale }),
++		button,
++	}) :: ScreenGui
++end
++
++local function scrimGui(): ScreenGui
++	return create("ScreenGui")({
++		Name = "SettingsScrim",
++		DisplayOrder = SCRIM_DISPLAY_ORDER,
++		ScreenInsets = Enum.ScreenInsets.None,
++
++		show(isOpen, function(_, present)
++			local function target(): number
++				return if present() then SCRIM_TRANSPARENCY * Screen.transparencyMultiplier() else 1
++			end
++			local faded = spring(target, FADE_PERIOD)
++			local exitDelay = if Screen.isReducedMotion() then 0 else FADE_PERIOD
++
++			return create("TextButton")({
++				Name = "Scrim",
++				Size = UDim2.fromScale(1, 1),
++				BackgroundColor3 = Theme.Scrim,
++				Selectable = false,
++				-- Stops a fading scrim from swallowing taps meant for the world.
++				Interactable = present,
++				BackgroundTransparency = function()
++					return if Screen.isReducedMotion() then target() else faded()
++				end,
++				Activated = close,
++			}),
++				exitDelay
++		end),
++	}) :: ScreenGui
++end
++
++local function panelGui(): ScreenGui
++	return create("ScreenGui")({
++		Name = "SettingsMenu",
++		DisplayOrder = PANEL_DISPLAY_ORDER,
++		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
++
++		create("UIScale")({ Scale = Screen.uiScale }),
++
++		show(isOpen, function()
++			return settingsPanel({
++				IsCompact = Screen.isPhone,
++				Room = Screen.usableSize,
++				AnchorPoint = Vector2.new(0.5, 0.5),
++				Position = UDim2.fromScale(0.5, 0.5),
++				MusicVolume = musicVolume,
++				SetMusicVolume = setMusicVolume,
++				EffectsVolume = effectsVolume,
++				SetEffectsVolume = setEffectsVolume,
++				DeleteBlocks = BlockPlacer.clearMyBlocks,
++				Close = close,
++				Focus = focusPanel,
++				CloseIcon = gamepadGlyph(CLOSE_KEY),
++			})
++		end),
++	}) :: ScreenGui
++end
++
++--[[
++	Builds the menu into PlayerGui and binds gamepad Y. Waits for PlayerGui, so
++	call it from a script that may yield.
++]]
++function Module.startAsync(): ()
++	if hasStarted then
++		return
++	end
++	hasStarted = true
++
++	const playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
++	mount(function()
++		syncWhileOpen()
++		return { buttonGui(), scrimGui(), panelGui() }
++	end, playerGui)
++
++	ContextActionService:BindAction(TOGGLE_ACTION, onToggleAction, false, TOGGLE_KEY)
++end
++
++return Module
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau
+new file mode 100644
+index 0000000..f416170
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau
+@@ -0,0 +1,47 @@
++--!strict
++--[[
++	Colors, fonts, and text sizes shared by the game's UI. Every text color
++	passes 4.5:1 contrast against the surface it sits on, and every surface
++	behind text is opaque, so text reads over any part of the world.
++]]
++
++const Theme = {
++	-- Surfaces
++	Panel = Color3.fromRGB(30, 33, 38),
++	Scrim = Color3.fromRGB(0, 0, 0),
++	Track = Color3.fromRGB(58, 63, 71),
++	-- 4.4:1 against Track, past the 3:1 a non-text graphic needs.
++	TrackFill = Color3.fromRGB(110, 168, 255),
++	Knob = Color3.fromRGB(245, 245, 245),
++	Outline = Color3.fromRGB(80, 86, 96),
++
++	-- 13:1 on Panel
++	Text = Color3.fromRGB(245, 245, 245),
++	-- 9:1 on Panel
++	TextMuted = Color3.fromRGB(190, 195, 204),
++
++	-- Text passes 4.5:1 on every button color below except Disabled, which
++	-- keeps the 3:1 an inactive control needs.
++	Neutral = Color3.fromRGB(58, 63, 71),
++	NeutralHover = Color3.fromRGB(74, 80, 90),
++	NeutralPressed = Color3.fromRGB(44, 48, 54),
++	Danger = Color3.fromRGB(179, 38, 30),
++	DangerHover = Color3.fromRGB(200, 52, 42),
++	DangerPressed = Color3.fromRGB(140, 28, 22),
++	Disabled = Color3.fromRGB(46, 49, 55),
++	TextDisabled = Color3.fromRGB(130, 135, 144),
++
++	Font = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Medium),
++	FontBold = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold),
++
++	-- In UI units for a 1080-tall screen; a TV's 1.25 scale lifts body text
++	-- past the 26 px console floor.
++	TitleTextSize = 32,
++	BodyTextSize = 24,
++	ButtonTextSize = 24,
++
++	CornerRadius = UDim.new(0, 12),
++	ButtonCornerRadius = UDim.new(0, 10),
++}
++
++return table.freeze(Theme)

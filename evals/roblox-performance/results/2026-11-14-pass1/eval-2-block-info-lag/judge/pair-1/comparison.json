@@ -1,0 +1,125 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "The two attempts are nearly the same fix: event-driven counts, a 27-cell grid index for hover, and dirty-flag text and Adornee writes, and both pass all checks. A edges ahead on behavior: it tracks insertion order so exact-distance ties resolve the way the original GetChildren scan did, and it handles CharacterRemoving. B's report is somewhat stronger (an explicit table of unmeasured results and a profiler label), but correct code that keeps the old behavior counts most, so A wins narrowly.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Event-driven counts",
+          "score": 5,
+          "note": "`onBlockAdded`/`onBlockRemoved` on ChildAdded/ChildRemoved keep `counts` and `totalCount` up to date; the only GetChildren is one pass at startup."
+        },
+        {
+          "criterion": "Hover lookup independent of block count",
+          "score": 5,
+          "note": "`cells` grid index keyed by `Vector3` cell; `findHoveredBlock` checks only the cells between minX..maxX etc., at most 27."
+        },
+        {
+          "criterion": "Work only on input change",
+          "score": 5,
+          "note": "`countsDirty` gates `rebuildCountsText`, `refreshLabel` runs only on count or hover change, and `selectionBox.Adornee` is written only when `hoverChanged`."
+        },
+        {
+          "criterion": "Same behavior",
+          "score": 5,
+          "note": "Connects events before the startup scan and skips duplicates with `records[child]`, keeps the strict `< HOVER_RADIUS` rule, and uses `record.order` so exact ties still go to the earliest-added block, as GetChildren order did."
+        },
+        {
+          "criterion": "Removes cost rather than throttling",
+          "score": 5,
+          "note": "No throttling, pooling, or Parallel Luau; the per-frame cost is one raycast plus a few table lookups."
+        },
+        {
+          "criterion": "Honest report",
+          "score": 4,
+          "note": "Explains the O(n) GetChildren scans and the allocations behind GC, phrases results as expectations ('should be far below 2.5 ms'), and lists MicroProfiler, phone FPS, and behavior checks; it is a little less explicit than B that nothing was measured."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Changes only the script and the report, the `BlockRecord` type is clear, and all checks pass."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Event-driven counts",
+          "score": 5,
+          "note": "`onChildAdded`/`onChildRemoved` keep `countsByName` and `totalChildren` up to date, with a single startup GetChildren pass and `countedNames` dedup."
+        },
+        {
+          "criterion": "Hover lookup independent of block count",
+          "score": 5,
+          "note": "`blocksByCell` grid index, searched only between `getCell(point - reach)` and `getCell(point + reach)`."
+        },
+        {
+          "criterion": "Work only on input change",
+          "score": 5,
+          "note": "`isTextStale` gates `buildText`, and `Adornee` is written only when `hovered ~= hoveredBlock or name ~= hoveredName`."
+        },
+        {
+          "criterion": "Same behavior",
+          "score": 4,
+          "note": "Counts, total, and the hover rule are preserved, but exact distance ties are settled by cell iteration order rather than GetChildren order (a rare edge case), and the character filter isn't cleared on removal (harmless)."
+        },
+        {
+          "criterion": "Removes cost rather than throttling",
+          "score": 5,
+          "note": "No throttling or micro-tuning; the debug.profilebegin label is diagnostic only."
+        },
+        {
+          "criterion": "Honest report",
+          "score": 5,
+          "note": "Says plainly that the after numbers are 'not measured yet', has a results table with expected values, explains the GetChildren garbage behind GC, and gives same-build before/after, scale test, and phone checks."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Changes only the script and the report, the code is typed and readable, and all checks pass."
+        }
+      ],
+      "overall_score": 8.3
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Keeps the old tie-break behavior with insertion order",
+        "Clean dirty-flag split between rebuilding the counts text and refreshing the label",
+        "Updates the character filter on both CharacterAdded and CharacterRemoving",
+        "Report states the anchored/never-renamed assumption"
+      ],
+      "weaknesses": [
+        "Report doesn't say outright that the after-change numbers are unmeasured",
+        "`records` lookup inside the hover loop is a little indirect"
+      ]
+    },
+    "B": {
+      "score": 8.3,
+      "strengths": [
+        "Very clear, honest report with an unmeasured-results table and a scale test",
+        "Adds a `BlockInfo:Step` profiler label to make checking easier",
+        "Also detects a hovered block's name changing"
+      ],
+      "weaknesses": [
+        "Exact-tie hover results may differ from the original GetChildren order",
+        "Character filter keeps the old character after removal (harmless)",
+        "Report includes extrapolated figures ('~20 ms at 50,000') that could read as estimates presented too confidently"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8.5,
+    "with_skill": 8.3
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

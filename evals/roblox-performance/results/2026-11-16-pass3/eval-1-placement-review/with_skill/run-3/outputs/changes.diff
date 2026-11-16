@@ -1,0 +1,169 @@
+diff --git a/docs/perf/placement-review.md b/docs/perf/placement-review.md
+new file mode 100644
+index 0000000..8216192
+--- /dev/null
++++ b/docs/perf/placement-review.md
+@@ -0,0 +1,134 @@
++# Block placement performance review
++
++Reviewed: `src/ServerScriptService/BlockPlacement.server.luau` and
++`src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau`, against a list of six suggested
++optimizations.
++
++## The load these scripts carry
++
++- The server accepts at most one placement per player every 0.1 s, so 10 per second per player.
++- A server holds 8 players, so the worst case is **80 `PlaceBlock` events per second** for the
++  whole server, and only if every player clicks ten times a second without stopping.
++- Each event runs a handful of type checks, a table lookup, a distance check, and creates one
++  anchored Part with seven property writes. That is on the order of tens of microseconds. At 80
++  per second it is well under 1% of a 16.7 ms server frame.
++- Each `PlaceBlock` payload is a short string (at most 6 characters) and one `Vector3`: a few
++  dozen bytes including overhead. One player sends at most about 0.3 KB/s, and the server
++  receives at most a few KB/s in total. Typical budgets are tens of KB/s per client.
++- On the client, the raycast and remote fire run once per click or tap, at human speed.
++- Nobody has reported lag, and no profile or measurement points at either script.
++
++The rule applied below: without a measurement that shows a problem, or an estimate that says a
++problem is coming at the intended scale, an optimization is not worth its cost in code and
++risk. The estimate above says these scripts are nowhere near any budget, so the bar for each
++item is "does this make the code better on its own terms, or fix a real problem?"
++
++## Verdicts
++
++### 1. Pool the block Parts instead of calling `Instance.new` for every block
++
++**Not worth doing.**
++
++- A pool reuses instances that were released. Nothing in this game removes placed blocks, so a
++  pool would never get a part back and every block would still need a new Part. There is
++  nothing to pool.
++- Even if blocks were removed later, pooling pays only when a profile shows instance creation
++  being a cost. At 80 creations per second at most, it is not. `Instance.new`, `Clone`, and
++  similar are within about 2x of each other for a simple part, and one anchored part with its
++  properties set before `Parent` (which this code already does correctly) is cheap.
++- A pool has its own costs: it holds memory for parts nobody sees, and a reused part can keep
++  stale state (the `PlacedBy` attribute, for one) that a fresh part would not have.
++
++The thing actually worth watching here is the **total number of blocks**, not how they are
++created. Nothing caps it, and each anchored Part in Workspace costs roughly 3 to 6 KB of server
++memory, is sent to every joining player, and adds to join time. A server open for a long time
++with busy builders could reach tens of thousands of parts. If that ever becomes a concern, the
++fix is a design decision (a per-player or per-server block limit, or clearing blocks when a
++player leaves), not pooling. That is a gameplay change, so it was not made here.
++
++### 2. Pack `PlaceBlock`'s arguments into a buffer to cut network traffic
++
++**Not worth doing.**
++
++- The payload is already a few dozen bytes, at most 10 times a second per player. A buffer could
++  shave perhaps ten bytes per event. That saves well under 0.1 KB/s per player against a budget
++  in the tens of KB/s.
++- Buffers save bytes and memory, not time; they do not make anything faster to process.
++- It would cost readability on both sides and move validation into hand-written byte reading,
++  which is a new place for bugs in code that handles untrusted client data. The current handler
++  checks `typeof`, rejects NaN, and validates the name; a buffer version would need all of that
++  plus length and bounds checks.
++- The bigger network cost of a placement is the new Part replicating to all 8 clients, which a
++  buffer does not touch.
++
++### 3. Change `PlaceBlock` to an `UnreliableRemoteEvent`
++
++**Do not do this. It would introduce a bug.**
++
++- "Unreliable" means the engine is allowed to drop the event, and drops it at once when its
++  queue is full. A dropped `PlaceBlock` is a click that silently places nothing. Players would
++  see that as the game ignoring their input.
++- Unreliable events are meant for data where the next message replaces the last one, such as a
++  position sent every frame. A placement is a one-off action whose result must happen; that is
++  exactly what a reliable `RemoteEvent` is for.
++- There is no speed problem to solve: at a few events per second per player, a reliable event
++  arrives as fast as an unreliable one in practice. The only time reliable events wait is when a
++  connection is losing packets, which is precisely when an unreliable placement would be lost.
++
++### 4. Put `--!native` at the top of both scripts
++
++**Not worth doing.**
++
++- Native code generation speeds up number crunching in tight loops. Both scripts mostly call
++  engine APIs (`Instance.new`, property writes, `FindFirstChild`, `Raycast`, `FireServer`),
++  which native code does nothing for.
++- The handlers run at most 80 times a second on the server and once per click on the client.
++  There is no hot loop to speed up.
++- Native code costs compile time and memory against a limit shared by the whole game, so it
++  belongs on the few functions a profile names.
++- On the client it is only supported on some platforms, so it would mostly do nothing there.
++
++### 5. Replace the `table.find` check with a lookup table
++
++**Changed, but as a cleanup rather than a speedup.**
++
++- As a performance change it is meaningless: `table.find` over 5 names takes nanoseconds, and a
++  lookup table only wins noticeably on long lists.
++- It was still worth changing, because the lookup table already existed. The server built its
++  own `VALID_NAMES` list from `BlockTypes.List`, searched it with `table.find`, and then looked
++  the name up in `BlockTypes.ByName` anyway. The handler now looks the name up in
++  `BlockTypes.ByName` once and returns if it is missing. That removes the duplicate list and the
++  loop that built it, and leaves one source of truth for valid names.
++- Behavior is unchanged: the same names are accepted and rejected. `ByName` is a frozen plain
++  table with no metatable, so a hostile string such as `"__index"` returns `nil` and is
++  rejected, just as before.
++
++### 6. Create the `RaycastParams` once instead of on every click
++
++**Not worth doing.**
++
++- Creating a `RaycastParams` and setting two properties costs microseconds, and it happens once
++  per click or tap, at most a few times a second. No player could ever notice it.
++- Reusing one `RaycastParams` matters in code that raycasts every frame or many times per frame.
++  This code raycasts only on input.
++- The current version is also correct by construction: it reads `Players.LocalPlayer.Character`
++  at each click, so the filter always excludes the current character after a respawn. A reused
++  `RaycastParams` would still need its filter updated on every click or on `CharacterAdded`,
++  adding state and a way to get it wrong, for no gain.
++
++## Summary
++
++| # | Suggestion | Verdict |
++|---|---|---|
++| 1 | Pool block Parts | No: nothing is ever released to a pool. Watch total block count instead. |
++| 2 | Pack arguments into a buffer | No: saves a few bytes per click, costs readability and validation safety. |
++| 3 | `UnreliableRemoteEvent` | No: would silently drop placements. |
++| 4 | `--!native` | No: code is engine calls at low frequency, not math in a loop. |
++| 5 | Lookup table instead of `table.find` | Done, as a cleanup: reuses the existing `BlockTypes.ByName`. |
++| 6 | Reuse `RaycastParams` | No: runs once per click, and the current version handles respawns for free. |
++
++None of the six would make a measurable difference at 8 players and 10 placements a second.
++If lag is reported later, the place to start is a MicroProfiler capture and the Developer
++Console's network and memory numbers on a live server, not this list. The one thing likely to
++matter as servers stay up longer is how many blocks pile up in Workspace, which is a design
++question (block limits or cleanup) for whoever owns the gameplay.
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index 71cc7bb..b2ff5a3 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -15,11 +15,6 @@ local MAX_REACH = 64
+ -- Shortest time between two placements by one player, in seconds.
+ local MIN_INTERVAL = 0.1
+ 
+-local VALID_NAMES: { string } = {}
+-for _, blockType in BlockTypes.List do
+-	table.insert(VALID_NAMES, blockType.Name)
+-end
+-
+ local placeBlock = Instance.new("RemoteEvent")
+ placeBlock.Name = "PlaceBlock"
+ placeBlock.Parent = ReplicatedStorage
+@@ -48,10 +43,10 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 	if position ~= position then
+ 		return
+ 	end
+-	if not table.find(VALID_NAMES, blockTypeName) then
++	local blockType = BlockTypes.ByName[blockTypeName]
++	if not blockType then
+ 		return
+ 	end
+-	local blockType = BlockTypes.ByName[blockTypeName]
+ 
+ 	local now = os.clock()
+ 	if now - (lastPlacedAt[player] or 0) < MIN_INTERVAL then

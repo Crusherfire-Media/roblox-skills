@@ -1,0 +1,126 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both have the same sound design: a single owning Charm module, clone-and-set updates, a useSignalState bridge inside the scope, and a placement guard that reads Charm directly. B handles the time before the first StockChanged better: it shows blank counts instead of every tile grayed with \\\"0 left\\\". It also starts BlockStock without blocking BlockPlacer.start. A's strict mode and story file are minor by comparison.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Single Charm signal owned by module",
+          "score": 5,
+          "note": "BlockStock.luau holds `Charm.signal({})`, exports only `getStock`/`getCount`, and writes it only in `onStockChanged`."
+        },
+        {
+          "criterion": "Immutable updates",
+          "score": 5,
+          "note": "The updater does `table.clone(stock)`, sets one entry, and returns the new table."
+        },
+        {
+          "criterion": "Shared derived values / guard reads Charm",
+          "score": 3,
+          "note": "The guard reads `BlockStock.getCount(blockType)` straight from Charm, but the selected block's count is worked out separately in BlockPicker's `countOf(props.Selected())`, with no shared computed."
+        },
+        {
+          "criterion": "Vide-tracked bridge",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` runs inside `app()` and is passed down as the `Stock` source."
+        },
+        {
+          "criterion": "Live updates and pre-data appearance",
+          "score": 3,
+          "note": "Updates live on stock and selection changes, but `or 0` makes every tile gray with \"0\" and \"0 left\" before the first StockChanged arrives."
+        },
+        {
+          "criterion": "No yields in Charm callbacks / no leaks",
+          "score": 5,
+          "note": "The updater is pure, and the only listener is the `useSignalState` one, which the Vide scope cleans up."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "Checks pass and `--!strict` is set. `BlockStock.start()` yields synchronously before `BlockPlacer.start()`, which is minor serialization. The extra story file is neutral."
+        }
+      ],
+      "overall_score": 7.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Single Charm signal owned by module",
+          "score": 5,
+          "note": "BlockStock.luau owns `Charm.signal({} :: Stock)`, exposes the getters, and writes only in `onStockChanged`."
+        },
+        {
+          "criterion": "Immutable updates",
+          "score": 5,
+          "note": "Clones before setting the entry, and returns the same table when the count hasn't changed."
+        },
+        {
+          "criterion": "Shared derived values / guard reads Charm",
+          "score": 3,
+          "note": "The guard uses `BlockStock.getCount(blockType) or 0` from Charm, but the selected block's count is recomputed inline in the label's `Text` binding, with no shared computed."
+        },
+        {
+          "criterion": "Vide-tracked bridge",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` runs in `app()` and is passed down as `Stock`."
+        },
+        {
+          "criterion": "Live updates and pre-data appearance",
+          "score": 5,
+          "note": "Updates live, and leaves the count and label blank (not gray) until the server reports, since `isEmpty` is `== 0` and the text is \"\" when nil."
+        },
+        {
+          "criterion": "No yields in Charm callbacks / no leaks",
+          "score": 5,
+          "note": "The updater is pure, and the listener is cleaned up through the Vide scope."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "Checks pass, and `task.spawn(BlockStock.start)` avoids serializing startup. BlockStock lacks `--!strict`."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7.5,
+      "strengths": [
+        "Clean owning module with an immutable clone-and-set update",
+        "Correct vide-charm bridge created inside the mounted scope",
+        "Guard reads Charm directly and fires with the captured blockType",
+        "Strict typing"
+      ],
+      "weaknesses": [
+        "Shows every tile grayed with \"0 left\" before the server's first update",
+        "BlockStock.start yields before BlockPlacer.start, so startup is serialized",
+        "No shared computed for the selected block's count"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Tells \"unknown\" apart from \"none left\", so the startup display is sensible",
+        "Immutable updates that skip unchanged counts",
+        "Non-blocking startup with task.spawn",
+        "Clear comments"
+      ],
+      "weaknesses": [
+        "No shared computed for the selected block's count",
+        "BlockStock is not marked --!strict"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 7.5,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

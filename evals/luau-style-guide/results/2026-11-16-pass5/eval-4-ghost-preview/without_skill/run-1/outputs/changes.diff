@@ -1,0 +1,195 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+new file mode 100644
+index 0000000..14ffe34
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+@@ -0,0 +1,189 @@
++--!strict
++-- A see-through copy of the selected block that follows the mouse, snapped to the grid, so the
++-- player can see where a click would put a block. Turns red where the block can't go.
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
++local UserInputService = game:GetService("UserInputService")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
++
++type BlockType = BlockTypes.BlockType
++
++export type Options = {
++	-- Transparency of the ghost while it's visible. Defaults to DefaultTransparency.
++	Transparency: number?,
++	-- How far the mouse ray reaches, in studs. Defaults to DefaultRaycastDistance.
++	RaycastDistance: number?,
++}
++
++local localPlayer = Players.LocalPlayer
++
++local GhostPreview = {}
++GhostPreview.__index = GhostPreview
++
++GhostPreview.DefaultTransparency = 0.5
++GhostPreview.DefaultRaycastDistance = 500
++GhostPreview.BlockedColor = Color3.fromRGB(255, 60, 60)
++
++type self = {
++	_blockType: BlockType,
++	_transparency: number,
++	_raycastDistance: number,
++	_part: Part,
++	_raycastParams: RaycastParams,
++	_filteredCharacter: Model?,
++	_connection: RBXScriptConnection?,
++	-- Result of the most recent frame. _center is nil while the mouse points at nothing.
++	_center: Vector3?,
++	_placeable: boolean,
++	_reason: string?,
++}
++
++export type GhostPreview = typeof(setmetatable({} :: self, GhostPreview))
++
++--[[
++	Creates a ghost for blockType and starts following the mouse. Call destroy when build mode
++	ends.
++]]
++function GhostPreview.new(blockType: BlockType, options: Options?): GhostPreview
++	local transparency = (options and options.Transparency) or GhostPreview.DefaultTransparency
++	local raycastDistance = (options and options.RaycastDistance)
++		or GhostPreview.DefaultRaycastDistance
++
++	local part = Instance.new("Part")
++	part.Name = "GhostPreview"
++	part.Size = Vector3.one * BlockTypes.BlockSize
++	part.Anchored = true
++	part.CanCollide = false
++	part.CanTouch = false
++	-- Keeps the ghost out of the mouse ray and out of PlacementRules' overlap check.
++	part.CanQuery = false
++	part.CastShadow = false
++	part.Transparency = 1
++	part.TopSurface = Enum.SurfaceType.Smooth
++	part.BottomSurface = Enum.SurfaceType.Smooth
++
++	local raycastParams = RaycastParams.new()
++	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
++	raycastParams.FilterDescendantsInstances = { part }
++
++	local self = setmetatable(
++		{
++			_blockType = blockType,
++			_transparency = transparency,
++			_raycastDistance = raycastDistance,
++			_part = part,
++			_raycastParams = raycastParams,
++			_filteredCharacter = nil,
++			_connection = nil,
++			_center = nil,
++			_placeable = false,
++			_reason = nil,
++		} :: self,
++		GhostPreview
++	)
++
++	self:_applyStyle()
++	part.Parent = workspace
++
++	self._connection = RunService.RenderStepped:Connect(function()
++		self:_update()
++	end)
++	self:_update()
++
++	return self
++end
++
++-- Switches the ghost to another block type.
++function GhostPreview.setBlockType(self: GhostPreview, blockType: BlockType)
++	self._blockType = blockType
++	self:_applyStyle()
++end
++
++function GhostPreview.getBlockType(self: GhostPreview): BlockType
++	return self._blockType
++end
++
++--[[
++	Where the ghost is and whether a block can go there, as of the latest frame. Returns
++	placeable, the cell center (nil when the mouse points at the sky), and why the block can't go
++	there when placeable is false.
++]]
++function GhostPreview.getPlacement(self: GhostPreview): (boolean, Vector3?, string?)
++	return self._placeable, self._center, self._reason
++end
++
++-- Stops following the mouse and removes the ghost. Safe to call more than once.
++function GhostPreview.destroy(self: GhostPreview)
++	if self._connection then
++		self._connection:Disconnect()
++		self._connection = nil
++	end
++	self._part:Destroy()
++	self._center = nil
++	self._placeable = false
++	self._reason = nil
++end
++
++function GhostPreview._applyStyle(self: GhostPreview)
++	local style = BlockTypes.Styles[self._blockType]
++	self._part.Material = style.Material
++	self._part.Color = if self._placeable or self._center == nil
++		then style.Color
++		else GhostPreview.BlockedColor
++end
++
++function GhostPreview._raycastFromMouse(self: GhostPreview): RaycastResult?
++	local camera = workspace.CurrentCamera
++	if not camera then
++		return nil
++	end
++
++	local character = localPlayer.Character
++	if character ~= self._filteredCharacter then
++		self._filteredCharacter = character
++		self._raycastParams.FilterDescendantsInstances = if character
++			then { self._part, character }
++			else { self._part }
++	end
++
++	local mouse = UserInputService:GetMouseLocation()
++	local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
++	return workspace:Raycast(ray.Origin, ray.Direction * self._raycastDistance, self._raycastParams)
++end
++
++function GhostPreview._update(self: GhostPreview)
++	local result = self:_raycastFromMouse()
++	if not result then
++		self._center = nil
++		self._placeable = false
++		self._reason = nil
++		self._part.Transparency = 1
++		return
++	end
++
++	-- Step half a block off the surface so the snap lands in the cell beside it, not inside it.
++	local center = PlacementRules.snap(result.Position + result.Normal * (BlockTypes.BlockSize / 2))
++
++	local placeable, reason
++	local blocksFolder = workspace:FindFirstChild("PlacedBlocks")
++	if blocksFolder then
++		placeable, reason = PlacementRules.check(center, localPlayer.Character, blocksFolder)
++	else
++		-- The server hasn't replicated the folder yet, so occupancy can't be checked.
++		placeable, reason = false, "NoBlocksFolder"
++	end
++
++	self._center = center
++	self._placeable = placeable
++	self._reason = reason
++
++	self._part.CFrame = CFrame.new(center)
++	self._part.Transparency = self._transparency
++	self:_applyStyle()
++end
++
++return GhostPreview

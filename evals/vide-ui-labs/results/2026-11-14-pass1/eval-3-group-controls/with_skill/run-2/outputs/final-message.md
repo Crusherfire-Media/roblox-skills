@@ -1,0 +1,6 @@
+I've fixed the formatting, but three type errors remain and they aren't caused by this change.
+
+- **Formatting:** I ran `stylua` on the story. It only re-wrapped the four `UILabs.Ordered(UILabs.ControlGroup({...}), n)` calls across several lines, so the grouping and order are unchanged.
+- **The two "Unknown require" errors (lines 4–5) and "Unknown type `BlockTypes.BlockType`":** this change didn't cause these. The two require lines are exactly as they were before. Both modules exist at `src/StarterPlayer/StarterPlayerScripts/BlockTile.luau` and `src/ReplicatedStorage/Shared/BlockTypes.luau`. The problem is that `sourcemap.json` doesn't list either of them, so `luau-lsp` can't resolve the requires, and the unknown type follows from that. Running `rojo sourcemap default.project.json -o sourcemap.json` should regenerate the sourcemap and clear all three. I didn't regenerate it, because you asked me to change only the story.
+
+I couldn't re-run `luau-lsp`, so the check that the new nested control types have no errors of their own is still open.

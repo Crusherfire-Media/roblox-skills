@@ -1,0 +1,126 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "B sums value-less container subsystems per frame from their leaves, aligned by FrameId, and takes the peak frame from that sum. It walks the tree with the documented FindCounterId and FirstChild/Sibling API and passes StyLua. A skips container subsystems entirely, relies on FetchCounterIds (not in the verified API), and fails StyLua. Both lack a usage line, show the absolute frame id, and dispose the session.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Open/usage/dispose",
+          "score": 3,
+          "note": "Opens process.args[2] via OpenFromFile and asserts, but has no usage line (\"could not open nil\"); disposes the session on both exit paths."
+        },
+        {
+          "criterion": "2. Hierarchy walk and paths",
+          "score": 3,
+          "note": "Builds children from the Parent links of every counter via session:FetchCounterIds(), which is not in the verified API; fullPath walks up Parent, and nothing is hard-coded."
+        },
+        {
+          "criterion": "3. Subsystem values / no double counting",
+          "score": 2,
+          "note": "A value-less container subsystem goes to the 'no samples' list instead of being summed from its leaves; the top-N list correctly ranks only leaves (collect)."
+        },
+        {
+          "criterion": "4. Stats and peak frame",
+          "score": 3,
+          "note": "stats() computes first, last, peak, and growth from sorted samples, but there is no summed peak because container sums aren't computed."
+        },
+        {
+          "criterion": "5. Frame id + absolute id",
+          "score": 5,
+          "note": "frameName prints id/FrameAbsoluteId plus a t= offset."
+        },
+        {
+          "criterion": "6. Fetch only, no Control",
+          "score": 4,
+          "note": "Uses only Fetch*** methods and no Control calls, but relies on FetchCounterIds, which may not exist."
+        },
+        {
+          "criterion": "7. Output/sort/format",
+          "score": 3,
+          "note": "Readable tables sorted by growth and topN defaults to 10, but StyLua fails on line 60."
+        }
+      ],
+      "overall_score": 5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Open/usage/dispose",
+          "score": 3,
+          "note": "Opens process.args[2] and asserts, with no usage line; disposes the session before error() and at the end."
+        },
+        {
+          "criterion": "2. Hierarchy walk and paths",
+          "score": 5,
+          "note": "FindCounterId('/memory'), then getChildren follows FirstChild/Sibling; getPath builds full paths recursively, with caching."
+        },
+        {
+          "criterion": "3. Subsystem values / no double counting",
+          "score": 5,
+          "note": "Uses the node's own samples when present, otherwise sumLeafSamples aligned by FrameId with carry-forward; top-N ranks only leaves, and the memory total is printed separately."
+        },
+        {
+          "criterion": "4. Stats and peak frame",
+          "score": 5,
+          "note": "summarize() runs on the summed series, so the peak frame is where the sum peaks."
+        },
+        {
+          "criterion": "5. Frame id + absolute id",
+          "score": 5,
+          "note": "formatFrame prints id/FrameAbsoluteId, with a range guard."
+        },
+        {
+          "criterion": "6. Fetch only, no Control",
+          "score": 5,
+          "note": "Uses only FetchCounterSamples, FetchCounterDesc, and FetchFrameDesc, plus Find***; no Control calls."
+        },
+        {
+          "criterion": "7. Output/sort/format",
+          "score": 5,
+          "note": "Column widths adapt to the names, both lists are sorted by growth, topN defaults to 10, and selene and StyLua pass."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 5,
+      "strengths": [
+        "Top-N ranks only leaf counters, with full paths",
+        "Frame names include the absolute id and a time offset",
+        "Simple, readable code"
+      ],
+      "weaknesses": [
+        "Does not sum value-less container subsystems",
+        "Relies on FetchCounterIds, which isn't in the documented API",
+        "StyLua check fails",
+        "No usage message when the argument is missing"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Correctly sums container subsystems from their leaves, aligned by frame",
+        "Uses only the documented hierarchy API (FindCounterId, FirstChild/Sibling)",
+        "Peak frame comes from the summed series",
+        "Passes all checks"
+      ],
+      "weaknesses": [
+        "No usage message when the argument is missing",
+        "Subsystem rows show the short name rather than the full path"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 5,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

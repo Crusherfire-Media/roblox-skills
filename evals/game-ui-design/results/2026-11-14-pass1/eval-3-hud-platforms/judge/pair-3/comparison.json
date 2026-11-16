@@ -1,0 +1,129 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "B detects input with PreferredInput and ViewportDisplaySize, updating live. A infers input from events and uses the deprecated IsTenFootInterface. B also handles touch layout more carefully (phone vs tablet button positions, hotbar clear of the thumbstick and jump button), grows text more for TV and phone through UIScale, refreshes glyphs live, and shows block names on gamepad focus. A keeps PC exactly as before and binds gamepad buttons more robustly, but its detection and readability fall short of B's.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Input-following layout",
+          "score": 2,
+          "note": "InputMode.luau works out the mode from InputBegan/InputChanged device types, not PreferredInput, and fallbackMode/TenFoot use the deprecated GuiService:IsTenFootInterface(); it does update live."
+        },
+        {
+          "criterion": "Prompts match input",
+          "score": 4,
+          "note": "Key labels and [B]/[I] hints show only in KeyboardMouse via Visible/switch; glyph() uses GetImageForKeyCode with text fallbacks (X/Y/LB/RB) only if Roblox has no image."
+        },
+        {
+          "criterion": "Controller path",
+          "score": 4,
+          "note": "BindActionAtPriority for ButtonX/ButtonY/L1/R1 with wraparound cycleBlockType; all buttons use Activated."
+        },
+        {
+          "criterion": "Touch targets and thumb zones",
+          "score": 4,
+          "note": "touchButton is 128x48 at the vertical middle of the right edge; slots are at least 44 px and wrap to two rows with a 100 px reserve on each side on small screens, though tablets only reserve a 12 px margin."
+        },
+        {
+          "criterion": "No hover-only info",
+          "score": 4,
+          "note": "flashedName shows the selected block's DisplayName for 1.5 s after each non-mouse pick; MouseEnter hover is ignored outside mouse mode."
+        },
+        {
+          "criterion": "Readability TV/phone",
+          "score": 3,
+          "note": "TextSize goes from 14 to 22 on gamepad but only 16 on touch; the 5% TV-safe UIPadding applies only when IsTenFootInterface is true."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 4,
+          "note": "PC metrics match the original; bindings and derived values are valid Vide; checks pass; sinking ButtonX/Y at High priority all the time could clash with the other dev's placement bindings."
+        }
+      ],
+      "overall_score": 6.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Input-following layout",
+          "score": 5,
+          "note": "Screen.luau reads UserInputService.PreferredInput (including MicroGamepad) and GuiService.ViewportDisplaySize through GetPropertyChangedSignal, so the layout and prompts update live."
+        },
+        {
+          "criterion": "Prompts match input",
+          "score": 5,
+          "note": "ShowKey and the [B]/[I] prefixes appear only on KeyboardAndMouse; Screen.glyphImage calls GetImageForKeyCode and re-reads it when gamepads connect or disconnect."
+        },
+        {
+          "criterion": "Controller path",
+          "score": 4,
+          "note": "InputBegan handles ButtonY/ButtonX/L1/R1 with wraparound stepBlockType and skips them while GuiService.SelectedObject is set; buttons use Activated. Uses UIS rather than CAS, so it can collide with the core backpack."
+        },
+        {
+          "criterion": "Touch targets and thumb zones",
+          "score": 5,
+          "note": "Phone buttons are 150x52 in a row under the coins and tablet buttons sit in a column above jumpButtonClearance; slots are 46-56 px in 5 columns, and hotbarPlacement centers the hotbar between THUMBSTICK_SHARE and the jump button."
+        },
+        {
+          "criterion": "No hover-only info",
+          "score": 5,
+          "note": "shownName combines hover (mouse only), SelectionGained focus, and a 2 s flash after each selection change."
+        },
+        {
+          "criterion": "Readability TV/phone",
+          "score": 4,
+          "note": "Text is 26 px for gamepad and 18 for phone/tablet, with UIScale plus a 1.25 boost on Large displays; ScreenInsets is CoreUISafeInsets and the gamepad margin is 32 px rather than a percentage safe area."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 4,
+          "note": "Valid Vide (deferred thread cleaned up with cleanup, bound metrics); checks pass; the PC HUD changes slightly (build hint becomes a 140x28 button, UIScale grows the HUD above 1080p)."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 6.5,
+      "strengths": [
+        "Robust input-mode tracking that ignores stick drift and fake mouse events after a tap",
+        "Gamepad bindings and prompts come from one shared Controls table",
+        "PC layout kept exactly as before",
+        "Touch hotbar adapts to two rows on small screens"
+      ],
+      "weaknesses": [
+        "Does not use PreferredInput; relies on the deprecated IsTenFootInterface",
+        "Touch text grows only slightly (16 px)",
+        "TV safe margin depends on the deprecated check",
+        "No ViewportDisplaySize use"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Uses PreferredInput and ViewportDisplaySize, as the rubric asks",
+        "Separate layouts for desktop, phone, tablet and gamepad, placed with the thumb zones in mind",
+        "Glyphs refresh when the controller changes",
+        "Shows block names on focus and on selection, not only on hover",
+        "Global UIScale with a TV boost"
+      ],
+      "weaknesses": [
+        "PC HUD changes slightly (UIScale on large monitors, build hint as a button)",
+        "Gamepad handling in UIS rather than ContextActionService, so it may conflict with the core backpack on LB/RB",
+        "The jump button area is hardcoded rather than measured live"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 6.5,
+    "with_skill": 8
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts add the same correct pesde.toml entry and require t through its link. Both keep every check, including NaN, and both write honest PR descriptions that ask the reviewer to run pesde install and commit pesde.lock. A wins on small points: it combines checks with t.intersection, which is how t is meant to be used, and it casts each argument once into a local. B's PR description is a little more thorough, but it ends with a stray generated-by footer. A's one slip, calling the install output roblox_packages/t, matters less.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "pesde.toml dependency",
+          "score": 5,
+          "note": "Adds `t = { wally = \"osyrisrblx/t\", version = \"=3.1.1\" }` under [dependencies]. It uses the file's existing form and pins exactly."
+        },
+        {
+          "criterion": "Require through link / no other package manager",
+          "score": 5,
+          "note": "Uses `require(ReplicatedStorage.Packages.t)`. It adds no wally.toml and leaves pesde.lock and roblox_packages untouched."
+        },
+        {
+          "criterion": "Handler uses t correctly, keeps all checks",
+          "score": 5,
+          "note": "`t.tuple(t.string, t.intersection(t.Vector3, isNotNaN))` runs first and returns early on failure. It keeps the NaN check, and the lookup, rate limit, character, reach, below-ground and occupied checks are unchanged."
+        },
+        {
+          "criterion": "PR description",
+          "score": 5,
+          "note": "Tells the reviewer to run `pesde install` and then commit the updated pesde.lock. It says plainly that nothing was run. It has one small inaccuracy: it says the install creates `roblox_packages/t`, but the link is t.luau."
+        },
+        {
+          "criterion": "Scope / lint / format",
+          "score": 5,
+          "note": "Selene and StyLua pass. The only extra change is a one-line README package table entry, which matches the repo's convention."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "pesde.toml dependency",
+          "score": 5,
+          "note": "Adds the same `t = { wally = \"osyrisrblx/t\", version = \"=3.1.1\" }` entry under [dependencies]."
+        },
+        {
+          "criterion": "Require through link / no other package manager",
+          "score": 5,
+          "note": "Uses `require(ReplicatedStorage.Packages.t)`. It adds no other package manager and makes no lockfile edits."
+        },
+        {
+          "criterion": "Handler uses t correctly, keeps all checks",
+          "score": 5,
+          "note": "`t.tuple(t.string, isVector3WithoutNaN)` wraps t.Vector3 together with a self-equality check, returns early on failure, and keeps all the downstream checks."
+        },
+        {
+          "criterion": "PR description",
+          "score": 5,
+          "note": "Tells the reviewer to run `pesde install`, commit pesde.lock, and regenerate the sourcemap. It includes a clear 'Not yet verified' section and explains why `t.keyOf` wasn't used."
+        },
+        {
+          "criterion": "Scope / lint / format",
+          "score": 4,
+          "note": "Selene and StyLua pass and the README entry is fine. But the PR description ends with an unnecessary '🤖 Generated with Claude Code' footer."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Uses t's own combinator (t.intersection) idiomatically to add the NaN check",
+        "Renames the raw parameters and casts each one once, so the rest of the handler reads cleanly",
+        "The PR description is clear and honest, with exact commands to run"
+      ],
+      "weaknesses": [
+        "Says the install creates `roblox_packages/t` (it is actually the t.luau link file)",
+        "isNotNaN takes its argument as `any` rather than `unknown`"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "The PR description is thorough: it gives the rojo serve restart note, explains why t.keyOf wasn't used, and has an explicit 'not verified' section",
+        "The NaN-aware Vector3 checker passes t's error message through"
+      ],
+      "weaknesses": [
+        "Casts inline at each use site (`blockTypeName :: string`, `position :: Vector3`), which is slightly less tidy",
+        "Adds a generated-by footer to the PR description"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 9,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

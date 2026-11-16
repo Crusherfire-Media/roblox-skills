@@ -1,0 +1,269 @@
+diff --git a/src/ReplicatedStorage/Shared/Dev/FrameReport.luau b/src/ReplicatedStorage/Shared/Dev/FrameReport.luau
+index ede07d3..fc82b01 100644
+--- a/src/ReplicatedStorage/Shared/Dev/FrameReport.luau
++++ b/src/ReplicatedStorage/Shared/Dev/FrameReport.luau
+@@ -3,10 +3,13 @@
+ 	each recent frame it returns the frame time, the time the main thread spent in the Physics
+ 	group, the GPU time, and the five scopes that took longest on the main thread. It also returns
+ 	the Luau heap size at the end of the capture.
++
++	The report covers up to REPORT_FRAMES of the frames the MicroProfiler currently holds. It does
++	not change the MicroProfiler's frame limit, because FpsOverlay relies on that limit to mean
++	"the last second". It opens and disposes its own session and never touches FpsOverlay's.
+ ]]
+ 
+ local LibMP = require(script.Parent.LibMPLoader)
+-local FpsOverlay = require(script.Parent.FpsOverlay)
+ 
+ local REPORT_FRAMES = 120
+ local TOP_SCOPES = 5
+@@ -29,73 +32,157 @@ export type Report = {
+ 	LuauHeap: number?,
+ }
+ 
++type FrameSpan = {
++	Id: number,
++	Start: number,
++	End: number,
++}
++
+ local FrameReport = {}
+ 
+ local function scopeName(session: any, timerId: number): string
+-	local timer = session:GetTimerDesc(timerId)
+-	local group = session:FetchGroupDesc(timer:GroupId())
+-	return `{timer:TimerName()} [{group.GroupName}]`
++	local timer = session:FetchTimerDesc(timerId)
++	local group = session:FetchGroupDesc(timer.GroupId)
++	return `{timer.TimerName} [{group.GroupName}]`
+ end
+ 
+-function FrameReport.run(): Report
+-	-- Hold the data still while we read it, and keep enough frames for the report.
+-	LibMP.Control:EnableCapture(false)
+-	LibMP.Control:SetFrameLimit(256)
+-
+-	local session = FpsOverlay.getSession() or LibMP.Session.OpenFromLiveData()
+-	assert(session, "could not open the MicroProfiler data")
++local function buildReport(session: any): Report
+ 	local global = session:FetchGlobalDesc()
++	local tickToMsCpu = global.TickToMsCpu
++	local tickToMsGpu = global.TickToMsGpu
++
+ 	local lastId = session:GetFrameIdMax()
+ 	local firstId = math.max(session:GetFrameIdMin(), lastId - REPORT_FRAMES + 1)
+ 
++	-- Only complete frames have valid end ticks (CPU and GPU). The newest frame is usually still
++	-- in progress, and its GPU work lags further behind.
+ 	local rows: { [number]: FrameRow } = {}
++	local spans: { FrameSpan } = {}
+ 	local scopeMs: { [number]: { [number]: number } } = {}
+ 	for frameId = firstId, lastId do
+ 		local frame = session:FetchFrameDesc(frameId)
+-		rows[frameId] = {
+-			FrameId = frameId,
+-			FrameMs = (frame.TickEndCpu - frame.TickStartCpu) * global.TickToMsCpu,
+-			GpuMs = (frame.TickEndGpu - frame.TickStartGpu) * global.TickToMsCpu,
+-			PhysicsMs = 0,
+-			TopScopes = {},
+-		}
+-		scopeMs[frameId] = {}
++		if not frame.IsIncomplete then
++			rows[frameId] = {
++				FrameId = frameId,
++				FrameMs = (frame.TickEndCpu - frame.TickStartCpu) * tickToMsCpu,
++				GpuMs = math.max(0, frame.TickEndGpu - frame.TickStartGpu) * tickToMsGpu,
++				PhysicsMs = 0,
++				TopScopes = {},
++			}
++			scopeMs[frameId] = {}
++			table.insert(spans, { Id = frameId, Start = frame.TickStartCpu, End = frame.TickEndCpu })
++		end
++	end
++
++	if #spans == 0 then
++		return { Frames = {}, LuauHeap = nil }
+ 	end
+ 
+-	local iter = session:CreateLogIterator()
+-	local state = iter:GetState()
+ 	local mainThreadId = session:FindThreadId("Main")
+-	iter:Configure({
+-		SkipEvents = true,
+-		ThreadIds = { mainThreadId },
+-	})
+-	iter:RewindTo(firstId, lastId)
+-
+-	while iter:Step() do
+-		if
+-			state:IsExit()
+-			and not state:ThreadStackIsUnderflowed()
+-			and not state:ThreadStackWasOverflowed()
+-		then
+-			local row = rows[state:FrameId()]
+-			if row then
+-				local element = iter:GetCurrentThreadStackElement(state:ThreadStackDepth())
+-				local ms = (state:Timestamp() - element:EnterTimestamp()) * global.TickToMsCpu
++	assert(mainThreadId, "could not find the MicroProfiler's Main thread")
++	local physicsGroupId = session:FindGroupId("Physics")
++
++	-- Group of each timer, looked up once.
++	local groupOfTimer: { [number]: number } = {}
++	local function timerGroup(timerId: number): number
++		local groupId = groupOfTimer[timerId]
++		if groupId == nil then
++			groupId = session:FetchTimerDesc(timerId).GroupId
++			groupOfTimer[timerId] = groupId
++		end
++		return groupId
++	end
++
++	-- Adds the part of [enterTick, exitTick] that falls in each frame. A scope can start in one
++	-- frame and end in the next; each frame only gets its own share.
++	local function distribute(enterTick: number, exitTick: number, add: (FrameSpan, number) -> ())
++		-- Spans are sorted by time; find the last span that starts before the scope ends.
++		local lo, hi = 1, #spans
++		local index = 0
++		while lo <= hi do
++			local mid = (lo + hi) // 2
++			if spans[mid].Start < exitTick then
++				index = mid
++				lo = mid + 1
++			else
++				hi = mid - 1
++			end
++		end
++		while index >= 1 do
++			local span = spans[index]
++			if span.End <= enterTick then
++				break
++			end
++			local overlap = math.min(exitTick, span.End) - math.max(enterTick, span.Start)
++			if overlap > 0 then
++				add(span, overlap * tickToMsCpu)
++			end
++			index -= 1
++		end
++	end
++
++	local iter = session:CreateLogIterator()
++	local ok, err = pcall(function()
++		iter:Configure({
++			SkipEvents = true,
++			ThreadIds = { mainThreadId },
++		})
++		local state = iter:GetState()
++		iter:RewindTo(firstId, lastId)
++
++		while iter:Step() do
++			if
++				state:IsExit()
++				and not state:ThreadStackIsUnderflowed()
++				and not state:ThreadStackWasOverflowed()
++			then
++				local depth = state:ThreadStackDepth()
++				local element = iter:GetCurrentThreadStackElement(depth)
++				local enterTick = element:EnterTimestamp()
++				local exitTick = state:Timestamp()
+ 				local timerId = state:TimerId()
+-				local frameScopes = scopeMs[row.FrameId]
+-				frameScopes[timerId] = (frameScopes[timerId] or 0) + ms
+-				if session:FetchTimerDesc(timerId).GroupId == session:FindGroupId("Physics") then
+-					row.PhysicsMs += ms
++				local isPhysics = timerGroup(timerId) == physicsGroupId
++
++				-- Nested scopes would be counted twice: a Physics scope inside another Physics
++				-- scope, or a timer that recurses into itself. Only count the outermost one.
++				local nestedInSameTimer = false
++				local nestedInPhysics = false
++				for ancestorDepth = 1, depth - 1 do
++					local ancestorTimerId = iter:GetCurrentThreadStackElement(ancestorDepth):TimerId()
++					if ancestorTimerId == timerId then
++						nestedInSameTimer = true
++					end
++					if isPhysics and timerGroup(ancestorTimerId) == physicsGroupId then
++						nestedInPhysics = true
++					end
++				end
++
++				local countScope = not nestedInSameTimer
++				local countPhysics = isPhysics and not nestedInPhysics
++				if countScope or countPhysics then
++					distribute(enterTick, exitTick, function(span, ms)
++						if countScope then
++							local frameScopes = scopeMs[span.Id]
++							frameScopes[timerId] = (frameScopes[timerId] or 0) + ms
++						end
++						if countPhysics then
++							rows[span.Id].PhysicsMs += ms
++						end
++					end)
+ 				end
+ 			end
+ 		end
++	end)
++	iter:Dispose()
++	if not ok then
++		error(err, 0)
+ 	end
+ 
+ 	local frames: { FrameRow } = {}
+-	for frameId = firstId, lastId do
+-		local row = rows[frameId]
++	for _, span in spans do
++		local row = rows[span.Id]
+ 		local scopes: { ScopeTime } = {}
+-		for timerId, ms in scopeMs[frameId] do
++		for timerId, ms in scopeMs[span.Id] do
+ 			table.insert(scopes, { Name = scopeName(session, timerId), Ms = ms })
+ 		end
+ 		table.sort(scopes, function(a, b)
+@@ -107,17 +194,42 @@ function FrameReport.run(): Report
+ 		table.insert(frames, row)
+ 	end
+ 
++	local luauHeap: number? = nil
+ 	local heapId = session:FindCounterId("**/Luau/heap")
+-	local heapSamples = session:GetCounterSamples(heapId)
+-	local lastHeapSample = heapSamples:FetchLastSample()
+-
+-	iter:Dispose()
+-	session:Dispose()
++	if heapId then
++		local lastHeapSample = session:GetCounterSamples(heapId):FetchLastSample()
++		if lastHeapSample then
++			luauHeap = lastHeapSample.Value
++		end
++	end
+ 
+ 	return {
+ 		Frames = frames,
+-		LuauHeap = if lastHeapSample then lastHeapSample.Value else nil,
++		LuauHeap = luauHeap,
+ 	}
+ end
+ 
++function FrameReport.run(): Report
++	-- Hold the data still while we read it. Capture is always turned back on afterwards, even if
++	-- reading fails, or the on-screen MicroProfiler and FpsOverlay stay frozen.
++	LibMP.Control:EnableCapture(false)
++
++	-- Use a session of our own: FpsOverlay keeps its session open for the whole run, so we must
++	-- not share it (disposing it would break the overlay).
++	local session = LibMP.Session.OpenFromLiveData()
++	if not session then
++		LibMP.Control:EnableCapture(true)
++		error("could not open the MicroProfiler data", 2)
++	end
++
++	local ok, result = pcall(buildReport, session)
++	session:Dispose()
++	LibMP.Control:EnableCapture(true)
++
++	if not ok then
++		error(result, 0)
++	end
++	return result
++end
++
+ return FrameReport

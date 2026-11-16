@@ -1,0 +1,80 @@
+diff --git a/src/ServerScriptService/Inventory/BlockInventory.luau b/src/ServerScriptService/Inventory/BlockInventory.luau
+index daa89f7..08a4bbc 100644
+--- a/src/ServerScriptService/Inventory/BlockInventory.luau
++++ b/src/ServerScriptService/Inventory/BlockInventory.luau
+@@ -45,11 +45,13 @@ end
+ 	Otherwise changes nothing and returns false.
+ ]]
+ function BlockInventory.take(inventory: Inventory, name: string, amount: number): boolean
+-	local current = inventory.Counts[name]
+-	if current and current < amount then
++	-- Block types never given to this inventory (like Window in the starter kit) have no entry and
++	-- count as zero, so they must fail this check too.
++	local current = inventory.Counts[name] or 0
++	if current < amount then
+ 		return false
+ 	end
+-	inventory.Counts[name] = (current or 0) - amount
++	inventory.Counts[name] = current - amount
+ 	return true
+ end
+ 
+diff --git a/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+new file mode 100644
+index 0000000..a2adf81
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+@@ -0,0 +1,53 @@
++local ServerScriptService = game:GetService("ServerScriptService")
++
++local JestGlobals = require(ServerScriptService.Tests.Packages.JestGlobals)
++local BlockInventory = require(ServerScriptService.Inventory.BlockInventory)
++
++local describe = JestGlobals.describe
++local expect = JestGlobals.expect
++local it = JestGlobals.it
++
++describe("BlockInventory.take", function()
++	-- Regression: a block type missing from the starting counts (Window in the starter kit) used to
++	-- allow one take, leaving its count at -1.
++	it("refuses a block type the inventory was never given", function()
++		local inventory = BlockInventory.new({ Brick = 20 })
++
++		expect(BlockInventory.take(inventory, "Window", 1)).toBe(false)
++		expect(BlockInventory.count(inventory, "Window")).toBe(0)
++	end)
++
++	it("refuses every take from an empty inventory", function()
++		local inventory = BlockInventory.new()
++
++		for _ = 1, 3 do
++			expect(BlockInventory.take(inventory, "Window", 1)).toBe(false)
++		end
++		expect(BlockInventory.count(inventory, "Window")).toBe(0)
++	end)
++
++	it("stops at zero for a block type given at the start", function()
++		local inventory = BlockInventory.new({ Grass = 2 })
++
++		expect(BlockInventory.take(inventory, "Grass", 1)).toBe(true)
++		expect(BlockInventory.take(inventory, "Grass", 1)).toBe(true)
++		expect(BlockInventory.take(inventory, "Grass", 1)).toBe(false)
++		expect(BlockInventory.count(inventory, "Grass")).toBe(0)
++	end)
++
++	it("refuses to take more than the inventory holds and changes nothing", function()
++		local inventory = BlockInventory.new({ Brick = 3 })
++
++		expect(BlockInventory.take(inventory, "Brick", 4)).toBe(false)
++		expect(BlockInventory.count(inventory, "Brick")).toBe(3)
++	end)
++
++	it("allows taking a block type once it has been added", function()
++		local inventory = BlockInventory.new()
++		BlockInventory.add(inventory, "Window", 1)
++
++		expect(BlockInventory.take(inventory, "Window", 1)).toBe(true)
++		expect(BlockInventory.count(inventory, "Window")).toBe(0)
++		expect(BlockInventory.take(inventory, "Window", 1)).toBe(false)
++	end)
++end)

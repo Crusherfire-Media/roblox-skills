@@ -1,0 +1,7 @@
+I changed `GhostPreview.luau` to fix what the stop-hook checks reported. I can't rerun luau-lsp or StyLua in this session (running commands needs approval and nobody can give it), so the hook's next run is the real test.
+
+- **Unknown require:** luau-lsp here can't resolve the `@game/...` path. The file now requires `ReplicatedStorage.Shared.BlockTypes` and `ReplicatedStorage.Shared.PlacementRules` by their place in the game tree, which luau-lsp works out from `sourcemap.json`. That also clears the three "Unknown type `BlockTypes.BlockType`" errors, which only came from the failed require.
+- **`self` type errors in `new`:** the object's fields now have their own named type. The constructor builds a table of that type and casts the result of `setmetatable` to `GhostPreview`, so calls like `self:_Update()` inside `new` should type-check.
+- **StyLua:** I rewrote the three statements that were longer than 100 columns so each fits on one line. One extra list variable for the raycast filter, one for the ray direction, and an ordinary `if` block instead of a one-line `if ... then ... else` for the placeable check. This leaves StyLua nothing to re-wrap, and behavior is unchanged.
+
+The public API is the same as before: `new`, `SetBlockType`, `GetPlacement` and `Destroy`.

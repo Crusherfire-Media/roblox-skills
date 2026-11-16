@@ -1,0 +1,113 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "The two attempts share the same structure: an effect-free view, a game-only wrapper that keeps the blur, zoom and sound with their cleanups, and a story that renders only the view. Both fail to move the `WaitForChild` out of the HUD body. A wins narrowly. B's `Number(0, …)` gives the dragger a sensitivity of 0, so the count can't be dragged, while A's default of 12 avoids that. A also has more flexible prop types (value or source) and strict typing.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story with live controls",
+          "score": 4,
+          "note": "`BuildModeHudView.story.luau` returns `vide = Vide` and `story`, with Choose built from `BlockTypes.List`, String and Number controls passed as sources; the only help for long names is a comment."
+        },
+        {
+          "criterion": "Data through props",
+          "score": 5,
+          "note": "The view takes `PlayerName/BlockType/PlacedCount` as `T | () -> T` via `read`, and BuildModeHud passes `localPlayer.DisplayName`, `selected`, `placedCount`."
+        },
+        {
+          "criterion": "No yield inside a Vide scope",
+          "score": 2,
+          "note": "The `WaitForChild(\"BlockPlaced\")` in the `buildModeHud` body is untouched; only the story path avoids it."
+        },
+        {
+          "criterion": "Side effects kept out of the story and undone in game",
+          "score": 5,
+          "note": "Blur, FOV and sound stay in the game wrapper with `cleanup(blur)` and the FOV restore; the story renders only the view."
+        },
+        {
+          "criterion": "Game behavior unchanged",
+          "score": 5,
+          "note": "The wrapper keeps every effect and passes the same data; the `Workspace` → `workspace` swap is harmless."
+        },
+        {
+          "criterion": "Story hygiene, typing, checks",
+          "score": 5,
+          "note": "`--!strict`, a typed StoryProps, no game-only requires in the story, and all checks pass."
+        }
+      ],
+      "overall_score": 7
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story with live controls",
+          "score": 3,
+          "note": "`CreateVideStory` with Choose built from `blockNames`, String and Number controls; `Number(0, 0, nil, 1)` gives drag sensitivity 0 so the count can't be dragged, and nothing helps with long names."
+        },
+        {
+          "criterion": "Data through props",
+          "score": 5,
+          "note": "The view takes `playerName/selected/placedCount` sources, and the game wrapper passes a function returning `localPlayer.DisplayName`."
+        },
+        {
+          "criterion": "No yield inside a Vide scope",
+          "score": 2,
+          "note": "The `WaitForChild(\"BlockPlaced\")` in `buildModeHud` is left in the component body."
+        },
+        {
+          "criterion": "Side effects kept out of the story and undone in game",
+          "score": 5,
+          "note": "Blur, camera and sound remain in BuildModeHud with their cleanups; the story uses only the view."
+        },
+        {
+          "criterion": "Game behavior unchanged",
+          "score": 5,
+          "note": "The wrapper keeps all effects and passes the same data to the view."
+        },
+        {
+          "criterion": "Story hygiene, typing, checks",
+          "score": 4,
+          "note": "No strict mode, but `UILabs.VideProps` is typed, nothing game-only is required, and checks pass."
+        }
+      ],
+      "overall_score": 6.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7,
+      "strengths": [
+        "Clean view/wrapper split; props accept plain values or sources",
+        "Strict typing and a typed story props table",
+        "The count control's default of 12 keeps dragging usable"
+      ],
+      "weaknesses": [
+        "`WaitForChild` still yields inside the HUD's component body",
+        "No preset or easy toggle for a long name"
+      ]
+    },
+    "B": {
+      "score": 6.5,
+      "strengths": [
+        "Clean view/wrapper split with clear prop comments",
+        "Uses the documented `CreateVideStory` helper"
+      ],
+      "weaknesses": [
+        "`WaitForChild` still yields inside the HUD's component body",
+        "The count default of 0 makes the Number control's drag sensitivity 0",
+        "No easy long-name option; no `--!strict`"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 7,
+    "without_skill": 6.5
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

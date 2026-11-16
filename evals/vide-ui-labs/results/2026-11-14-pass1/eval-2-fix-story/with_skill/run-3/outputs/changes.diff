@@ -1,0 +1,263 @@
+diff --git a/src/ServerScriptService/Stories/BlockPicker.story.luau b/src/ServerScriptService/Stories/BlockPicker.story.luau
+index 2498f0a..4725ed5 100644
+--- a/src/ServerScriptService/Stories/BlockPicker.story.luau
++++ b/src/ServerScriptService/Stories/BlockPicker.story.luau
+@@ -6,39 +6,81 @@ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local UILabs = require(ReplicatedStorage.Packages.UILabs)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local cleanup = Vide.cleanup
++
+ local blockNames = {}
+ for _, blockType in BlockTypes.List do
+ 	table.insert(blockNames, blockType.Name)
+ end
+ 
+-local controls = {
++local CONTROLS = {
+ 	Block = UILabs.Ordered(
+ 		UILabs.ControlGroup({
+ 			Selected = UILabs.Ordered(UILabs.Choose(blockNames), 1),
+ 		}),
+ 		1
+ 	),
++	Player = UILabs.Ordered(
++		UILabs.ControlGroup({
++			-- Try a 20-character display name to check the title truncates.
++			Name = UILabs.Ordered("Builder", 1),
++		}),
++		2
++	),
+ 	Look = UILabs.Ordered(
+ 		UILabs.ControlGroup({
+ 			ShowNames = UILabs.Ordered(true, 1),
+ 		}),
+-		2
++		3
+ 	),
+ }
+ 
+-local function story(props: any)
++type StoryProps = {
++	controls: {
++		Block: {
++			Selected: () -> string,
++		},
++		Player: {
++			Name: () -> string,
++		},
++		Look: {
++			ShowNames: () -> boolean,
++		},
++	},
++	target: Frame,
++}
++
++-- Sounds play in edit mode only under the plugin widget, which is also outside the place.
++local function createClickSound(): Sound?
++	local widget = UILabs.Environment.PluginWidget
++	if not widget then
++		return nil
++	end
++
++	local clickSound = Instance.new("Sound")
++	clickSound.Name = "TileClick"
++	clickSound.SoundId = "rbxasset://sounds/electronicpingshort.wav"
++	clickSound.Volume = 0.4
++	clickSound.Parent = widget
++	cleanup(clickSound)
++	return clickSound
++end
++
++local function story(props: StoryProps)
+ 	return BlockPicker({
+-		ShowNames = props.controls.Look.ShowNames(),
+-		Selected = props.controls.Selected,
++		PlayerName = props.controls.Player.Name,
++		ShowNames = props.controls.Look.ShowNames,
++		Selected = props.controls.Block.Selected,
+ 		Select = function(name: string)
+ 			print(`Selected {name}`)
+ 		end,
++		ClickSound = createClickSound(),
+ 	})
+ end
+ 
+ return {
+ 	summary = "The build mode block picker.",
+ 	vide = Vide,
+-	controls = controls,
++	controls = CONTROLS,
+ 	story = story,
+ }
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index 605f18b..2296a89 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -1,17 +1,19 @@
+ --[[
+ 	The block picker: a title over a row of tiles along the bottom of the screen, one per block
+ 	type, optionally with its name under the swatch. The selected tile has a yellow outline, and
+-	clicking or tapping a tile selects its block type with a click sound.
++	clicking or tapping a tile selects its block type, playing ClickSound when one is given.
++
++	It reads no game state, so UI Labs can render it in edit mode: the caller passes the player
++	name and the sound in through props.
+ ]]
+ 
+-local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-local SoundService = game:GetService("SoundService")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
++local read = Vide.read
+ 
+ type BlockType = BlockTypes.BlockType
+ 
+@@ -27,40 +29,16 @@ local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+ local SELECTED_COLOR = Color3.fromRGB(255, 200, 60)
+ local IDLE_STROKE_COLOR = Color3.fromRGB(70, 70, 80)
+ local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
+-local CLICK_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
+-
+-local PLAYER_NAME = Players.LocalPlayer.DisplayName
+-
+-local tileClick = Instance.new("Sound")
+-tileClick.Name = "TileClick"
+-tileClick.SoundId = CLICK_SOUND_ID
+-tileClick.Volume = 0.4
+-tileClick.Parent = SoundService
+-
+ type TileProps = {
+ 	BlockType: BlockType,
+ 	LayoutOrder: number,
+-	ShowName: boolean,
++	ShowName: boolean | () -> boolean,
+ 	IsSelected: () -> boolean,
+ 	Select: () -> (),
++	ClickSound: Sound?,
+ }
+ 
+ local function tile(props: TileProps): TextButton
+-	local nameLabel: TextLabel? = nil
+-	if props.ShowName then
+-		nameLabel = create("TextLabel")({
+-			Name = "BlockName",
+-			Position = UDim2.fromOffset(0, TILE_SIZE),
+-			Size = UDim2.fromOffset(TILE_SIZE, NAME_HEIGHT),
+-			BackgroundTransparency = 1,
+-			Font = Enum.Font.Gotham,
+-			TextSize = 14,
+-			TextColor3 = TEXT_COLOR,
+-			TextTruncate = Enum.TextTruncate.AtEnd,
+-			Text = props.BlockType.DisplayName,
+-		})
+-	end
+-
+ 	return create("TextButton")({
+ 		Name = props.BlockType.Name,
+ 		LayoutOrder = props.LayoutOrder,
+@@ -69,7 +47,9 @@ local function tile(props: TileProps): TextButton
+ 		Text = "",
+ 
+ 		Activated = function()
+-			tileClick:Play()
++			if props.ClickSound then
++				props.ClickSound:Play()
++			end
+ 			props.Select()
+ 		end,
+ 
+@@ -90,14 +70,27 @@ local function tile(props: TileProps): TextButton
+ 				end,
+ 			}),
+ 		}),
+-		nameLabel,
++		create("TextLabel")({
++			Name = "BlockName",
++			Visible = props.ShowName,
++			Position = UDim2.fromOffset(0, TILE_SIZE),
++			Size = UDim2.fromOffset(TILE_SIZE, NAME_HEIGHT),
++			BackgroundTransparency = 1,
++			Font = Enum.Font.Gotham,
++			TextSize = 14,
++			TextColor3 = TEXT_COLOR,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++			Text = props.BlockType.DisplayName,
++		}),
+ 	})
+ end
+ 
+ export type BlockPickerProps = {
+-	ShowNames: boolean,
++	PlayerName: string | () -> string,
++	ShowNames: boolean | () -> boolean,
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
++	ClickSound: Sound?,
+ }
+ 
+ local function blockPicker(props: BlockPickerProps): Frame
+@@ -113,6 +106,7 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 			Select = function()
+ 				props.Select(blockType.Name)
+ 			end,
++			ClickSound = props.ClickSound,
+ 		})
+ 	end
+ 
+@@ -149,7 +143,9 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 			TextColor3 = TEXT_COLOR,
+ 			TextXAlignment = Enum.TextXAlignment.Left,
+ 			TextTruncate = Enum.TextTruncate.AtEnd,
+-			Text = `{PLAYER_NAME}'s blocks`,
++			Text = function()
++				return `{read(props.PlayerName)}'s blocks`
++			end,
+ 		}),
+ 		create("Frame")({
+ 			Name = "Tiles",
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index b69fbf6..f1c1633 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,5 +1,6 @@
+ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local SoundService = game:GetService("SoundService")
+ 
+ local BlockPicker = require(script.Parent.BlockPicker)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
+@@ -9,7 +10,16 @@ local create = Vide.create
+ local mount = Vide.mount
+ local source = Vide.source
+ 
+-local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
++local TILE_CLICK_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
++
++local localPlayer = Players.LocalPlayer
++local playerGui = localPlayer:WaitForChild("PlayerGui")
++
++local tileClick = Instance.new("Sound")
++tileClick.Name = "TileClick"
++tileClick.SoundId = TILE_CLICK_SOUND_ID
++tileClick.Volume = 0.4
++tileClick.Parent = SoundService
+ 
+ -- Mirrors BlockPlacer's selection so the picker can bind to it.
+ local selected = source(BlockPlacer.getBlockType())
+@@ -22,9 +32,11 @@ local function app()
+ 		Name = "BlockPickerGui",
+ 
+ 		BlockPicker({
++			PlayerName = localPlayer.DisplayName,
+ 			ShowNames = true,
+ 			Selected = selected,
+ 			Select = BlockPlacer.setBlockType,
++			ClickSound = tileClick,
+ 		}),
+ 	})
+ end

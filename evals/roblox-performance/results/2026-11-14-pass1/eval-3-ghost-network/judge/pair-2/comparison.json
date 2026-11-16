@@ -1,0 +1,127 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts correctly move ghost drawing to the clients, draw each builder's own ghost locally, send only on change at a capped rate, and batch the server broadcasts. B wins because it puts the continuous, replaceable ghost updates on UnreliableRemoteEvents and handles out-of-order and lost messages with sequence numbers, tick numbers, a resend every second and a snapshot every second. A keeps them on a reliable RemoteEvent that shares the ordered stream with PlaceBlock. B's write-up is also more rigorous. A's only edge is that an idle builder sends nothing at all.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Change-only, capped client sends",
+          "score": 5,
+          "note": "updateOwnGhost sends only when blockIndex/cell changes and os.clock()-lastSentAt >= 1/20; an idle builder sends nothing."
+        },
+        {
+          "criterion": "2. Client-side ghost visuals, server relays",
+          "score": 5,
+          "note": "The server keeps only a states table and FireAllClients batches; createGhostPart makes the parts in a client-only Workspace.Ghosts."
+        },
+        {
+          "criterion": "3. Own ghost local every frame",
+          "score": 5,
+          "note": "ownGhost's CFrame is set in RenderStepped from getCursorCell with no round trip."
+        },
+        {
+          "criterion": "4. Unreliable transport / placement unchanged",
+          "score": 2,
+          "note": "GhostUpdate is a reliable RemoteEvent in both directions. The rate is low, but updates still share the ordered reliable stream with PlaceBlock. PlaceBlock itself is untouched."
+        },
+        {
+          "criterion": "5. Server validation, rate limit, no echo, cleanup",
+          "score": 4,
+          "note": "GhostProtocol.validate rejects NaN, infinities, fractions and unknown indexes, and isFlooding caps at 60/s. FireAllClients includes the builder (the client filters localPlayer). PlayerRemoving cleans up on both sides."
+        },
+        {
+          "criterion": "6. Traffic write-up",
+          "score": 4,
+          "note": "Clear per-message arithmetic for before and after, labelled as estimates, with a 'what players will notice' list. It is candid that outbound bytes stay similar."
+        },
+        {
+          "criterion": "7. Correct, scoped, typed, checks pass",
+          "score": 5,
+          "note": "Typed, readable shared protocol module plus a spec. lsp, selene and stylua all pass."
+        }
+      ],
+      "overall_score": 7
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Change-only, capped client sends",
+          "score": 4,
+          "note": "sendOwnGhost sends on change with a 1/20 s cap, independent of FPS, but resends once a second while idle (RESEND_INTERVAL), so an idle builder is not fully silent."
+        },
+        {
+          "criterion": "2. Client-side ghost visuals, server relays",
+          "score": 5,
+          "note": "The server stores only a ghostStates table and sends buffer batches; clients build their parts with createGhostPart."
+        },
+        {
+          "criterion": "3. Own ghost local every frame",
+          "score": 5,
+          "note": "onRenderStepped runs getCursorGhost and then drawOwnGhost locally every frame."
+        },
+        {
+          "criterion": "4. Unreliable transport / placement unchanged",
+          "score": 5,
+          "note": "SendGhost and GhostUpdates are UnreliableRemoteEvents, with sequence numbers (isNewerSequence), per-ghost LastTick ordering, resends, snapshots and a resync; PlaceBlock is untouched."
+        },
+        {
+          "criterion": "5. Server validation, rate limit, no echo, cleanup",
+          "score": 4,
+          "note": "decodeState requires an exact 8-byte buffer and a valid block index; i16 cells cannot hold NaN; the cap is 30/s; a late message after removal is guarded. The builder's own entry is echoed and ignored on the client."
+        },
+        {
+          "criterion": "6. Traffic write-up",
+          "score": 5,
+          "note": "Detailed arithmetic, explicitly labelled estimates with the unmeasured assumptions named, scaling discussion, a steps-to-measure section, and a full list of what players will notice, including packet-loss effects."
+        },
+        {
+          "criterion": "7. Correct, scoped, typed, checks pass",
+          "score": 5,
+          "note": "--!strict, a clean GhostWire module that keeps batches under the 1000-byte limit; all checks pass."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7,
+      "strengths": [
+        "A simple design that sends only on change and batches broadcasts",
+        "Thorough input validation with unit tests",
+        "Snapshot on first message for late joiners",
+        "An idle builder sends nothing"
+      ],
+      "weaknesses": [
+        "Ghost traffic stays on a reliable RemoteEvent, sharing the ordered stream with PlaceBlock",
+        "Echoes the builder's own update back to them (filtered on the client)",
+        "A Players table with holes (players who left) could misalign decoding"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "UnreliableRemoteEvent handled correctly, with ordering and loss recovery",
+        "A compact buffer wire format with batching kept under the payload limit",
+        "An excellent write-up with steps for checking the estimates",
+        "Strict typing throughout"
+      ],
+      "weaknesses": [
+        "Idle builders still send one message a second",
+        "Echoes the builder's own entry back to them",
+        "The doc cites an odd external 'skill' table for its byte costs"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 7,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

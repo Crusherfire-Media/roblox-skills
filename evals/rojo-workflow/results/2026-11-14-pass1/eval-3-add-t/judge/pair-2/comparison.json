@@ -1,0 +1,103 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "The two are functionally the same: the same pesde entry, the same require path, every check kept, and correct install instructions in the PR. A wins narrowly. Its diff is smaller, its helper is clean and reusable, and its PR description makes no unsupported claims. B's PR says Rojo 7.7.x can crash during an install without showing any basis for it, and B renames variables inside the handler.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "pesde.toml dependency",
+          "score": 5,
+          "note": "Adds `t = { wally = \"osyrisrblx/t\", version = \"=3.1.1\" }` under [dependencies], in the same exact-pin form as the other entries, with an alias that matches the require."
+        },
+        {
+          "criterion": "Require path / no other package manager",
+          "score": 5,
+          "note": "Uses `require(ReplicatedStorage.Packages.t)`, with no wally.toml, no lockfile edits and nothing added under roblox_packages."
+        },
+        {
+          "criterion": "Correct t usage, all checks kept",
+          "score": 5,
+          "note": "`t.tuple(t.string, isPlainVector3)` returns early on failure, and `isPlainVector3` runs t.Vector3 and then the `value ~= value` NaN check; the block lookup, rate limit, character, reach, below-ground and occupied checks are unchanged."
+        },
+        {
+          "criterion": "PR description",
+          "score": 5,
+          "note": "Tells the reviewer to run `pesde install` and commit `pesde.lock`, says nothing was installed, and says plainly that none of the checks were run."
+        },
+        {
+          "criterion": "Scope / lint",
+          "score": 4,
+          "note": "selene and StyLua pass; the README package-table row is a small, reasonable extra."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "pesde.toml dependency",
+          "score": 5,
+          "note": "Same line as A: `t = { wally = \"osyrisrblx/t\", version = \"=3.1.1\" }` under [dependencies]."
+        },
+        {
+          "criterion": "Require path / no other package manager",
+          "score": 5,
+          "note": "Uses `require(ReplicatedStorage.Packages.t)` and adds no other package files."
+        },
+        {
+          "criterion": "Correct t usage, all checks kept",
+          "score": 5,
+          "note": "`t.intersection(t.Vector3, function(value) return value == value, ... end)` inside `t.tuple(t.string, isPosition)` keeps the NaN check, and all the game-state checks are unchanged."
+        },
+        {
+          "criterion": "PR description",
+          "score": 4,
+          "note": "Has the install and lockfile-commit steps and is clear about what wasn't run, but adds an unverified claim that Rojo 7.7.x can crash during an install."
+        },
+        {
+          "criterion": "Scope / lint",
+          "score": 4,
+          "note": "selene and StyLua pass; besides the README row, it renames variables inside the handler (`name`, `checkedPosition`), so the diff touches more lines."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "`isPlainVector3` is a clear, reusable helper that returns a t-style (boolean, message) pair",
+        "Small diff that only renames the handler's parameters and casts after the check",
+        "Honest PR description with clear steps the reviewer must do"
+      ],
+      "weaknesses": [
+        "The README edit is slightly beyond what was asked",
+        "Writes the NaN wrapper by hand instead of combining t's own combinators"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Uses t's own combinator, `t.intersection`, for the NaN check",
+        "Detailed test plan that says exactly what was and wasn't run"
+      ],
+      "weaknesses": [
+        "Unverified claim in the PR about Rojo crashing",
+        "The inline checker's parameter has no type annotation",
+        "Renames variables inside the handler body, which widens the diff"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8.5,
+    "with_skill": 8
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

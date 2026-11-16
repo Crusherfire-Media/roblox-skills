@@ -1,0 +1,203 @@
+diff --git a/src/ServerScriptService/Stories/BlockPicker.story.luau b/src/ServerScriptService/Stories/BlockPicker.story.luau
+index 2498f0a..3e019cb 100644
+--- a/src/ServerScriptService/Stories/BlockPicker.story.luau
++++ b/src/ServerScriptService/Stories/BlockPicker.story.luau
+@@ -6,6 +6,9 @@ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local UILabs = require(ReplicatedStorage.Packages.UILabs)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local effect = Vide.effect
++local source = Vide.source
++
+ local blockNames = {}
+ for _, blockType in BlockTypes.List do
+ 	table.insert(blockNames, blockType.Name)
+@@ -18,20 +21,52 @@ local controls = {
+ 		}),
+ 		1
+ 	),
++	Player = UILabs.Ordered(
++		UILabs.ControlGroup({
++			-- Try a 20-character display name to check the title truncates.
++			Name = UILabs.Ordered("Builder", 1),
++		}),
++		2
++	),
+ 	Look = UILabs.Ordered(
+ 		UILabs.ControlGroup({
+ 			ShowNames = UILabs.Ordered(true, 1),
+ 		}),
+-		2
++		3
+ 	),
+ }
+ 
+-local function story(props: any)
++type StoryProps = {
++	controls: {
++		Block: {
++			Selected: () -> string,
++		},
++		Player: {
++			Name: () -> string,
++		},
++		Look: {
++			ShowNames: () -> boolean,
++		},
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	local block = props.controls.Block
++
++	-- Both the control and tile clicks change the selection.
++	local selected = source(block.Selected())
++	effect(function()
++		selected(block.Selected())
++	end)
++
+ 	return BlockPicker({
+-		ShowNames = props.controls.Look.ShowNames(),
+-		Selected = props.controls.Selected,
++		PlayerName = props.controls.Player.Name,
++		ShowNames = props.controls.Look.ShowNames,
++		Selected = selected,
+ 		Select = function(name: string)
+ 			print(`Selected {name}`)
++			selected(name)
+ 		end,
+ 	})
+ end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index 605f18b..0d7ddcb 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -4,14 +4,17 @@
+ 	clicking or tapping a tile selects its block type with a click sound.
+ ]]
+ 
+-local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
+ local SoundService = game:GetService("SoundService")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local cleanup = Vide.cleanup
+ local create = Vide.create
++local read = Vide.read
++local show = Vide.show
+ 
+ type BlockType = BlockTypes.BlockType
+ 
+@@ -29,26 +32,19 @@ local IDLE_STROKE_COLOR = Color3.fromRGB(70, 70, 80)
+ local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
+ local CLICK_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
+ 
+-local PLAYER_NAME = Players.LocalPlayer.DisplayName
+-
+-local tileClick = Instance.new("Sound")
+-tileClick.Name = "TileClick"
+-tileClick.SoundId = CLICK_SOUND_ID
+-tileClick.Volume = 0.4
+-tileClick.Parent = SoundService
+-
+ type TileProps = {
+ 	BlockType: BlockType,
+ 	LayoutOrder: number,
+-	ShowName: boolean,
++	ShowName: boolean | () -> boolean,
+ 	IsSelected: () -> boolean,
+ 	Select: () -> (),
+ }
+ 
+ local function tile(props: TileProps): TextButton
+-	local nameLabel: TextLabel? = nil
+-	if props.ShowName then
+-		nameLabel = create("TextLabel")({
++	local nameLabel = show(function()
++		return read(props.ShowName)
++	end, function()
++		return create("TextLabel")({
+ 			Name = "BlockName",
+ 			Position = UDim2.fromOffset(0, TILE_SIZE),
+ 			Size = UDim2.fromOffset(TILE_SIZE, NAME_HEIGHT),
+@@ -59,7 +55,7 @@ local function tile(props: TileProps): TextButton
+ 			TextTruncate = Enum.TextTruncate.AtEnd,
+ 			Text = props.BlockType.DisplayName,
+ 		})
+-	end
++	end)
+ 
+ 	return create("TextButton")({
+ 		Name = props.BlockType.Name,
+@@ -68,10 +64,7 @@ local function tile(props: TileProps): TextButton
+ 		BackgroundTransparency = 1,
+ 		Text = "",
+ 
+-		Activated = function()
+-			tileClick:Play()
+-			props.Select()
+-		end,
++		Activated = props.Select,
+ 
+ 		create("Frame")({
+ 			Name = "Swatch",
+@@ -95,12 +88,23 @@ local function tile(props: TileProps): TextButton
+ end
+ 
+ export type BlockPickerProps = {
+-	ShowNames: boolean,
++	PlayerName: string | () -> string,
++	ShowNames: boolean | () -> boolean,
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
+ }
+ 
+ local function blockPicker(props: BlockPickerProps): Frame
++	local tileClick = Instance.new("Sound")
++	tileClick.Name = "TileClick"
++	tileClick.SoundId = CLICK_SOUND_ID
++	tileClick.Volume = 0.4
++	-- In edit mode SoundService is the saved place, so a story must not parent here.
++	if RunService:IsRunning() then
++		tileClick.Parent = SoundService
++	end
++	cleanup(tileClick)
++
+ 	local tiles = {}
+ 	for index, blockType in BlockTypes.List do
+ 		tiles[index] = tile({
+@@ -111,6 +115,7 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 				return props.Selected() == blockType.Name
+ 			end,
+ 			Select = function()
++				tileClick:Play()
+ 				props.Select(blockType.Name)
+ 			end,
+ 		})
+@@ -149,7 +154,9 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 			TextColor3 = TEXT_COLOR,
+ 			TextXAlignment = Enum.TextXAlignment.Left,
+ 			TextTruncate = Enum.TextTruncate.AtEnd,
+-			Text = `{PLAYER_NAME}'s blocks`,
++			Text = function()
++				return `{read(props.PlayerName)}'s blocks`
++			end,
+ 		}),
+ 		create("Frame")({
+ 			Name = "Tiles",
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index b69fbf6..590c5c8 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -22,6 +22,7 @@ local function app()
+ 		Name = "BlockPickerGui",
+ 
+ 		BlockPicker({
++			PlayerName = Players.LocalPlayer.DisplayName,
+ 			ShowNames = true,
+ 			Selected = selected,
+ 			Select = BlockPlacer.setBlockType,

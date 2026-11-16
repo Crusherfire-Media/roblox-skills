@@ -1,0 +1,123 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts have sound designs with per-player keys, ready handshakes, and removeClient on leave. B is written against the verified Charm 0.11.1 API (Charm.signal getter/setter) and vide-charm's useSignalState. A relies on Charm.atom and VideCharm.useAtom, which don't match the confirmed APIs and would likely break both placement and the UI at runtime. B is the safer, mergeable attempt.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Server Charm state, check, cleanup",
+          "score": 3,
+          "note": "PlayerState.get creates one `Charm.atom(MAX_BLOCKS_PER_PLAYER)` per player, the check reads `blocksLeft()`, and PlayerRemoving clears it; but `Charm.atom` is not part of Charm 0.11.1's verified signal API."
+        },
+        {
+          "criterion": "Server sync wiring",
+          "score": 4,
+          "note": "connect is called once and fires `remote:FireClient(player, payloads)`; keyAtoms builds per-player keys `{field}:{userId}`, subscribes on ready, and calls removeClient on leave. All correct if atoms work as getters."
+        },
+        {
+          "criterion": "Client sync wiring",
+          "score": 4,
+          "note": "PlayerSync.client calls addSignals with keyed atoms before connecting OnClientEvent → client.patch, then fires the ready remote."
+        },
+        {
+          "criterion": "Vide bridge, limit, initial display",
+          "score": 3,
+          "note": "`VideCharm.useAtom(PlayerState.blocksLeft)` runs inside the mounted app, which is not the verified `useSignalState` API; the server syncs the remaining count and the label stays hidden while it is nil, which is sensible."
+        },
+        {
+          "criterion": "UI never writes synced signal",
+          "score": 5,
+          "note": "BlocksLeft only reads `props.Count()`."
+        },
+        {
+          "criterion": "Extensibility",
+          "score": 5,
+          "note": "Adding a field to both PlayerState modules is all it takes; keyAtoms handles the keys generically."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 2,
+          "note": "Checks pass, but relying on `Charm.atom`/`useAtom` against Charm 0.11.1/vide-charm 0.4.1 would likely break placement and the UI at runtime."
+        }
+      ],
+      "overall_score": 5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Server Charm state, check, cleanup",
+          "score": 5,
+          "note": "Each player gets `Charm.signal(PlayerData.Default)`, `update` replaces the table via `table.clone`, the check reads `data.BlocksPlaced`, and onPlayerRemoving clears the state."
+        },
+        {
+          "criterion": "Server sync wiring",
+          "score": 5,
+          "note": "connect is called once and fires syncRemote to the player; addSignalsToClient uses `PlayerData.syncKey(userId)` on ready; removeClient runs on leave."
+        },
+        {
+          "criterion": "Client sync wiring",
+          "score": 5,
+          "note": "addSignals registers setData under the same key, then connects OnClientEvent → patch before `readyRemote:FireServer()`."
+        },
+        {
+          "criterion": "Vide bridge, limit, initial display",
+          "score": 5,
+          "note": "`useSignalState` runs inside app; the limit is shared in BlockTypes.MaxBlocksPerPlayer; the default data shows 50 left before the first sync."
+        },
+        {
+          "criterion": "UI never writes synced signal",
+          "score": 5,
+          "note": "Only CharmSync calls setData; the UI just reads it."
+        },
+        {
+          "criterion": "Extensibility",
+          "score": 5,
+          "note": "Adding a value means adding a field to the PlayerData type and DEFAULT; it syncs under the same per-player key."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 4,
+          "note": "Correct against the verified APIs and all checks pass; the HotbarLayout refactor and absolute positioning add a little extra."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 5,
+      "strengths": [
+        "Clean per-field state modules on both sides",
+        "Ready handshake avoids losing the first payload",
+        "Label hidden until the count is known; stacked layout above the hotbar"
+      ],
+      "weaknesses": [
+        "Uses Charm.atom and VideCharm.useAtom, which don't match the verified Charm 0.11.1 signal / vide-charm useSignalState APIs",
+        "`:: any` casts hide the type mismatch"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Uses the verified Charm.signal and useSignalState APIs",
+        "Copy-on-update, matching frozen-table semantics",
+        "Shared limit constant; ready handshake; handles players already in game"
+      ],
+      "weaknesses": [
+        "Shows the default 50 before the real sync arrives",
+        "Label positioned by computed absolute offsets instead of a layout"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 5,
+    "with_skill": 8
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

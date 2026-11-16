@@ -1,0 +1,178 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+new file mode 100644
+index 0000000..b872d5b
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+@@ -0,0 +1,172 @@
++--!strict
++-- A see-through copy of the selected block that follows the mouse, snapped to the grid.
++
++local Players = game:GetService("Players")
++local RunService = game:GetService("RunService")
++local UserInputService = game:GetService("UserInputService")
++
++local BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++local PlacementRules = require("@game/ReplicatedStorage/Shared/PlacementRules")
++
++local DEFAULT_TRANSPARENCY = 0.5
++local DEFAULT_RAYCAST_DISTANCE = 500 -- studs
++local BLOCKED_COLOR = Color3.fromRGB(230, 40, 40)
++-- How far the block's color moves toward BLOCKED_COLOR where it can't go.
++local BLOCKED_TINT = 0.7
++-- Runs after the camera updates, so the ray matches the frame being drawn.
++local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 1
++local PLACED_BLOCKS_NAME = "PlacedBlocks"
++
++type BlockType = BlockTypes.BlockType
++
++export type Options = {
++	Transparency: number?,
++	RaycastDistance: number?,
++}
++
++local localPlayer = Players.LocalPlayer
++-- BindToRenderStep names must be unique per binding, and several previews can exist.
++local nextBindingId = 0
++
++local GhostPreview = {}
++GhostPreview.__index = GhostPreview
++
++export type GhostPreview = typeof(setmetatable(
++	{} :: {
++		BlockType: BlockType,
++		Transparency: number,
++		RaycastDistance: number,
++		Part: Part,
++		_RaycastParams: RaycastParams,
++		_FilteredCharacter: Model?,
++		_BindingName: string,
++		_Placement: Vector3?,
++		_IsPlaceable: boolean,
++		_IsDestroyed: boolean,
++	},
++	GhostPreview
++))
++
++local function createPart(transparency: number): Part
++	local part = Instance.new("Part")
++	part.Name = "GhostPreview"
++	part.Size = Vector3.one * BlockTypes.BlockSize
++	part.Anchored = true
++	part.CanCollide = false
++	part.CanQuery = false
++	part.CanTouch = false
++	part.CastShadow = false
++	part.Transparency = transparency
++	return part
++end
++
++--[[
++	Creates a preview of blockType and starts following the mouse every frame. Call
++	Destroy when build mode ends.
++]]
++function GhostPreview.new(blockType: BlockType, options: Options?): GhostPreview
++	local transparency = options and options.Transparency or DEFAULT_TRANSPARENCY
++	local raycastDistance = options and options.RaycastDistance or DEFAULT_RAYCAST_DISTANCE
++	assert(transparency >= 0 and transparency <= 1, "Transparency must be between 0 and 1")
++	assert(raycastDistance > 0, "RaycastDistance must be greater than 0")
++
++	nextBindingId += 1
++
++	local raycastParams = RaycastParams.new()
++	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
++
++	local self = {
++		BlockType = blockType,
++		Transparency = transparency,
++		RaycastDistance = raycastDistance,
++		Part = createPart(transparency),
++		_RaycastParams = raycastParams,
++		_FilteredCharacter = nil,
++		_BindingName = `GhostPreview{nextBindingId}`,
++		_Placement = nil,
++		_IsPlaceable = false,
++		_IsDestroyed = false,
++	}
++	setmetatable(self, GhostPreview)
++
++	self:_ApplyLook()
++	RunService:BindToRenderStep(self._BindingName, RENDER_PRIORITY, function()
++		self:_Update()
++	end)
++
++	return self
++end
++
++-- Switches the preview to another block type, keeping its position.
++function GhostPreview.SetBlockType(self: GhostPreview, blockType: BlockType)
++	self.BlockType = blockType
++	self:_ApplyLook()
++end
++
++--[[
++	Returns the center of the grid cell the preview is in when a block can be placed
++	there, or nil when it can't or the mouse points at nothing.
++]]
++function GhostPreview.GetPlacement(self: GhostPreview): Vector3?
++	return if self._IsPlaceable then self._Placement else nil
++end
++
++-- Stops following the mouse and removes the preview. Safe to call more than once.
++function GhostPreview.Destroy(self: GhostPreview)
++	if self._IsDestroyed then
++		return
++	end
++	self._IsDestroyed = true
++	RunService:UnbindFromRenderStep(self._BindingName)
++	self.Part:Destroy()
++	self._Placement = nil
++	self._IsPlaceable = false
++end
++
++function GhostPreview._ApplyLook(self: GhostPreview)
++	local style = BlockTypes.Styles[self.BlockType]
++	self.Part.Material = style.Material
++	self.Part.Color = if self._IsPlaceable
++		then style.Color
++		else style.Color:Lerp(BLOCKED_COLOR, BLOCKED_TINT)
++end
++
++function GhostPreview._Update(self: GhostPreview)
++	local character = localPlayer.Character
++	if character ~= self._FilteredCharacter then
++		self._RaycastParams.FilterDescendantsInstances = if character
++			then { character, self.Part }
++			else { self.Part }
++		self._FilteredCharacter = character
++	end
++
++	local camera = workspace.CurrentCamera
++	local mouseLocation = UserInputService:GetMouseLocation()
++	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
++	local result =
++		workspace:Raycast(ray.Origin, ray.Direction * self.RaycastDistance, self._RaycastParams)
++	if not result then
++		self._Placement = nil
++		self.Part.Parent = nil
++		return
++	end
++
++	-- Half a block along the normal lands inside the empty cell next to the hit face.
++	local center = PlacementRules.snap(result.Position + result.Normal * (BlockTypes.BlockSize / 2))
++	-- Until the server's folder replicates, the server would reject every placement too.
++	local blocksFolder = workspace:FindFirstChild(PLACED_BLOCKS_NAME)
++	local isPlaceable = false
++	if blocksFolder then
++		isPlaceable = PlacementRules.check(center, character, blocksFolder)
++	end
++
++	self._Placement = center
++	self.Part.CFrame = CFrame.new(center)
++	self.Part.Parent = workspace
++	if isPlaceable ~= self._IsPlaceable then
++		self._IsPlaceable = isPlaceable
++		self:_ApplyLook()
++	end
++end
++
++return GhostPreview

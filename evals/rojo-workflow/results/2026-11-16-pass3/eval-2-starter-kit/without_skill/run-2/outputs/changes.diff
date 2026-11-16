@@ -1,0 +1,126 @@
+diff --git a/src/ReplicatedStorage/Shared/StarterKit.model.json b/src/ReplicatedStorage/Shared/StarterKit.model.json
+new file mode 100644
+index 0000000..ffb152d
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/StarterKit.model.json
+@@ -0,0 +1,10 @@
++{
++  "className": "Configuration",
++  "attributes": {
++    "Brick": 20,
++    "Dirt": 20,
++    "Grass": 10,
++    "Window": 0,
++    "Wood": 10
++  }
++}
+diff --git a/src/ServerScriptService/Main.server.luau b/src/ServerScriptService/Main.server.luau
+index 291404f..4d92e38 100644
+--- a/src/ServerScriptService/Main.server.luau
++++ b/src/ServerScriptService/Main.server.luau
+@@ -1,5 +1,38 @@
+ local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+-Players.PlayerAdded:Connect(function(player: Player)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++-- Designers tune these counts as attributes in Studio's Properties window.
++local starterKit = ReplicatedStorage.Shared:WaitForChild("StarterKit") :: Configuration
++
++-- Set on the Player after every block count is written, so clients know the kit has arrived.
++local KIT_GIVEN_ATTRIBUTE = "StarterKitGiven"
++
++local function getStarterCount(blockName: string): number
++	local value = starterKit:GetAttribute(blockName)
++	if typeof(value) ~= "number" then
++		if value ~= nil then
++			warn(`StarterKit.{blockName} should be a number, got {typeof(value)}; using 0`)
++		end
++		return 0
++	end
++	return math.max(0, math.floor(value))
++end
++
++local function giveStarterKit(player: Player)
++	for _, blockType in BlockTypes.List do
++		player:SetAttribute(blockType.Name, getStarterCount(blockType.Name))
++	end
++	player:SetAttribute(KIT_GIVEN_ATTRIBUTE, true)
++end
++
++local function onPlayerAdded(player: Player)
+ 	print(`{player.Name} joined`)
+-end)
++	giveStarterKit(player)
++end
++
++Players.PlayerAdded:Connect(onPlayerAdded)
++for _, player in Players:GetPlayers() do
++	task.spawn(onPlayerAdded, player)
++end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 19820e1..5ae92aa 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,4 +1,60 @@
+ local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local StarterGui = game:GetService("StarterGui")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++-- The server sets this on the Player after writing every block count.
++local KIT_GIVEN_ATTRIBUTE = "StarterKitGiven"
+ 
+ local localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
++
++local function describeKit(): string?
++	local parts = {}
++	for _, blockType in BlockTypes.List do
++		local count = localPlayer:GetAttribute(blockType.Name)
++		if typeof(count) == "number" and count > 0 then
++			table.insert(parts, `{count} {blockType.DisplayName}`)
++		end
++	end
++	if #parts == 0 then
++		return nil
++	end
++	return table.concat(parts, ", ")
++end
++
++local function sendNotification(text: string)
++	-- SetCore errors until the CoreScripts register the callback, so retry for a short while.
++	for _ = 1, 20 do
++		local ok = pcall(StarterGui.SetCore, StarterGui, "SendNotification", {
++			Title = "Starter kit",
++			Text = text,
++			Duration = 8,
++		})
++		if ok then
++			return
++		end
++		task.wait(0.5)
++	end
++	warn("Could not show the starter kit notification")
++end
++
++local function showStarterKitNotification()
++	local text = describeKit()
++	if text then
++		sendNotification(`You got {text}`)
++	end
++end
++
++if localPlayer:GetAttribute(KIT_GIVEN_ATTRIBUTE) then
++	task.spawn(showStarterKitNotification)
++else
++	local connection: RBXScriptConnection
++	connection = localPlayer:GetAttributeChangedSignal(KIT_GIVEN_ATTRIBUTE):Connect(function()
++		if localPlayer:GetAttribute(KIT_GIVEN_ATTRIBUTE) then
++			connection:Disconnect()
++			showStarterKitNotification()
++		end
++	end)
++end

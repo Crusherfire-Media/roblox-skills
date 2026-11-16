@@ -1,0 +1,111 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both work. A bridges the signal with useSignalState in the mounted app component and leaves BlockPicker as a plain view, which is what criterion 5 asks for. B moves the bridge into BlockPicker, which changes its prop contract and ties it to Charm, and B also renames the getter without need.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns Charm signal",
+          "score": 5,
+          "note": "`Charm.signal` is private, `BlockPlacer.getBlockType = getSelectedName` is exported, and `setBlockType` keeps the assert and is the only writer."
+        },
+        {
+          "criterion": "Hotbar bridges to Vide state with disposal",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockPlacer.getBlockType)` is called inside `app()`, which runs within `mount`."
+        },
+        {
+          "criterion": "Single copy, BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirrored source and the BindableEvent are both removed."
+        },
+        {
+          "criterion": "PlacementPreview via Charm",
+          "score": 5,
+          "note": "`Charm.listen(BlockPlacer.getBlockType, applyBlockType)` runs right away and again on every change."
+        },
+        {
+          "criterion": "BlockPicker unchanged",
+          "score": 5,
+          "note": "BlockPicker is untouched and still receives a Vide source as `Selected`."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 5,
+          "note": "All checks pass and the change is minimal, with the `getBlockType` name kept."
+        }
+      ],
+      "overall_score": 9.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns Charm signal",
+          "score": 5,
+          "note": "The signal is private, the getter is exported as `selectedBlockType`, and `setBlockType` keeps the assert."
+        },
+        {
+          "criterion": "Hotbar bridges to Vide state with disposal",
+          "score": 4,
+          "note": "`useSignalState(props.Selected)` runs in BlockPicker's body during `mount`, which works but puts the bridge in the view."
+        },
+        {
+          "criterion": "Single copy, BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirror and the event are removed."
+        },
+        {
+          "criterion": "PlacementPreview via Charm",
+          "score": 5,
+          "note": "`Charm.listen(BlockPlacer.selectedBlockType, applyBlockType)`."
+        },
+        {
+          "criterion": "BlockPicker unchanged",
+          "score": 2,
+          "note": "BlockPicker now requires VideCharm and treats `Selected` as a Charm getter, so a Vide source passed in (as in stories) would stop updating."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 4,
+          "note": "Checks pass, but renaming `getBlockType` to `selectedBlockType` is an API change the task didn't need."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9.5,
+      "strengths": [
+        "Bridges Charm to Vide in the mounted root component",
+        "Leaves BlockPicker's view contract alone",
+        "Keeps the existing getter name"
+      ],
+      "weaknesses": [
+        "No notable issues"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Works at runtime",
+        "Clear doc comments"
+      ],
+      "weaknesses": [
+        "Couples BlockPicker to Charm and changes its prop meaning",
+        "Renames the public getter for no clear reason"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9.5,
+    "without_skill": 7
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

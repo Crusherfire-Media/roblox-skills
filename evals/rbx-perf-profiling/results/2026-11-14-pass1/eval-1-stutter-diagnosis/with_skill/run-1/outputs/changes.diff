@@ -1,0 +1,165 @@
+diff --git a/docs/perf/stutter-diagnosis.md b/docs/perf/stutter-diagnosis.md
+new file mode 100644
+index 0000000..2f782ec
+--- /dev/null
++++ b/docs/perf/stutter-diagnosis.md
+@@ -0,0 +1,159 @@
++# Laptop stutter while building: diagnosis
++
++Source: `docs/perf/captures/laptop-stutter-analysis.txt`. Priya ran our LibMP scripts on
++Sam's dump `laptop-stutter.gprx`, recorded on his laptop client while building on his
++6,000-block plot. The dump holds 240 frames over about 5.4 s.
++
++Frames are written as **LibMP id / absolute id**. Use the LibMP id with our scripts in
++`tools/profiling` (`lute tree.luau laptop-stutter.gprx <id> <id> ...`). Use the absolute id to
++find the frame in the MicroProfiler UI after loading the dump. Times are in milliseconds.
++
++## Summary
++
++| Symptom | Cause | Frames |
++|---|---|---|
++| Hitch every ~2.1 s | `BuildAutosave:Snapshot` takes ~75 ms on the main thread, and 54 ms of that is Luau GC, triggered by a ~48 MB allocation burst | 18236/604130, 18327/604221, 18419/604313, plus the frame after each one |
++| Choppy the rest of the time | The main thread is the bottleneck at ~22 ms per frame (≈45 FPS). `BlockHighlight:Update` takes ~10 ms of that every frame, including ~2.3 ms of GC | Steady-state window 18330/604224 – 18410/604304 |
++| Biggest frame in the dump (353 ms) | **Not the game.** This is the one-time MicroProfiler stall when the profiler is switched on | 18223/604117 |
++
++## 1. The stutter: `BuildAutosave:Snapshot`
++
++The four frames over 90 ms are the 353 ms profiler frame (see section 3) plus three frames of
++95–97 ms. Those three are evenly spaced:
++
++| Spike frame (id/abs) | ms | t | Next frame (id/abs) | ms |
++|---|---|---|---|---|
++| 18236/604130 | 95.2 | 0.89 s | 18237/604131 | 28.5 |
++| 18327/604221 | 96.4 | 2.98 s | 18328/604222 | 29.4 |
++| 18419/604313 | 97.1 | 5.09 s | 18420/604314 | 28.4 |
++
++They are 91 and 92 frames apart, or 2.09 s and 2.11 s. That matches "every couple of seconds".
++
++**What is in a spike** (`tree.luau` on 18419/604313):
++
++- Main thread 96.6 ms. `Heartbeat > RunService.Heartbeat > Script_Main` takes 85.9 ms.
++- Within that, `BuildAutosave:Snapshot` takes **75.4 ms**: 21.1 ms of its own work and
++  **54.4 ms of `GC`** inside it.
++- The rest of the frame looks like a normal frame. `BlockHighlight:Update` takes 10.2 ms,
++  RenderJob 6.9 ms, and Simulation 2.2 ms. Worker threads are unchanged (~31.6 ms of merged roots,
++  the same as steady state).
++
++So the spike comes entirely from one script call that holds the main thread for ~75 ms.
++
++**Why GC is so high** (`counter-series.luau` on `memory/Luau/heap`):
++
++| Spike | Heap before | Heap at spike | Back to baseline |
++|---|---|---|---|
++| 18236/604130 | 186.9 MB (18221) | 235.1 MB | ~187.9 MB by 18261 |
++| 18327/604221 | 188.3 MB (18321) | 236.4 MB | ~188.2 MB by 18351 |
++| 18419/604313 | 188.6 MB (18411) | 236.9 MB | ~188.7 MB by 18441 |
++
++Each snapshot allocates about **48 MB** of short-lived Luau data in one call. With 6,231 parts
++that is roughly **7.7 KB per block**, which points to building new tables or strings for every
++block on every snapshot (for example per-block dictionaries, string keys, or encoding the whole
++plot into one large string). Luau charges GC assist work to the code that is allocating, so the
++54 ms shows up under `Snapshot`. The heap then returns to baseline over the next ~20–25 frames,
++so this is churn, not a leak.
++
++**Aftershock frame.** The frame after each spike runs about 28–29 ms instead of 22 ms. In
++18328/604222 (`series.luau`), `GC` is 9.12 ms instead of the usual ~2.2 ms. That is the
++collector finishing the work the snapshot left behind. It is a small second hitch that comes
++right after the big one.
++
++**Period.** The ~2.09–2.11 s spacing fits a loop that waits 2 s *after* each snapshot finishes
++(2 s + ~75 ms snapshot + rounding to the next frame), for example `task.wait(2)` in a loop. This
++is a guess from the timing; check it against the `BuildAutosave` source.
++
++**Gap in the evidence.** Only 18419/604313 (tree) and 18327/604221 (series) were broken down.
++18236/604130 is matched to the same cause by its duration, its ~48 MB heap jump, its aftershock
++frame, and its spacing, but nobody has run `tree.luau` on it yet.
++
++## 2. The choppiness: main thread bound, `BlockHighlight:Update` is half of it
++
++Frames outside the spikes sit at 20–24 ms, with a p50 of 22.2 ms. That is about 45 FPS, short of
++the 60 FPS (16.7 ms) target, and the frame-to-frame variation makes it feel uneven.
++
++Steady-state window 18330/604224 – 18410/604304 (81 frames, no spikes, avg 22.04 ms):
++
++| Thread | Busy per frame | Share of a 22.04 ms frame |
++|---|---|---|
++| Main | 21.58 ms | **98%**, the critical path |
++| Render | 7.12 ms | 32% |
++| Worker A–D | 7.5–8.2 ms each | 34–37% |
++| GPU | 6.38 ms | 29% |
++
++The main thread is busy for almost the whole frame, and every other thread has more than 13 ms
++of slack. The frame rate is limited by main-thread work.
++
++Main thread breakdown per frame:
++
++- `Heartbeat > RunService.Heartbeat > Script_Main`: 11.03 ms
++  - **`BlockHighlight:Update`: 10.12 ms** (self 7.86 ms + `GC` 2.26 ms), once per frame
++  - `BlockPlacer:OnInput`: 0.57 ms (3.1 calls per frame; fine)
++- `RenderJob`: 6.88 ms (Perform 5.71, of which Pass3d 2.27, SceneUpdater::UpdatePrepare 1.29)
++- `Simulation`: 2.14 ms
++- `Replicator ProcessPackets`: 0.71 ms, `InputDispatch`: 0.47 ms
++
++`BlockHighlight:Update` alone is 46% of every frame. Without it, the main thread would be at
++about 11.5 ms, well under 16.7 ms. It is also stable, 9.9–10.3 ms in every frame of
++`series.luau`, so it is constant per-frame work and not driven by input. Taking 7.9 ms of script
++time per frame on a 6,000-block plot suggests it touches every block each frame, such as looping
++over all parts to find or restyle the highlighted one. The steady 2.2–2.3 ms of `GC` means it
++also allocates every frame (temporary tables, closures, Vector3/CFrame math results kept in
++tables, `GetChildren`/`GetDescendants` arrays). It probably scales with plot size, which would
++explain why Sam notices it while building on a big plot.
++
++## 3. Things that look alarming but are not the problem
++
++- **18223/604117, 352.6 ms, the longest frame in the dump.** 328.7 ms of it is
++  `MicroProfileFlip [MicroProfiler]`, and the game's own work in that frame is normal
++  (`BlockHighlight:Update` 9.8 ms, no `BuildAutosave`). The frame is 12 frames and 0.27 s into the
++  dump, right after Sam pressed Ctrl+F6. That is the known one-time stall (~350 ms, ~12 frames in)
++  of the first capture after the profiler turns on. Players never see it. It also raises the
++  dump's avg (24.52 ms vs p50 22.20 ms) and max, so leave it out of any averages.
++- **GPU frame span 21.71 ms, almost equal to the CPU frame.** The `TickStartGpu`/`TickEndGpu`
++  span follows the CPU frame because the GPU waits for the CPU to submit work. Actual GPU work,
++  measured from the GPU thread's scopes, is 6.38 ms per frame (Scene 3.91, ShadowMap 1.22,
++  UI 0.61, Glow 0.42). The laptop's GPU is not the limit.
++- **"3 frames with GPU end before start" (18342/604236, 18371/604265, 18395/604289).** GPU frame
++  timestamps can be wrong or too broad. This is a known data quirk, not a GPU fault. Skipping
++  those frames was correct, and it is another reason to use GPU-thread scopes instead of the
++  span.
++- **Workers merged: 31.4 ms of roots per frame, more than the 22 ms frame.** This is the sum
++  across four worker threads, and inclusive times are work volume, not wall time. Each worker is
++  busy 7.5–8.2 ms out of 22 ms. Culling (`Cull` 6.7 ms over ~25 jobs), physics (`stepContacts`
++  4.1 ms), light grid, and shadow map updates run in parallel and are not on the critical path.
++  They could matter on a laptop with fewer cores, but not in this capture.
++- **Luau heap jumping to ~236 MB.** These jumps come only from the autosave (section 1) and fall
++  back to ~188 MB each time. The baseline drifts from 186.2 to 188.4 MB over 5 s, which is too
++  short a window to call a leak.
++- **`instance_count/part` = 6,231.** It does not change over the 240 samples, so building is not
++  leaking parts. In this capture nothing was placed or removed, or placement balanced out.
++- **p99 = 96.40 ms.** With 240 frames, p99 is just the third-longest frame, which is one of the
++  three autosave spikes. It is not a separate population of slow frames.
++
++## What to look at next
++
++1. **Confirm the third spike.** Run `lute tree.luau laptop-stutter.gprx 18236 18237 0.4 6` to
++   confirm 18236/604130 is `BuildAutosave:Snapshot` and 18237/604131 is the GC aftershock.
++2. **Read `BuildAutosave` once the game scripts are available.** Check what `Snapshot` builds
++   per block (where the ~48 MB / ~7.7 KB per block comes from), how often it runs and why
++   (a 2 s interval while building seems very frequent for an autosave), and whether it encodes
++   the whole plot each time when only changes are needed. Options to evaluate: snapshot only
++   changed blocks, save less often or only after edits stop, reuse buffers instead of making new
++   tables, or spread the work over several frames.
++3. **Read `BlockHighlight:Update`.** Find out whether it walks all blocks every frame and what it
++   allocates per frame. Check whether it needs to run when the hovered or selected block has not
++   changed.
++4. **Get a finer breakdown before changing code.** Add `debug.profilebegin`/`debug.profileend`
++   labels inside `BuildAutosave:Snapshot` (gather vs. serialize vs. write) and
++   `BlockHighlight:Update`. Recapture with `series.luau` to see which part costs the time.
++5. **Check the scaling theory.** Capture once on a small plot (for example a few hundred blocks)
++   and compare `BlockHighlight:Update` and `Snapshot` times and the heap jump size against this
++   capture. If they scale with block count, that confirms per-block work.
++6. **Recapture with the profiler already running.** Turn the MicroProfiler on, wait at least a
++   second (~24+ frames) before building, then dump. That keeps the `MicroProfileFlip` stall out
++   of the data. Include at least two autosave cycles so they are still easy to compare.
++7. **Compare against a desktop.** If the same capture on a desktop is well under 16.7 ms in steady
++   state, the choppiness is mostly the laptop's slower single-core speed on the main-thread
++   script work above. That makes `BlockHighlight` the fix with the most payoff for low-end players.

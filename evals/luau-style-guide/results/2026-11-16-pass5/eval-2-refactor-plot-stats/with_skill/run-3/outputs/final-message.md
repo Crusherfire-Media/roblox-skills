@@ -1,0 +1,7 @@
+I fixed all eight luau-lsp errors in `PlotStats.luau`, but I couldn't re-run the analyzer myself because shell commands are still blocked. The next check will confirm whether it's clean.
+
+- **Comparing `Position` to `nil` (lines 49 and 56):** strict mode won't compare a `Vector3` with `nil`. Both functions now call a new `hasPosition` helper that casts `Position` to an optional `Vector3` before checking it. The check behaves exactly as before, so a block with no `Position` (possible from untyped callers) is still skipped.
+- **`string.match` returning `string?` (lines 87 and 90):** `formatWholeNumber` now stops with an explicit error when the text has no digits. That only happens for NaN or infinite values, which already crashed inside `string.gsub` before. **The one difference:** those inputs now raise `Cannot format inf as a whole number` instead of the old `gsub` argument error. Every input that worked before gives the same output.
+- **Counts (lines 122 and 127):** the tally is now `(counts[block.Type] or 0) + 1`, the same expression the original used. A type is added to `Variety` the first time its count reaches 1.
+
+**Typing change for callers:** `Summary.Counts` is now `{ [string]: number? }` instead of being keyed by `BlockType`. The `BlockType` union still checks the names in the `BLOCK_TYPES` table.

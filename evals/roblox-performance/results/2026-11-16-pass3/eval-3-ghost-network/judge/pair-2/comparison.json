@@ -1,0 +1,129 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts move ghost parts onto the clients, send only on change at 20 a second at most, and draw each builder's own ghost locally every frame. The deciding difference is the network channel. A sends the continuous, replaceable ghost updates over an UnreliableRemoteEvent and repairs lost or reordered updates with re-sends. That removes ghost traffic from the reliable ordered stream that was causing the ping spike. B keeps ghost updates on a reliable RemoteEvent. B does have better server checks: a per-player flood limit and whole-number cell validation. It also has tests and an idle client that sends nothing. Still, A's choice of channel fixes the main problem in the task, and its missing rate limit is easier to add. A wins.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Change-only, capped sends",
+          "score": 4,
+          "note": "sendOwnGhost sends only when the type index or cell changes, with a 50 ms gap (UpdateInterval), so the rate no longer depends on frame rate; it also re-sends 0.3 s after a change and then every 2 s, so an idle player is not completely silent."
+        },
+        {
+          "criterion": "2. Client-built ghosts, server relays",
+          "score": 5,
+          "note": "The server keeps a GhostState table and creates no parts; applyRemoteGhost builds parts on each client and glideRemoteGhosts lerps them toward the target, with a snap for jumps over 24 studs."
+        },
+        {
+          "criterion": "3. Own ghost local every frame",
+          "score": 5,
+          "note": "updateOwnGhost raycasts and moves ownGhost in RenderStepped, with no server round trip."
+        },
+        {
+          "criterion": "4. Unreliable ghost channel, PlaceBlock unchanged",
+          "score": 5,
+          "note": "GhostUpdate is an UnreliableRemoteEvent; the settle and refresh re-sends repair dropped or out-of-order updates; the reliable GhostSnapshot is used only at join; placement code is untouched."
+        },
+        {
+          "criterion": "5. Server validation and lifecycle",
+          "score": 3,
+          "note": "It checks types, rejects NaN or infinite values via the Magnitude test, rejects unknown type indices, and snaps the cell; but the server has no per-player rate limit, and FireAllClients sends each builder's updates back to them, where the client ignores them; ghosts are cleaned up on PlayerRemoving and hidden when the cell is nil."
+        },
+        {
+          "criterion": "6. Write-up",
+          "score": 4,
+          "note": "The before and after estimates are worked out from send rates, player counts and bytes per message, and the player-facing list is thorough; but it calls the per-call byte costs 'measured in Studio' while also saying nothing was measured, which contradicts itself."
+        },
+        {
+          "criterion": "7. Correct, typed, in scope",
+          "score": 5,
+          "note": "All checks pass; it adds only a small shared GhostNetwork module; the code is typed and guards against an unknown block type index."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Change-only, capped sends",
+          "score": 5,
+          "note": "updateOwnGhost sends only when the block index or cell changes, at most every SEND_INTERVAL (1/20 s), and an idle client sends nothing."
+        },
+        {
+          "criterion": "2. Client-built ghosts, server relays",
+          "score": 5,
+          "note": "The server keeps states and pending tables and broadcasts a list of players with a buffer of states; applyRemoteState and updateRemoteGhosts build and smooth the parts on each client."
+        },
+        {
+          "criterion": "3. Own ghost local every frame",
+          "score": 5,
+          "note": "ownGhost is moved from the local raycast in RenderStepped."
+        },
+        {
+          "criterion": "4. Unreliable ghost channel, PlaceBlock unchanged",
+          "score": 2,
+          "note": "GhostUpdate is created with Instance.new(\"RemoteEvent\"), so ghost updates stay on the reliable ordered stream; the volume is capped, but a lost packet can still hold up other reliable traffic behind it. PlaceBlock is unchanged."
+        },
+        {
+          "criterion": "5. Server validation and lifecycle",
+          "score": 4,
+          "note": "GhostProtocol.validate checks the type, NaN, infinity, whole-number cells, a range limit and the block index, and isFlooding caps each player at 60 messages a second; but FireAllClients still sends builders their own updates, which the client filters out. Cleanup and hiding are handled correctly."
+        },
+        {
+          "criterion": "6. Write-up",
+          "score": 5,
+          "note": "It states its assumptions about message sizes, lays out a clear before and after for 12 players at mixed frame rates, labels everything as an estimate, and gives a good list of what players will notice."
+        },
+        {
+          "criterion": "7. Correct, typed, in scope",
+          "score": 4,
+          "note": "All checks pass and it adds a well-tested GhostProtocol module, but blockIndexByName[...] can be nil and would then be passed to applyBlockType without a check."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Continuous ghost updates travel on an UnreliableRemoteEvent, which takes them off the reliable stream that caused the ping spike.",
+        "Periodic re-sends repair lost or reordered updates without needing sequence numbers.",
+        "The server batches changes at 20 per second, and remote ghosts glide toward each new cell and snap on long jumps.",
+        "A reliable snapshot brings late joiners up to date."
+      ],
+      "weaknesses": [
+        "The server has no per-player rate limit on incoming ghost messages.",
+        "Each builder's own updates are broadcast back to them; the client filters them out instead of the server never sending them.",
+        "An idle client still sends a refresh every 2 s.",
+        "The write-up says the per-call byte costs were measured in Studio, which conflicts with its own statement that nothing was measured."
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Thorough server checks: whole-number cell validation and a per-player flood limit.",
+        "A compact buffer encoding of 13 bytes per entry, with Jest specs.",
+        "An idle client sends nothing.",
+        "An honest, clearly reasoned write-up."
+      ],
+      "weaknesses": [
+        "Ghost updates still use a reliable RemoteEvent, so packet loss can stall other reliable traffic.",
+        "There is no unreliable-channel design to tolerate dropped or reordered updates.",
+        "Each builder's own updates are broadcast back to them.",
+        "An unknown block type name would make applyBlockType error on a nil index."
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8,
+    "without_skill": 7
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

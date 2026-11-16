@@ -1,0 +1,8 @@
+I fixed both type-check errors the stop hook reported:
+
+- **Unknown require `game/ReplicatedStorage/Shared/BlockTypes`:** the require path was fine. `sourcemap.json` was out of date and listed neither `BlockTypes` nor `BlockInventory`, so luau-lsp couldn't find the module. I regenerated it with `rojo sourcemap`, and the require resolves now. `sourcemap.json` doesn't show in `git status`, so it isn't tracked.
+- **Unknown type `BlockTypes.BlockType`:** this cleared up once the require resolved. That exposed one real error in my code: `BlockTypes.Order` is declared as `{ BlockType }`, but the checker reads its entries as plain `string`, so they couldn't be used as keys in my counts table. I fixed it in `BlockInventory.luau` with an annotated cast on the loop variable and didn't touch `BlockTypes.luau`.
+
+luau-lsp now reports nothing about my code. Every error left in both files comes from not having Roblox's type definitions (`Player`, `warn`, `task`, `Color3`, `Enum`). StyLua and selene pass with no warnings.
+
+`BlockInventory.luau` is the only file the change touches, and it hasn't been committed. Two commands were blocked because this session can't approve permission prompts: a check of the sourcemap's contents and a filter on the luau-lsp output. I ran simpler versions of both instead, so neither left a gap. Everything in my earlier summary about the API and the save-overwrite risk still applies.

@@ -1,0 +1,148 @@
+diff --git a/src/ReplicatedStorage/Shared/StarterKit.model.json b/src/ReplicatedStorage/Shared/StarterKit.model.json
+new file mode 100644
+index 0000000..ffb152d
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/StarterKit.model.json
+@@ -0,0 +1,10 @@
++{
++  "className": "Configuration",
++  "attributes": {
++    "Brick": 20,
++    "Dirt": 20,
++    "Grass": 10,
++    "Window": 0,
++    "Wood": 10
++  }
++}
+diff --git a/src/ServerScriptService/Main.server.luau b/src/ServerScriptService/Main.server.luau
+index 291404f..f660ef7 100644
+--- a/src/ServerScriptService/Main.server.luau
++++ b/src/ServerScriptService/Main.server.luau
+@@ -1,5 +1,45 @@
+-local Players = game:GetService("Players")
++--!strict
++const Players = game:GetService("Players")
++const ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+-Players.PlayerAdded:Connect(function(player: Player)
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++const STARTER_KIT_NAME = "StarterKit"
++
++local function getStarterKit(): Configuration?
++	-- Designers may move the Configuration anywhere under ReplicatedStorage.
++	const starterKit = ReplicatedStorage:FindFirstChild(STARTER_KIT_NAME, true)
++	if starterKit and starterKit:IsA("Configuration") then
++		return starterKit
++	end
++	warn(`No Configuration named {STARTER_KIT_NAME} under ReplicatedStorage; starting counts are 0`)
++	return nil
++end
++
++local function grantStarterKit(player: Player)
++	-- Read on every join so attribute edits made during a playtest apply to the next player.
++	const starterKit = getStarterKit()
++	for _, blockType in BlockTypes.List do
++		local count = 0
++		if starterKit then
++			const value = starterKit:GetAttribute(blockType.Name)
++			-- value == value rejects NaN, which passes the range check
++			if typeof(value) == "number" and value >= 0 and value == value then
++				count = math.floor(value)
++			elseif value ~= nil then
++				warn(`{STARTER_KIT_NAME}.{blockType.Name} must be a number of 0 or more`)
++			end
++		end
++		player:SetAttribute(blockType.Name, count)
++	end
++end
++
++local function onPlayerAdded(player: Player)
+ 	print(`{player.Name} joined`)
+-end)
++	grantStarterKit(player)
++end
++
++Players.PlayerAdded:Connect(onPlayerAdded)
++for _, player in Players:GetPlayers() do
++	task.spawn(onPlayerAdded, player)
++end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 19820e1..77c216f 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,4 +1,72 @@
+-local Players = game:GetService("Players")
++--!strict
++const Players = game:GetService("Players")
++const StarterGui = game:GetService("StarterGui")
+ 
+-local localPlayer = Players.LocalPlayer
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++const NOTIFICATION_TITLE = "Starter kit"
++const NOTIFICATION_DURATION = 8
++const SET_CORE_RETRY_DELAY = 0.5
++const SET_CORE_MAX_ATTEMPTS = 20
++
++const localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
++
++local function hasAllCounts(): boolean
++	for _, blockType in BlockTypes.List do
++		if typeof(localPlayer:GetAttribute(blockType.Name)) ~= "number" then
++			return false
++		end
++	end
++	return true
++end
++
++local function describeKit(): string
++	const lines = {}
++	for _, blockType in BlockTypes.List do
++		const count = localPlayer:GetAttribute(blockType.Name) :: number
++		if count > 0 then
++			table.insert(lines, `{blockType.DisplayName} x{count}`)
++		end
++	end
++	return table.concat(lines, ", ")
++end
++
++local function sendNotificationAsync(text: string)
++	for _ = 1, SET_CORE_MAX_ATTEMPTS do
++		-- SetCore errors until the CoreScripts register SendNotification, which
++		-- can happen after this script starts.
++		const success = pcall(function()
++			StarterGui:SetCore("SendNotification", {
++				Title = NOTIFICATION_TITLE,
++				Text = text,
++				Duration = NOTIFICATION_DURATION,
++			})
++		end)
++		if success then
++			return
++		end
++		task.wait(SET_CORE_RETRY_DELAY)
++	end
++	warn("Could not show the starter kit notification")
++end
++
++local function showStarterKit()
++	const text = describeKit()
++	if text == "" then
++		return
++	end
++	task.spawn(sendNotificationAsync, `You got: {text}`)
++end
++
++if hasAllCounts() then
++	showStarterKit()
++else
++	local connection: RBXScriptConnection
++	connection = localPlayer.AttributeChanged:Connect(function()
++		if hasAllCounts() then
++			connection:Disconnect()
++			showStarterKit()
++		end
++	end)
++end

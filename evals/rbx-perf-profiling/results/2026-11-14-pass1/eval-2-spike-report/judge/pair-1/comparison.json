@@ -1,0 +1,125 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts open the slot correctly, split scope time at frame boundaries, skip the GPU thread, and dispose everything inside a pcall. B passes all the automatic checks and covers both readings of the normal-frame comparison: a per-scope average and a separate normal top-five list. A fails luau-lsp because it iterates `selfTicks[frameId] or {}`, fails StyLua, and gives only a per-scope normal average. B is the cleaner attempt and the one a developer would merge.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Opens slot snapshot, handles failure, no live/profiler toggling, no slot clearing",
+          "score": 5,
+          "note": "`LibMP.Session.OpenFromSlot(slot)` checks for nil and `IsValid` and errors cleanly. It never calls `EnableCapture`, `SetFrameLimit` or `ResetSlot`."
+        },
+        {
+          "criterion": "Frame times from CPU ticks, incomplete skipped, median/p90 from sorted",
+          "score": 5,
+          "note": "It computes `(desc.TickEndCpu - desc.TickStartCpu) * tickToMs`, skips `IsIncomplete` and paused frames, and uses an interpolated `percentile()` on `sortedMs`."
+        },
+        {
+          "criterion": "Scope time split across frame boundaries",
+          "score": 5,
+          "note": "`IsThreadFrameEnd` flushes the open stack with `EnterTimestampFrameLocal`. An underflowed exit uses `frameStartTick[frameId]`, and other exits use the frame-local enter time."
+        },
+        {
+          "criterion": "Per-thread self time with stack; GPU skipped",
+          "score": 4,
+          "note": "The `unclaimed` list is cleared per frame and thread, and a parent claims the children that entered at or after it, so it subtracts only direct children. `SkipGpuThreads = true` keeps the GPU thread out. The approach is clever but less direct than a depth stack."
+        },
+        {
+          "criterion": "FrameId + FrameAbsoluteId; normal average over non-slow frames",
+          "score": 4,
+          "note": "`name` and the fields carry both IDs. `normalAvgMs` per top scope is divided by `normalFrameCount`. There is no separate normal-frame top-five list, but that reading of the task is defensible."
+        },
+        {
+          "criterion": "Safe LibMP use: dispose on all paths, Fetch, cached names",
+          "score": 5,
+          "note": "`pcall(analyze, ...)` is followed by disposing the iterator and the session. It uses only Fetch methods, and `timerName` and `threadName` are cached."
+        },
+        {
+          "criterion": "Returns table, scoped changes, checks pass",
+          "score": 2,
+          "note": "It returns a `Report` table and adds only the one file. luau-lsp reports two errors from iterating `selfTicks[frameId] or {}`, and the file fails StyLua."
+        }
+      ],
+      "overall_score": 6.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Opens slot snapshot, handles failure, no live/profiler toggling, no slot clearing",
+          "score": 5,
+          "note": "It asserts the slot is 1–4, calls `OpenFromSlot(slot)`, and on a nil or invalid session disposes it and errors. It never resets the slot or touches profiler settings."
+        },
+        {
+          "criterion": "Frame times from CPU ticks, incomplete skipped, median/p90 from sorted",
+          "score": 5,
+          "note": "`readFrameTimes` uses `TickEndCpu - TickStartCpu` times `TickToMsCpu` and skips incomplete frames. The median is exact and p90 is nearest-rank on `sortedMs`."
+        },
+        {
+          "criterion": "Scope time split across frame boundaries",
+          "score": 5,
+          "note": "`IsThreadFrameEnd` flushes with `EnterTimestampFrameLocal`. An underflowed exit uses `frameStartTick`, taken from the frame-boundary timestamp."
+        },
+        {
+          "criterion": "Per-thread self time with stack; GPU skipped",
+          "score": 5,
+          "note": "`childTicksByDepth`, keyed by absolute depth, is cleared on `ThreadChanged`, so it subtracts only direct children. `SkipGpuThreads = true` keeps the GPU thread out."
+        },
+        {
+          "criterion": "FrameId + FrameAbsoluteId; normal average over non-slow frames",
+          "score": 5,
+          "note": "Each slow frame's `Name` and fields carry both IDs. It gives `NormalAverageMs` per slow scope plus a separate `NormalTopScopes` list, both averaged over `normalFrameCount`."
+        },
+        {
+          "criterion": "Safe LibMP use: dispose on all paths, Fetch, cached names",
+          "score": 4,
+          "note": "`pcall(buildReport)` is followed by disposing the iterator and the session, and it uses only Fetch methods. `describeTimer` isn't cached, but it runs only per reported scope, never per log entry."
+        },
+        {
+          "criterion": "Returns table, scoped changes, checks pass",
+          "score": 5,
+          "note": "It returns a typed `Report`, adds a single file, and passes luau-lsp, selene and StyLua."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 6.5,
+      "strengths": [
+        "Correct frame-boundary splitting, including underflowed exits",
+        "Disposes everything inside the pcall, and timer/thread names are cached",
+        "Lists the threads for each top scope and gives a clear name for each slow frame"
+      ],
+      "weaknesses": [
+        "luau-lsp type errors in its own code (iterating `x or {}`)",
+        "The file fails StyLua",
+        "No separate normal-frame top-five list",
+        "Uses an extra `SkipPausedFrames` config key that the documented API doesn't list"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Clean depth-based self-time accounting that handles overflow and underflow",
+        "Covers both the per-scope normal comparison and a normal-frame top five",
+        "All static checks pass"
+      ],
+      "weaknesses": [
+        "Timer descriptors are not cached (a minor issue)",
+        "Relies on iterator APIs such as `GetThreadStackState`, `DepthAbsolute` and `IsFrameBoundary` that aren't in the given facts"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 6.5,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

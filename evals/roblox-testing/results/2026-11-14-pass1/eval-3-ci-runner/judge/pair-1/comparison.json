@@ -1,0 +1,125 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "B's task script raises an error when specs fail, as the task requires, while A's returns normally and relies on the workflow reading the returned output. B also handles HTTP 429 properly and passes every lint check. Its CI project file is generated in the workflow, which the rubric explicitly allows, so the failed LoadStringEnabled check doesn't count against it. A has a richer workflow but misses the key requirement for the script and has a selene warning.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. run-specs.luau errors on rejection or failure",
+          "score": 2,
+          "note": "It errors only when status ~= \"Resolved\" or a folder is missing. When specs fail it returns `summary` with success=false, so the task ends COMPLETE and only the workflow's output check catches the failure."
+        },
+        {
+          "criterion": "2. Toolchain, packages, build, upload",
+          "score": 5,
+          "note": "setup-rokit, `pesde install --locked`, `rojo build ci.project.json`, then a POST to universes/v1/.../versions?versionType=Saved with the API key."
+        },
+        {
+          "criterion": "3. Single pinned task, polling, logs, fail unless COMPLETE",
+          "score": 5,
+          "note": "One task on the versions/$PLACE_VERSION/luau-execution-session-tasks endpoint; a 600s polling deadline until COMPLETE/FAILED/CANCELLED; paginated logs; exits 1 unless COMPLETE and success."
+        },
+        {
+          "criterion": "4. Open Cloud limits",
+          "score": 4,
+          "note": "Workflow-level concurrency per PR with cancel-in-progress and timeout-minutes: 20. `curl --retry 5` on the creation POST honours Retry-After but could duplicate tasks after a 5xx."
+        },
+        {
+          "criterion": "5. LoadStringEnabled in the CI build",
+          "score": 5,
+          "note": "A committed ci.project.json adds `$properties.LoadStringEnabled: true`, and a jq step checks that it hasn't drifted from default.project.json."
+        },
+        {
+          "criterion": "6. Secrets handling",
+          "score": 5,
+          "note": "All values come from ${{ secrets.* }} env vars and are never echoed; the IDs aren't hard-coded."
+        },
+        {
+          "criterion": "7. Lint, format, valid YAML/JSON",
+          "score": 4,
+          "note": "luau-lsp and StyLua pass, but selene warns about `_G.NOCOLOR = true` in its own code; the YAML and JSON look valid."
+        }
+      ],
+      "overall_score": 6.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. run-specs.luau errors on rejection or failure",
+          "score": 5,
+          "note": "It errors on status == \"Rejected\", on numTotalTests == 0, and when `not results.success`, after printing the failures."
+        },
+        {
+          "criterion": "2. Toolchain, packages, build, upload",
+          "score": 5,
+          "note": "setup-rokit, `pesde install --locked`, `rojo build ci.project.json -o build/ci.rbxl`, then upload_place POSTs a Saved version."
+        },
+        {
+          "criterion": "3. Single pinned task, polling, logs, fail unless COMPLETE",
+          "score": 5,
+          "note": "create_task uses the versions/{version}/luau-execution-session-tasks endpoint; poll_task has a 13-minute deadline; print_logs pages through the logs; main returns 1 unless the task is COMPLETE."
+        },
+        {
+          "criterion": "4. Open Cloud limits",
+          "score": 5,
+          "note": "Job-level concurrency group with cancel-in-progress and timeout-minutes: 20; it retries only HTTP 429, honours retry-after, and stops after 3 retries."
+        },
+        {
+          "criterion": "5. LoadStringEnabled in the CI build",
+          "score": 5,
+          "note": "A workflow step writes ci.project.json from default.project.json with jq, adding LoadStringEnabled = true, and builds that file. That is a CI-only file the workflow builds, which the rubric allows, and it is gitignored."
+        },
+        {
+          "criterion": "6. Secrets handling",
+          "score": 5,
+          "note": "Secrets are passed through env and read with os.environ; nothing is printed or hard-coded."
+        },
+        {
+          "criterion": "7. Lint, format, valid YAML/JSON",
+          "score": 5,
+          "note": "luau-lsp, selene, and StyLua all pass; the YAML is valid."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 6.5,
+      "strengths": [
+        "Thorough workflow: secrets check, drift check, a step summary with a failure table, and annotations",
+        "Pins the task to the uploaded version and follows log pagination",
+        "Treats zero spec files as a failure"
+      ],
+      "weaknesses": [
+        "The task script returns normally when specs fail instead of raising an error, against the explicit requirement",
+        "selene _G warning",
+        "curl --retry on the task-creation POST could create duplicate tasks after a 5xx"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "The task script raises an error on every failure path, so the task state reflects the test result",
+        "Clean Python helper that uses only the standard library, with retries that respect HTTP 429",
+        "The CI project file is generated from default.project.json, so it can't drift"
+      ],
+      "weaknesses": [
+        "pageToken isn't URL-encoded",
+        "The concurrency group uses github.ref rather than the PR number (it works the same way for PRs)",
+        "No summary in the step summary, unlike A"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 6.5,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

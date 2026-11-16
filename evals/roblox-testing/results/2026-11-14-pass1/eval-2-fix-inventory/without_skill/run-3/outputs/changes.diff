@@ -1,0 +1,94 @@
+diff --git a/src/ServerScriptService/Inventory/BlockInventory.luau b/src/ServerScriptService/Inventory/BlockInventory.luau
+index daa89f7..f5250fb 100644
+--- a/src/ServerScriptService/Inventory/BlockInventory.luau
++++ b/src/ServerScriptService/Inventory/BlockInventory.luau
+@@ -42,14 +42,16 @@ end
+ 
+ --[[
+ 	Takes amount blocks of a type when the inventory holds at least that many and returns true.
+-	Otherwise changes nothing and returns false.
++	Otherwise changes nothing and returns false. A block type the inventory has never held counts
++	as zero, so it can't be taken. A negative amount is refused, since it would add blocks
++	without the MaxStack check that add does.
+ ]]
+ function BlockInventory.take(inventory: Inventory, name: string, amount: number): boolean
+-	local current = inventory.Counts[name]
+-	if current and current < amount then
++	local current = inventory.Counts[name] or 0
++	if amount < 0 or current < amount then
+ 		return false
+ 	end
+-	inventory.Counts[name] = (current or 0) - amount
++	inventory.Counts[name] = current - amount
+ 	return true
+ end
+ 
+diff --git a/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+new file mode 100644
+index 0000000..0465f8b
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+@@ -0,0 +1,63 @@
++local ServerScriptService = game:GetService("ServerScriptService")
++
++local JestGlobals = require(ServerScriptService.Tests.Packages.JestGlobals)
++local BlockInventory = require(ServerScriptService.Inventory.BlockInventory)
++
++local describe = JestGlobals.describe
++local expect = JestGlobals.expect
++local it = JestGlobals.it
++
++describe("BlockInventory.take", function()
++	-- Regression: new players could place one Window (not in the starter kit) and the count
++	-- dropped to -1, because a type with no entry in Counts skipped the "enough left?" check.
++	it("refuses a block type the inventory has never held", function()
++		local inventory = BlockInventory.new({ Brick = 20, Dirt = 20, Grass = 10, Wood = 10 })
++
++		expect(BlockInventory.take(inventory, "Window", 1)).toBe(false)
++		expect(BlockInventory.count(inventory, "Window")).toBe(0)
++		expect(inventory.Counts.Window).toBeNil()
++	end)
++
++	it("refuses every take from an empty inventory", function()
++		local inventory = BlockInventory.new()
++
++		for _ = 1, 3 do
++			expect(BlockInventory.take(inventory, "Window", 1)).toBe(false)
++		end
++		expect(BlockInventory.count(inventory, "Window")).toBe(0)
++	end)
++
++	it("takes blocks down to zero and then refuses", function()
++		local inventory = BlockInventory.new({ Brick = 2 })
++
++		expect(BlockInventory.take(inventory, "Brick", 1)).toBe(true)
++		expect(BlockInventory.take(inventory, "Brick", 1)).toBe(true)
++		expect(BlockInventory.count(inventory, "Brick")).toBe(0)
++
++		expect(BlockInventory.take(inventory, "Brick", 1)).toBe(false)
++		expect(BlockInventory.count(inventory, "Brick")).toBe(0)
++	end)
++
++	it("refuses to take more than the inventory holds", function()
++		local inventory = BlockInventory.new({ Wood = 3 })
++
++		expect(BlockInventory.take(inventory, "Wood", 4)).toBe(false)
++		expect(BlockInventory.count(inventory, "Wood")).toBe(3)
++	end)
++
++	it("refuses a negative amount", function()
++		local inventory = BlockInventory.new({ Wood = BlockInventory.MaxStack })
++
++		expect(BlockInventory.take(inventory, "Wood", -5)).toBe(false)
++		expect(BlockInventory.count(inventory, "Wood")).toBe(BlockInventory.MaxStack)
++	end)
++
++	it("can take a block type again after it is added", function()
++		local inventory = BlockInventory.new()
++		BlockInventory.add(inventory, "Window", 1)
++
++		expect(BlockInventory.take(inventory, "Window", 1)).toBe(true)
++		expect(BlockInventory.count(inventory, "Window")).toBe(0)
++		expect(BlockInventory.take(inventory, "Window", 1)).toBe(false)
++	end)
++end)

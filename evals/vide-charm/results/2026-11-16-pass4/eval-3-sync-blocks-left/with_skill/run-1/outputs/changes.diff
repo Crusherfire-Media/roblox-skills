@@ -1,0 +1,530 @@
+diff --git a/src/ReplicatedStorage/Shared/SyncedPlayerData.luau b/src/ReplicatedStorage/Shared/SyncedPlayerData.luau
+new file mode 100644
+index 0000000..d84822a
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/SyncedPlayerData.luau
+@@ -0,0 +1,25 @@
++--[[
++	The per-player data the server syncs to each player's own client through CharmSync. To sync
++	another value, add a field to PlayerData and give it a starting value in the server's
++	PlayerData module; the client then has it in ClientPlayerData.getData().
++]]
++
++export type PlayerData = {
++	-- How many more blocks the player may place in this server.
++	BlocksLeft: number,
++}
++
++-- The server fires it with CharmSync payloads; the client fires it with no arguments once it is
++-- ready to receive them.
++local REMOTE_NAME = "PlayerDataSync"
++
++local function getSyncKey(userId: number): string
++	return `PlayerData-{userId}`
++end
++
++local SyncedPlayerData = {
++	RemoteName = REMOTE_NAME,
++	getSyncKey = getSyncKey,
++}
++
++return table.freeze(SyncedPlayerData)
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index d4a64ab..27dba20 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -1,7 +1,7 @@
+ --[[
+ 	Places blocks for players. Clients fire PlaceBlock with a block type name and the position of
+-	the grid cell they want filled; the server checks both before placing anything. Each player may
+-	place at most MAX_BLOCKS_PER_PLAYER blocks.
++	the grid cell they want filled; the server checks both before placing anything. Each placement
++	uses up one of the player's PlayerData.BlocksLeft.
+ ]]
+ 
+ local Players = game:GetService("Players")
+@@ -9,14 +9,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local Workspace = game:GetService("Workspace")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local PlayerData = require(script.Parent.PlayerData)
+ 
+ local BLOCK_SIZE = BlockTypes.BlockSize
+ -- How far from the player's character a block may be placed, in studs.
+ local MAX_REACH = 64
+ -- Shortest time between two placements by one player, in seconds.
+ local MIN_INTERVAL = 0.1
+--- How many blocks one player may place in a server.
+-local MAX_BLOCKS_PER_PLAYER = 50
+ 
+ local placeBlock = Instance.new("RemoteEvent")
+ placeBlock.Name = "PlaceBlock"
+@@ -27,7 +26,6 @@ blocksFolder.Name = "Blocks"
+ blocksFolder.Parent = Workspace
+ 
+ local lastPlacedAt: { [Player]: number } = {}
+-local placedCounts: { [Player]: number } = {}
+ local occupied: { [Vector3]: boolean } = {}
+ 
+ local function snapAxis(value: number): number
+@@ -48,7 +46,8 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 	end
+ 
+ 	local blockType = BlockTypes.ByName[blockTypeName]
+-	if not blockType or (placedCounts[player] or 0) >= MAX_BLOCKS_PER_PLAYER then
++	local data = PlayerData.get(player)
++	if not blockType or not data or data.BlocksLeft <= 0 then
+ 		return
+ 	end
+ 
+@@ -73,7 +72,11 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 
+ 	lastPlacedAt[player] = now
+ 	occupied[cell] = true
+-	placedCounts[player] = (placedCounts[player] or 0) + 1
++	PlayerData.update(player, function(current)
++		local nextData = table.clone(current)
++		nextData.BlocksLeft -= 1
++		return nextData
++	end)
+ 
+ 	local part = Instance.new("Part")
+ 	part.Name = blockType.Name
+@@ -90,5 +93,4 @@ placeBlock.OnServerEvent:Connect(onPlaceBlock)
+ 
+ Players.PlayerRemoving:Connect(function(player: Player)
+ 	lastPlacedAt[player] = nil
+-	placedCounts[player] = nil
+ end)
+diff --git a/src/ServerScriptService/PlayerData.luau b/src/ServerScriptService/PlayerData.luau
+new file mode 100644
+index 0000000..139dec6
+--- /dev/null
++++ b/src/ServerScriptService/PlayerData.luau
+@@ -0,0 +1,77 @@
++--[[
++	Owns each player's PlayerData, one Charm signal per player, from when they join until they
++	leave. PlayerDataSync.server sends each signal to its player's client, so every change made
++	through update reaches that client.
++]]
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Charm = require(ReplicatedStorage.Packages.Charm)
++local SyncedPlayerData = require(ReplicatedStorage.Shared.SyncedPlayerData)
++
++-- How many blocks one player may place in a server.
++local MAX_BLOCKS_PER_PLAYER = 50
++
++type PlayerData = SyncedPlayerData.PlayerData
++
++type Entry = {
++	Get: Charm.Getter<PlayerData>,
++	Set: Charm.Setter<PlayerData>,
++}
++
++local entries: { [Player]: Entry? } = {}
++
++local PlayerData = {}
++
++--[[
++	Returns the Charm getter for a player's data, or nil once they have left.
++]]
++function PlayerData.getSignal(player: Player): Charm.Getter<PlayerData>?
++	local entry = entries[player]
++	return if entry then entry.Get else nil
++end
++
++function PlayerData.get(player: Player): PlayerData?
++	local entry = entries[player]
++	return if entry then entry.Get() else nil
++end
++
++--[[
++	Replaces a player's data with what update returns. Charm compares tables by reference and
++	freezes them in Studio, so update must return a new table (table.clone the one it gets).
++	Does nothing for a player who has left.
++]]
++function PlayerData.update(player: Player, update: (PlayerData) -> PlayerData)
++	local entry = entries[player]
++	if entry then
++		entry.Set(update)
++	end
++end
++
++local function onPlayerAdded(player: Player)
++	if entries[player] then
++		return
++	end
++
++	local initialData: PlayerData = {
++		BlocksLeft = MAX_BLOCKS_PER_PLAYER,
++	}
++	local get, set = Charm.signal(initialData)
++	entries[player] = {
++		Get = get,
++		Set = set,
++	}
++end
++
++Players.PlayerAdded:Connect(onPlayerAdded)
++-- Players who joined before this module was first required.
++for _, player in Players:GetPlayers() do
++	onPlayerAdded(player)
++end
++
++Players.PlayerRemoving:Connect(function(player: Player)
++	entries[player] = nil
++end)
++
++return PlayerData
+diff --git a/src/ServerScriptService/PlayerDataSync.server.luau b/src/ServerScriptService/PlayerDataSync.server.luau
+new file mode 100644
+index 0000000..6c9a681
+--- /dev/null
++++ b/src/ServerScriptService/PlayerDataSync.server.luau
+@@ -0,0 +1,39 @@
++--[[
++	Sends each player their own PlayerData through CharmSync. A client fires the remote once it
++	has registered its signals; CharmSync then sends the full data once and only changes after
++	that.
++]]
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local CharmSync = require(ReplicatedStorage.Packages.CharmSync)
++local PlayerData = require(script.Parent.PlayerData)
++local SyncedPlayerData = require(ReplicatedStorage.Shared.SyncedPlayerData)
++
++local syncRemote = Instance.new("RemoteEvent")
++syncRemote.Name = SyncedPlayerData.RemoteName
++syncRemote.Parent = ReplicatedStorage
++
++CharmSync.server.connect(function(player: Player, payloads: { CharmSync.SyncPayload })
++	syncRemote:FireClient(player, payloads)
++end)
++
++local syncedPlayers: { [Player]: true? } = {}
++
++syncRemote.OnServerEvent:Connect(function(player: Player)
++	local getData = PlayerData.getSignal(player)
++	if syncedPlayers[player] or not getData then
++		return
++	end
++	syncedPlayers[player] = true
++
++	CharmSync.server.addSignalsToClient(player, {
++		[SyncedPlayerData.getSyncKey(player.UserId)] = getData,
++	})
++end)
++
++Players.PlayerRemoving:Connect(function(player: Player)
++	syncedPlayers[player] = nil
++	CharmSync.server.removeClient(player)
++end)
+diff --git a/src/ServerScriptService/Stories/BlocksLeftLabel.story.luau b/src/ServerScriptService/Stories/BlocksLeftLabel.story.luau
+new file mode 100644
+index 0000000..ed348da
+--- /dev/null
++++ b/src/ServerScriptService/Stories/BlocksLeftLabel.story.luau
+@@ -0,0 +1,70 @@
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local StarterPlayer = game:GetService("StarterPlayer")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local UILabs = require(ReplicatedStorage.Packages.UILabs)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local playerScripts = StarterPlayer.StarterPlayerScripts
++local BlockPicker = require(playerScripts.BlockPicker)
++local BlocksLeftLabel = require(playerScripts.BlocksLeftLabel)
++
++local create = Vide.create
++local effect = Vide.effect
++local source = Vide.source
++
++local blockNames = {}
++for _, blockType in BlockTypes.List do
++	table.insert(blockNames, blockType.Name)
++end
++
++local CONTROLS = {
++	-- The game starts players at 50; higher values check the label's width.
++	BlocksLeft = UILabs.Ordered(UILabs.Slider(50, 0, 999, 1), 1),
++	-- Off shows the moment before the server's first sync, when the count is unknown.
++	IsSynced = UILabs.Ordered(true, 2),
++	SelectedBlock = UILabs.Ordered(UILabs.Choose(blockNames), 3),
++}
++
++type StoryProps = {
++	controls: {
++		BlocksLeft: () -> number,
++		IsSynced: () -> boolean,
++		SelectedBlock: () -> string,
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	local controls = props.controls
++
++	local selected = source(controls.SelectedBlock())
++	effect(function()
++		selected(controls.SelectedBlock())
++	end)
++
++	return create("Frame")({
++		Name = "Screen",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundTransparency = 1,
++
++		BlocksLeftLabel({
++			BlocksLeft = function()
++				return if controls.IsSynced() then controls.BlocksLeft() else nil
++			end,
++		}),
++		BlockPicker({
++			Selected = selected,
++			Select = function(name: string)
++				selected(name)
++			end,
++		}),
++	})
++end
++
++return {
++	summary = "The blocks-left label above the hotbar, from full to none left.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/ServerScriptService/Stories/GameUI.storybook.luau b/src/ServerScriptService/Stories/GameUI.storybook.luau
+new file mode 100644
+index 0000000..1847f41
+--- /dev/null
++++ b/src/ServerScriptService/Stories/GameUI.storybook.luau
+@@ -0,0 +1,4 @@
++return {
++	name = "Game UI",
++	storyRoots = { script.Parent },
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index 4599f52..22626a3 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -6,19 +6,20 @@
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local HotbarLayout = require(script.Parent.HotbarLayout)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
+ 
+ type BlockType = BlockTypes.BlockType
+ 
+-local TILE_SIZE = 64
++local TILE_SIZE = HotbarLayout.TileSize
+ local TILE_GAP = 8
+ local TILE_RADIUS = 8
+-local PANEL_PADDING = 8
++local PANEL_PADDING = HotbarLayout.PanelPadding
+ local PANEL_RADIUS = TILE_RADIUS + PANEL_PADDING
+-local BOTTOM_MARGIN = 24
+-local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
++local BOTTOM_MARGIN = HotbarLayout.BottomMargin
++local PANEL_COLOR = HotbarLayout.PanelColor
+ local SELECTED_COLOR = Color3.fromRGB(255, 200, 60)
+ local IDLE_STROKE_COLOR = Color3.fromRGB(70, 70, 80)
+ 
+@@ -81,7 +82,7 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 		Position = UDim2.new(0.5, 0, 1, -BOTTOM_MARGIN),
+ 		Size = UDim2.fromOffset(
+ 			count * TILE_SIZE + (count - 1) * TILE_GAP + PANEL_PADDING * 2,
+-			TILE_SIZE + PANEL_PADDING * 2
++			HotbarLayout.PanelHeight
+ 		),
+ 		BackgroundColor3 = PANEL_COLOR,
+ 		BackgroundTransparency = 0.2,
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlocksLeftLabel.luau b/src/StarterPlayer/StarterPlayerScripts/BlocksLeftLabel.luau
+new file mode 100644
+index 0000000..cd25fb0
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/BlocksLeftLabel.luau
+@@ -0,0 +1,59 @@
++--[[
++	A small label centered just above the hotbar that says how many more blocks the player may
++	place. It turns red at zero, and stays hidden until the count is known.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local HotbarLayout = require(script.Parent.HotbarLayout)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local create = Vide.create
++
++local GAP_ABOVE_HOTBAR = 8
++local TEXT_SIZE = 20
++local TEXT_COLOR = Color3.fromRGB(255, 255, 255)
++local EMPTY_TEXT_COLOR = Color3.fromRGB(255, 110, 100)
++
++export type BlocksLeftLabelProps = {
++	-- nil until the server's first sync.
++	BlocksLeft: () -> number?,
++}
++
++local function blocksLeftLabel(props: BlocksLeftLabelProps): TextLabel
++	return create("TextLabel")({
++		Name = "BlocksLeft",
++		AnchorPoint = Vector2.new(0.5, 1),
++		Position = UDim2.new(
++			0.5,
++			0,
++			1,
++			-(HotbarLayout.BottomMargin + HotbarLayout.PanelHeight + GAP_ABOVE_HOTBAR)
++		),
++		AutomaticSize = Enum.AutomaticSize.XY,
++		BackgroundColor3 = HotbarLayout.PanelColor,
++		BackgroundTransparency = 0.2,
++		FontFace = Font.fromEnum(Enum.Font.BuilderSansBold),
++		TextSize = TEXT_SIZE,
++		Visible = function()
++			return props.BlocksLeft() ~= nil
++		end,
++		Text = function()
++			local count = props.BlocksLeft() or 0
++			return if count == 1 then "1 block left" else `{count} blocks left`
++		end,
++		TextColor3 = function()
++			return if props.BlocksLeft() == 0 then EMPTY_TEXT_COLOR else TEXT_COLOR
++		end,
++
++		create("UICorner")({ CornerRadius = UDim.new(1, 0) }),
++		create("UIPadding")({
++			PaddingLeft = UDim.new(0, 12),
++			PaddingRight = UDim.new(0, 12),
++			PaddingTop = UDim.new(0, 4),
++			PaddingBottom = UDim.new(0, 4),
++		}),
++	})
++end
++
++return blocksLeftLabel
+diff --git a/src/StarterPlayer/StarterPlayerScripts/ClientPlayerData.luau b/src/StarterPlayer/StarterPlayerScripts/ClientPlayerData.luau
+new file mode 100644
+index 0000000..d3da673
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/ClientPlayerData.luau
+@@ -0,0 +1,47 @@
++--[[
++	The local player's PlayerData, synced from the server by CharmSync. UI reads it through
++	getData and never sets it: the server's next patch would overwrite a client-side change.
++]]
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Charm = require(ReplicatedStorage.Packages.Charm)
++local CharmSync = require(ReplicatedStorage.Packages.CharmSync)
++local SyncedPlayerData = require(ReplicatedStorage.Shared.SyncedPlayerData)
++
++type PlayerData = SyncedPlayerData.PlayerData
++
++local ClientPlayerData = {}
++
++-- nil until the server's first payload arrives.
++local getData, setData = Charm.signal(nil :: PlayerData?)
++local hasStarted = false
++
++ClientPlayerData.getData = getData
++
++--[[
++	Registers with CharmSync and asks the server for the data. Yields until the server's remote
++	exists, so call it after any UI is mounted or from its own thread.
++]]
++function ClientPlayerData.start()
++	if hasStarted then
++		return
++	end
++	hasStarted = true
++
++	CharmSync.client.addSignals({
++		[SyncedPlayerData.getSyncKey(Players.LocalPlayer.UserId)] = setData,
++	})
++
++	local remote = ReplicatedStorage:WaitForChild(SyncedPlayerData.RemoteName)
++	assert(remote:IsA("RemoteEvent"), "PlayerDataSync must be a RemoteEvent")
++
++	-- Connected before asking, so the first payload is not missed.
++	remote.OnClientEvent:Connect(function(payloads: { CharmSync.SyncPayload })
++		CharmSync.client.patch(payloads)
++	end)
++	remote:FireServer()
++end
++
++return ClientPlayerData
+diff --git a/src/StarterPlayer/StarterPlayerScripts/HotbarLayout.luau b/src/StarterPlayer/StarterPlayerScripts/HotbarLayout.luau
+new file mode 100644
+index 0000000..9c3538b
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/HotbarLayout.luau
+@@ -0,0 +1,17 @@
++--[[
++	Sizes of the hotbar, shared with UI that sits on top of it.
++]]
++
++local TILE_SIZE = 64
++local PANEL_PADDING = 8
++
++local HotbarLayout = {
++	TileSize = TILE_SIZE,
++	PanelPadding = PANEL_PADDING,
++	PanelHeight = TILE_SIZE + PANEL_PADDING * 2,
++	-- Gap between the bottom of the screen and the hotbar.
++	BottomMargin = 24,
++	PanelColor = Color3.fromRGB(28, 28, 34),
++}
++
++return table.freeze(HotbarLayout)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 3385ae6..75954de 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -3,7 +3,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockPicker = require(script.Parent.BlockPicker)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local BlocksLeftLabel = require(script.Parent.BlocksLeftLabel)
++local ClientPlayerData = require(script.Parent.ClientPlayerData)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
++local VideCharm = require(ReplicatedStorage.Packages.VideCharm)
+ 
+ local create = Vide.create
+ local mount = Vide.mount
+@@ -18,9 +21,17 @@ BlockPlacer.BlockTypeChanged:Connect(function(name: string)
+ end)
+ 
+ local function app()
++	local blocksLeft = VideCharm.useSignalState(function()
++		local data = ClientPlayerData.getData()
++		return if data then data.BlocksLeft else nil
++	end)
++
+ 	return create("ScreenGui")({
+ 		Name = "HotbarGui",
+ 
++		BlocksLeftLabel({
++			BlocksLeft = blocksLeft,
++		}),
+ 		BlockPicker({
+ 			Selected = selected,
+ 			Select = BlockPlacer.setBlockType,
+@@ -30,4 +41,5 @@ end
+ 
+ mount(app, playerGui)
+ 
++task.spawn(ClientPlayerData.start)
+ BlockPlacer.start()

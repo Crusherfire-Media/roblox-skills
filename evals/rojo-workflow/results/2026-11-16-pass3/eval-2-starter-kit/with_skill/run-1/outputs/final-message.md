@@ -1,0 +1,11 @@
+I added the starter kit as three new files. Lint, format and type checks all pass, but I haven't run it in Studio or a playtest, so it hasn't been tested in game yet. Nothing is committed.
+
+- **`src/ReplicatedStorage/Shared/StarterKit.model.json`** becomes a Configuration named `ReplicatedStorage.Shared.StarterKit` with number attributes Brick 20, Dirt 20, Grass 10, Window 0, Wood 10. Designers can change them in the Properties window. Because this file defines them, a change made only in Studio gets overwritten on the next sync, so new defaults should go into the file.
+- **`src/ServerScriptService/StarterKit.server.luau`**: when a player joins, it sets one number attribute on the Player for each block type in `BlockTypes.List`. The counts are read at join time, so changes made during a playtest apply to the next player who joins. If an attribute is missing, not a number, negative or infinite, it logs a warning and gives 0. Decimals are rounded down.
+- **`src/StarterPlayer/StarterPlayerScripts/StarterKit.client.luau`** waits until every block type's count is on the local player, then shows one notification, for example "You got Brick x20, Dirt x20, Grass x10, Wood x10".
+  - Block types with a count of 0 (Window, by default) are left out of the list, and if every count is 0 no notification appears.
+  - It retries `SetCore("SendNotification", ...)` for up to about 10 seconds, because the call can fail if it runs before Roblox's notification system is ready.
+
+**To check in a playtest:** the notification appears once, the counts show as attributes on your Player, and changing a value on `StarterKit` changes what the next joining player gets.
+
+These are standalone scripts like the existing `Main` scripts, since this project doesn't use Module Loader. The new block-count attributes use the block type names directly (e.g. `Brick`) on the Player. If you later add other Player attributes, a prefix such as `Block_Brick` would keep them from clashing, but that changes the format you asked for, so I left it as is.

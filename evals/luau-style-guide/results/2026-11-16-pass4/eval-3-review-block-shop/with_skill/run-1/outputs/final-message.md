@@ -1,0 +1,12 @@
+I wrote the review to `docs/review.md` and didn't touch the script. It has 10 findings, ordered by impact, each with where it is, what's wrong and what to do instead. The most important ones:
+
+1. **The remote handlers trust what the client sends.** An exploiter can send NaN (not-a-number) as the amount. It passes every range check, so the coin balance gets saved as NaN and the player can then place unlimited blocks of that type. Fractional amounts and bad block types or positions also get through, or crash the handlers.
+2. **Coins are read from and written to the DataStore on every purchase, with no error handling.** Two purchase requests sent together both read the same balance, so the player pays once and gets the blocks twice. Spamming purchases also uses up the server's DataStore request limit. The fix is to load coins once when the player joins, keep them in memory, and save on leave and on a timer.
+3. **Removing a block whose owner has left adds it to the remover's stock.** That would let players farm free blocks with an alt account. Bug 4 currently stops this code from running, so fixing 4 on its own would open the exploit. Removal also has no reach check, so players can delete their own blocks from anywhere on the map.
+4. **The "anyone can clear a block whose owner left" path always errors.** `getOwnerName` returns nothing when no player matches, and `tostring()` with no argument throws.
+5. **The handlers crash if a player has no stock entry.** That happens for players who joined before the script ran (common in Studio Play Solo) and for events that arrive just after a player leaves. Bought blocks that weren't placed are also lost when the player leaves, even though their coins were spent.
+6. **Players can't turn receipts off**, because `false or true` gives `true` (line 99).
+
+The rest are smaller: client requests can spam the server output, `placeBlock` takes boolean arguments that are unclear at the call site, prices are stored only in the server script, and there are style and typing fixes (`--!strict`, abbreviated names). The review ends with a suggested order of work.
+
+I didn't run the project's checks (luau-lsp, selene, StyLua). A shell command to list and print the project files was blocked by the permission system, so I read the files with the file tools instead.

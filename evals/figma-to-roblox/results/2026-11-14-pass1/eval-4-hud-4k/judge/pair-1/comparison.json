@@ -1,0 +1,127 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "A gets every rubric value right: halved sizes, placement, layout, fills, a Center stroke, and two native UIShadows. B opts out of the top-bar safe area, replaces both shadows with one 9-slice image sized through a lagging AbsoluteSize loop, and never sets the stroke position. Both read 1.5 line height correctly from 24/16.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Reference size",
+          "score": 5,
+          "note": "Theme.luau halves every value: CardWidth 360, CardPadding 16, CardGap 8, CardRadius 16, title 24, body 16, count 16, PillHeight 44, coin text 24."
+        },
+        {
+          "criterion": "Constraints",
+          "score": 5,
+          "note": "Card uses AnchorPoint (1,0) and Position (1,-24,0,80); pill uses AnchorPoint (0.5,0) and Position (0.5,0,0,20); nothing opts out of the safe area."
+        },
+        {
+          "criterion": "Auto layout and text",
+          "score": 4,
+          "note": "Vertical UIListLayout (Padding 8), UIPadding 16, AutomaticSize Y; body is TextWrapped with LineHeight 24/16 = 1.5; title and track fill the free width (track through UIFlexItem Fill). A UISizeConstraint caps body growth at 4 lines."
+        },
+        {
+          "criterion": "Fills and strokes",
+          "score": 5,
+          "note": "Card UIGradient has the default Rotation 0 on a white base at transparency 0.06; fill gradient Rotation 90 on white; card stroke is 2 px, BorderStrokePosition Center, 0.86; coin text has a Contextual 2 px UIStroke."
+        },
+        {
+          "criterion": "Shadows",
+          "score": 5,
+          "note": "shadow() creates two UIShadows: (0,4) blur 12 at 0.65 and (0,1) blur 2 at 0.8."
+        },
+        {
+          "criterion": "Native or image",
+          "score": 5,
+          "note": "Fill width comes from progressFraction(read(Progress), read(Goal)); pill is a plain fill at 0.4 transparency; only the coin and quest icons are images, from one sprite sheet."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Main.client creates sources from HudData, updates them in a batch on Changed, and mounts both components; luau-lsp, selene, and StyLua pass."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Reference size",
+          "score": 5,
+          "note": "CARD_WIDTH 360, PADDING 16, GAP 8, radius 16, text sizes 24/16/16, pill 44 tall with 24 px coin text."
+        },
+        {
+          "criterion": "Constraints",
+          "score": 2,
+          "note": "Anchors and positions are correct, but Main sets ScreenInsets = DeviceSafeInsets, which opts out of the top-bar safe area, so the pill sits under the top bar."
+        },
+        {
+          "criterion": "Auto layout and text",
+          "score": 4,
+          "note": "Vertical list with Padding 8, UIPadding 16, body LineHeight 24/16 wrapped with AutomaticSize Y, track uses UIFlexItem Fill; capped at 4 lines. The outer card height comes from an AbsoluteSize feedback loop."
+        },
+        {
+          "criterion": "Fills and strokes",
+          "score": 4,
+          "note": "Gradient Rotation 0 on white at 0.06, fill gradient 90, card stroke 2 px at 0.86, coin stroke 2 px Contextual; but BorderStrokePosition is never set to Center."
+        },
+        {
+          "criterion": "Shadows",
+          "score": 1,
+          "note": "One 9-slice ImageLabel with a placeholder asset instead of two UIShadows; the second shadow is missing."
+        },
+        {
+          "criterion": "Native or image",
+          "score": 3,
+          "note": "Native fill sized from progressRatio() and a plain pill fill at 0.5, but the shadow and the coin glow are extra images beyond the two icons."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 4,
+          "note": "Each component subscribes to HudData.Changed itself and checks pass, but the inset change and the frame-lagged shadow sizing are regressions."
+        }
+      ],
+      "overall_score": 5.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Every value is halved correctly and kept in a central Theme file",
+        "Two native UIShadows with the exact design values",
+        "Stroke sets BorderStrokePosition Center as the design asks",
+        "Components are reactive and take their data as props"
+      ],
+      "weaknesses": [
+        "Text is capped at 2 title lines and 4 body lines, so very long quests are cut rather than growing the card",
+        "Pill transparency changed from 0.5 to 0.4 (the change is explained in a comment)",
+        "Rewrites Main.client syntax beyond what the task needed"
+      ]
+    },
+    "B": {
+      "score": 5.5,
+      "strengths": [
+        "Sizes are halved correctly",
+        "Live data is wired with cleanup",
+        "Coin stroke and gradients are correct"
+      ],
+      "weaknesses": [
+        "DeviceSafeInsets puts the HUD under the top bar",
+        "Image shadow instead of UIShadow, and only one shadow",
+        "Fragile AbsoluteSize feedback loop sets the card height",
+        "Stroke position is not Center"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 5.5
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

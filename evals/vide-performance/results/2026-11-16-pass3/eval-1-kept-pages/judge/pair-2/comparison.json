@@ -1,0 +1,122 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both keep pages and the menu correctly, keep the slide, and stop the Heartbeat when unseen. A keeps the rainbow running through the slide-out and restarts it at red as a rebuilt swatch would, names the remaining behaviour difference, and gives a fuller verification note with an instance-count script and eye checks. B freezes the rainbow during the slide-out and its note is thinner.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Pages built once and kept",
+          "score": 5,
+          "note": "`indexes(pageKeys, ...)` over a `visited` map that only grows, with `page.Visible = isOnShow()` in an effect."
+        },
+        {
+          "criterion": "Menu built once and kept",
+          "score": 5,
+          "note": "`show(hasOpenedMenu, ...)` in Main.client.luau; `hasOpenedMenu` never goes back to false."
+        },
+        {
+          "criterion": "Slide plays every time",
+          "score": 5,
+          "note": "`Present = present() and isMenuOpen()` drives the spring; panel `Visible = isShowing` (Present or slide < 1) keeps it on screen until the slide-out ends."
+        },
+        {
+          "criterion": "Per-frame work stops when unseen",
+          "score": 5,
+          "note": "`whileShowing` connects Heartbeat only while the showing context (menu showing and Colors on show) is true, including during the slide-out."
+        },
+        {
+          "criterion": "Kept page behaves like a fresh one",
+          "score": 5,
+          "note": "Sets CanvasPosition to zero when the page is shown again and resets hue to 0 each time it is shown; the note names the reopen-during-slide-out difference."
+        },
+        {
+          "criterion": "Perf note",
+          "score": 5,
+          "note": "Has a before table, MicroProfiler steps, a per-frame DescendantAdded counting script, eye checks (slide, scroll, rainbow, tint outline) and a Script Profiler check."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 4,
+          "note": "All checks pass and behaviour is kept; the context-based `showingScope` helper adds some indirection."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Pages built once and kept",
+          "score": 5,
+          "note": "`values(visitedTabs, ...)` over a list of visited tabs that only grows, with `Visible = visible` on each page."
+        },
+        {
+          "criterion": "Menu built once and kept",
+          "score": 5,
+          "note": "`show(hasMenuOpened, ...)`, which is set only on open and never cleared."
+        },
+        {
+          "criterion": "Slide plays every time",
+          "score": 5,
+          "note": "`Present = mounted() and isMenuOpen()`; panel Visible is true while `Present() or slide() < 1`."
+        },
+        {
+          "criterion": "Per-frame work stops when unseen",
+          "score": 4,
+          "note": "The effect connects Heartbeat only while `visible() and props.Present()`, but this stops the cycle the moment the menu starts closing, so the swatch freezes during the slide-out."
+        },
+        {
+          "criterion": "Kept page behaves like a fresh one",
+          "score": 4,
+          "note": "`scrollToTopWhenShown` resets the scroll, but the hue isn't reset and the frozen rainbow during the slide-out isn't mentioned."
+        },
+        {
+          "criterion": "Perf note",
+          "score": 3,
+          "note": "Has MicroProfiler steps and an Explorer/descendant-count check, but no before table and no explicit list of eye checks for slide, highlight or tint."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 4,
+          "note": "Checks pass and the code is clear; it writes a source from inside an effect to track visited tabs."
+        }
+      ],
+      "overall_score": 7.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Closed menu matches the old one closely: rainbow keeps cycling during the slide-out and restarts at red",
+        "Thorough note with a runnable instance-count script and a list of eye checks",
+        "Names the one behaviour change in the note"
+      ],
+      "weaknesses": [
+        "The context and showingScope helpers are more complex than needed",
+        "pageKeys updates a table outside the reactive graph"
+      ]
+    },
+    "B": {
+      "score": 7.5,
+      "strengths": [
+        "Simple, readable visited-tabs tracking with `values` and a typed PAGES table",
+        "Scroll reset is factored into a clear helper"
+      ],
+      "weaknesses": [
+        "Rainbow freezes during the slide-out, a small visible change",
+        "Note is thinner on measuring instances and on what to check by eye"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 7.5
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

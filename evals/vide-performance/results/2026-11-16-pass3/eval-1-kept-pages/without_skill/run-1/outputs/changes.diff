@@ -1,0 +1,245 @@
+diff --git a/docs/perf/build-menu.md b/docs/perf/build-menu.md
+new file mode 100644
+index 0000000..63764f6
+--- /dev/null
++++ b/docs/perf/build-menu.md
+@@ -0,0 +1,40 @@
++# Build menu hitches
++
++## Problem
++
++The menu rebuilt its pages every time they were shown. `switch(props.Tab)` in `BuildMenu.luau`
++destroyed the old page and created the new one on every tab change: about 450 instances for
++Shapes (64 cards) and about 370 for Colors (121 swatches). `show(isMenuOpen, ...)` in
++`Main.client.luau` also destroyed the whole menu after it slid out, so reopening rebuilt the
++current page. That gave a 30–40 ms frame each time.
++
++## Changes
++
++- **Pages are kept** (`BuildMenu.luau`, `keptPage`). Each page is built the first time its tab is
++  shown. After that, switching tabs only sets `Visible` on two frames.
++- **The menu is kept** (`Main.client.luau`). It is built on the first open and never destroyed.
++  It still slides in and out on `isMenuOpen`. Once it has fully slid out, `BuildMenu` sets
++  `Visible = false` on it so it costs nothing to render while closed.
++- **Same look as before.** A page that is shown again scrolls back to the top, and the rainbow
++  swatch restarts at hue 0. A freshly built page did both of these. The first open still slides
++  in from below the screen.
++- **No hidden work.** The rainbow swatch's Heartbeat update skips its work while the Colors page
++  isn't visible (menu closed or another tab selected). Before, the page didn't exist then.
++
++The first time you open the menu, and the first visit to each tab, still costs about what it did
++before. That one-time cost is expected.
++
++## Checking it in Studio
++
++1. Play (F5). Open the MicroProfiler with Ctrl+F6 (Ctrl+Alt+F6 shows it detailed).
++2. Open the menu with M. Click Shapes, then Colors, once each. These first visits still spike;
++   they build the pages.
++3. Pause the profiler (Ctrl+P, or the Pause button) and switch tabs and open/close the menu several
++   times. Then look at the frames where you clicked. Switching to Shapes or Colors, and reopening
++   the menu while it was on either one, should now look like normal ~8 ms frames, not 30–40 ms.
++4. To count instances, run this in the command bar (client view) before and after switching tabs.
++   The count should stay the same after the first visit to each tab:
++   ```lua
++   print(#game.Players.LocalPlayer.PlayerGui.BuildMenuGui:GetDescendants())
++   ```
++   With the menu closed you should still see `BuildMenuGui.BuildMenu`, kept with `Visible = false`.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau b/src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau
+index 5f1730b..c9fb377 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau
+@@ -3,6 +3,12 @@
+ 	palette of tints for the next blocks plus a rainbow swatch whose hue keeps cycling, and Shapes
+ 	lists the block shapes. The panel slides up from below the screen when it opens and back down
+ 	when it closes.
++
++	Performance: each page is built the first time its tab is shown and then kept, so switching
++	tabs (or reopening the menu) only flips Visible instead of creating hundreds of instances.
++	Main.client.luau likewise keeps the whole menu after its first open. To look the same as a
++	freshly built page, a page scrolls back to the top and the rainbow restarts at hue 0 each time
++	it is shown, and the rainbow only animates while it can be seen.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+@@ -13,9 +19,11 @@ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local cleanup = Vide.cleanup
+ local create = Vide.create
++local derive = Vide.derive
++local effect = Vide.effect
++local show = Vide.show
+ local source = Vide.source
+ local spring = Vide.spring
+-local switch = Vide.switch
+ 
+ type BlockType = BlockTypes.BlockType
+ 
+@@ -85,9 +93,19 @@ local function swatch(props: BuildMenuProps, color: Color3, layoutOrder: number)
+ 	})
+ end
+ 
+-local function rainbowSwatch(props: BuildMenuProps): TextButton
++local function rainbowSwatch(props: BuildMenuProps, shown: () -> boolean): TextButton
+ 	local hue = source(0)
++	-- Restart the cycle each time the page is shown, like a freshly built swatch would.
++	effect(function()
++		if shown() then
++			hue(0)
++		end
++	end)
+ 	cleanup(RunService.Heartbeat:Connect(function(deltaTime: number)
++		-- Don't animate (and update the property every frame) while nobody can see it.
++		if not shown() then
++			return
++		end
+ 		hue((hue() + deltaTime * RAINBOW_SPEED) % 1)
+ 	end))
+ 
+@@ -108,7 +126,7 @@ local function rainbowSwatch(props: BuildMenuProps): TextButton
+ 	})
+ end
+ 
+-local function colorsPage(props: BuildMenuProps): ScrollingFrame
++local function colorsPage(props: BuildMenuProps, shown: () -> boolean): ScrollingFrame
+ 	local swatches = {}
+ 	for row = 1, PALETTE_ROWS do
+ 		for column = 1, PALETTE_COLUMNS do
+@@ -136,7 +154,7 @@ local function colorsPage(props: BuildMenuProps): ScrollingFrame
+ 			CellPadding = UDim2.fromOffset(SWATCH_GAP, SWATCH_GAP),
+ 		}),
+ 
+-		rainbowSwatch(props),
++		rainbowSwatch(props, shown),
+ 		swatches,
+ 	})
+ end
+@@ -288,19 +306,65 @@ local function tabButton(props: BuildMenuProps, tab: Tab, layoutOrder: number):
+ 	})
+ end
+ 
++--[[
++	Builds a page the first time `shown` is true, then keeps it: afterwards being shown or hidden
++	only sets Visible. Each time it is shown again it scrolls back to the top, as a new page would.
++]]
++local function keptPage(shown: () -> boolean, build: () -> GuiObject): () -> GuiObject?
++	local visited = source(false)
++	effect(function()
++		if shown() then
++			visited(true)
++		end
++	end)
++
++	return show(visited, function()
++		local page = build()
++		effect(function()
++			local isShown = shown()
++			page.Visible = isShown
++			if isShown and page:IsA("ScrollingFrame") then
++				page.CanvasPosition = Vector2.zero
++			end
++		end)
++		return page
++	end)
++end
++
+ local function buildMenu(props: BuildMenuProps): Frame
+ 	-- 0 is in place; 1 is fully below the screen.
+ 	local slide = spring(function(): number
+ 		return if props.Present() then 0 else 1
+ 	end, SLIDE_SECONDS)
+ 
++	-- The menu is kept after it closes, so hide it once it has fully slid out.
++	local panelVisible = derive(function()
++		return props.Present() or slide() ~= 1
++	end)
++
+ 	local tabs = {}
++	local pages = {}
++	local builders: { [Tab]: (shown: () -> boolean) -> GuiObject } = {
++		Blocks = blocksPage,
++		Colors = function(shown)
++			return colorsPage(props, shown)
++		end,
++		Shapes = shapesPage,
++	}
+ 	for index, tab in TABS do
+ 		tabs[index] = tabButton(props, tab, index)
++
++		local shown = derive(function()
++			return props.Tab() == tab and panelVisible()
++		end)
++		pages[index] = keptPage(shown, function()
++			return builders[tab](shown)
++		end)
+ 	end
+ 
+ 	return create("Frame")({
+ 		Name = "BuildMenu",
++		Visible = panelVisible,
+ 		AnchorPoint = Vector2.new(0.5, 0.5),
+ 		Position = function()
+ 			return UDim2.new(0.5, 0, 0.5 + slide(), slide() * PANEL_SIZE.Y)
+@@ -335,13 +399,7 @@ local function buildMenu(props: BuildMenuProps): Frame
+ 			Size = UDim2.new(1, 0, 1, -(TAB_HEIGHT + PANEL_PADDING)),
+ 			BackgroundTransparency = 1,
+ 
+-			switch(props.Tab)({
+-				Blocks = blocksPage,
+-				Colors = function()
+-					return colorsPage(props)
+-				end,
+-				Shapes = shapesPage,
+-			}),
++			pages,
+ 		}),
+ 	})
+ end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index fdb61ce..d7ca222 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -7,6 +7,7 @@ local BuildMenu = require(script.Parent.BuildMenu)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
++local effect = Vide.effect
+ local mount = Vide.mount
+ local show = Vide.show
+ local source = Vide.source
+@@ -43,20 +44,32 @@ local function menuButton()
+ end
+ 
+ local function app()
++	local menuBuilt = source(false)
++	effect(function()
++		if isMenuOpen() then
++			menuBuilt(true)
++		end
++	end)
++
+ 	return create("ScreenGui")({
+ 		Name = "BuildMenuGui",
+ 
+ 		menuButton(),
+ 
+-		show(isMenuOpen, function(_, present: () -> boolean)
++		-- Build the menu on its first open and keep it, so reopening doesn't rebuild it. It
++		-- slides in and out on isMenuOpen and hides itself once it has slid out.
++		show(menuBuilt, function(_, built: () -> boolean)
+ 			return BuildMenu.component({
+ 				Tab = tab,
+ 				SelectTab = tab,
+ 				Tint = tint,
+ 				SelectTint = tint,
+-				Present = present,
+-			}),
+-				BuildMenu.SlideSeconds
++				-- `built` is false while the menu is being created, so it starts below the screen
++				-- and slides in on the first open, as before.
++				Present = function()
++					return built() and isMenuOpen()
++				end,
++			})
+ 		end),
+ 	})
+ end

@@ -1,0 +1,87 @@
+diff --git a/src/ServerScriptService/Stories/BlockPicker.story.luau b/src/ServerScriptService/Stories/BlockPicker.story.luau
+new file mode 100644
+index 0000000..cf557de
+--- /dev/null
++++ b/src/ServerScriptService/Stories/BlockPicker.story.luau
+@@ -0,0 +1,54 @@
++--!strict
++
++const UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const BlockPicker = require("@game/StarterPlayer/StarterPlayerScripts/BlockPicker")
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++const effect = Vide.effect
++const source = Vide.source
++
++const BLOCK_NAMES = {}
++for index, blockType in BlockTypes.List do
++	BLOCK_NAMES[index] = blockType.Name
++end
++
++const CONTROLS = {
++	Title = UILabs.Ordered("Blocks", 1),
++	-- Clicking a tile in the preview also changes the selection.
++	Selected = UILabs.Ordered(UILabs.Choose(BLOCK_NAMES), 2),
++}
++
++type StoryProps = {
++	controls: {
++		Title: () -> string,
++		Selected: () -> string,
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	const controls = props.controls
++
++	-- Two writers, the control and tile clicks, so derive cannot express it.
++	const selected = source(controls.Selected())
++	effect(function()
++		selected(controls.Selected())
++	end)
++
++	return BlockPicker({
++		Title = controls.Title,
++		Selected = selected,
++		Select = function(name: string)
++			selected(name)
++		end,
++	})
++end
++
++return {
++	summary = "The block picker. Click a tile to select it, as in game.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/ServerScriptService/Stories/GameUI.storybook.luau b/src/ServerScriptService/Stories/GameUI.storybook.luau
+new file mode 100644
+index 0000000..00783b8
+--- /dev/null
++++ b/src/ServerScriptService/Stories/GameUI.storybook.luau
+@@ -0,0 +1,8 @@
++--!strict
++
++const ServerScriptService = game:GetService("ServerScriptService")
++
++return {
++	name = "Game UI",
++	storyRoots = { ServerScriptService.Stories },
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index c12314d..a208a29 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -75,7 +75,7 @@ local function tile(props: TileProps): TextButton
+ end
+ 
+ export type BlockPickerProps = {
+-	Title: string,
++	Title: string | () -> string,
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
+ }

@@ -1,0 +1,214 @@
+diff --git a/src/ServerScriptService/BlockInventory.luau b/src/ServerScriptService/BlockInventory.luau
+new file mode 100644
+index 0000000..b1cecd3
+--- /dev/null
++++ b/src/ServerScriptService/BlockInventory.luau
+@@ -0,0 +1,208 @@
++--!strict
++-- Tracks how many of each block type every player has. Counts are loaded from the
++-- "BlockInventory" DataStore when a player joins and dropped when they leave.
++--
++-- Every function is safe to call for a player whose counts haven't loaded yet or who has
++-- already left: reads return nil and changes fail with "NotLoaded".
++
++local DataStoreService = game:GetService("DataStoreService")
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++-- Block type name to count. Only names that pass BlockTypes.isBlockType are ever stored.
++type Counts = { [string]: number }
++
++-- Why a change to a player's counts was refused.
++-- NotLoaded: the player's counts are still loading, or the player has left.
++-- UnknownBlockType: the block type isn't one of BlockTypes.Order.
++-- InvalidAmount: the amount isn't a whole number above zero.
++-- NoneLeft: the player has none of that block type to take.
++-- AtLimit: the player already holds the most they can get back by removing blocks.
++export type Failure = "NotLoaded" | "UnknownBlockType" | "InvalidAmount" | "NoneLeft" | "AtLimit"
++
++local STORE_NAME = "BlockInventory"
++local STARTING_COUNT = 20
++-- The most of one type a player can reach by removing blocks. Grants can go past it.
++local MAX_COUNT = 99
++local LOAD_ATTEMPTS = 3
++local LOAD_RETRY_DELAY = 1
++
++local BlockInventory = {}
++
++-- Counts for players whose load has finished, keyed by the Player instance so a player who
++-- rejoins gets a fresh entry that an older, still-running load can't touch.
++local countsByPlayer: { [Player]: Counts } = {}
++-- Players whose load is running. Removed when they leave, so a late load is thrown away.
++local loadingPlayers: { [Player]: true } = {}
++
++local store: DataStore? = nil
++do
++	local ok, result = pcall(DataStoreService.GetDataStore, DataStoreService, STORE_NAME)
++	if ok then
++		store = result
++	else
++		warn(`BlockInventory: couldn't open DataStore "{STORE_NAME}", using defaults: {result}`)
++	end
++end
++
++local function isCount(value: unknown): boolean
++	return type(value) == "number" and value >= 0 and value < math.huge and value % 1 == 0
++end
++
++local function isPositiveWholeNumber(value: unknown): boolean
++	return type(value) == "number" and value > 0 and value < math.huge and value % 1 == 0
++end
++
++local function startingCounts(): Counts
++	local counts: Counts = {}
++	for _, blockType in BlockTypes.Order do
++		counts[blockType] = STARTING_COUNT
++	end
++	return counts
++end
++
++-- Builds counts from saved data, keeping only valid entries for known block types. Types
++-- missing from the save (for example ones added since it was written) start at the default.
++local function countsFromSave(saved: unknown): Counts
++	local counts = startingCounts()
++	if type(saved) ~= "table" then
++		return counts
++	end
++	local savedTable = saved :: { [unknown]: unknown }
++	for _, blockType in BlockTypes.Order do
++		local value = savedTable[blockType]
++		if isCount(value) then
++			counts[blockType] = value :: number
++		end
++	end
++	return counts
++end
++
++local function fetchSave(player: Player): (boolean, unknown)
++	local activeStore = store
++	if activeStore == nil then
++		return false, nil
++	end
++	local key = `player_{player.UserId}`
++	local lastError: unknown = nil
++	for attempt = 1, LOAD_ATTEMPTS do
++		local ok, result = pcall(activeStore.GetAsync, activeStore, key)
++		if ok then
++			return true, result
++		end
++		lastError = result
++		if attempt < LOAD_ATTEMPTS then
++			task.wait(LOAD_RETRY_DELAY)
++			-- No point retrying for a player who has left.
++			if not loadingPlayers[player] then
++				return false, nil
++			end
++		end
++	end
++	warn(`BlockInventory: couldn't load {key}, starting with defaults: {lastError}`)
++	return false, nil
++end
++
++local function loadPlayer(player: Player)
++	if loadingPlayers[player] or countsByPlayer[player] ~= nil then
++		return
++	end
++	loadingPlayers[player] = true
++	local loaded, saved = fetchSave(player)
++	-- Cleared by unloadPlayer if the player left while the load was running.
++	if not loadingPlayers[player] then
++		return
++	end
++	loadingPlayers[player] = nil
++	countsByPlayer[player] = if loaded then countsFromSave(saved) else startingCounts()
++end
++
++local function unloadPlayer(player: Player)
++	loadingPlayers[player] = nil
++	countsByPlayer[player] = nil
++end
++
++-- Returns how many of a block type the player has, or nil if their counts aren't loaded or the
++-- block type is unknown.
++function BlockInventory.getCount(player: Player, blockType: unknown): number?
++	local counts = countsByPlayer[player]
++	if counts == nil or not BlockTypes.isBlockType(blockType) then
++		return nil
++	end
++	return counts[blockType :: string]
++end
++
++-- Whether the player's counts have loaded.
++function BlockInventory.isLoaded(player: Player): boolean
++	return countsByPlayer[player] ~= nil
++end
++
++-- Takes one block when a player places it. Returns true on success, or false and the reason.
++function BlockInventory.take(player: Player, blockType: unknown): (boolean, Failure?)
++	local counts = countsByPlayer[player]
++	if counts == nil then
++		return false, "NotLoaded"
++	end
++	if not BlockTypes.isBlockType(blockType) then
++		return false, "UnknownBlockType"
++	end
++	local typed = blockType :: string
++	local count = counts[typed]
++	if count <= 0 then
++		return false, "NoneLeft"
++	end
++	counts[typed] = count - 1
++	return true, nil
++end
++
++-- Gives one block back when a player removes it. Refused once the player holds MAX_COUNT of
++-- that type. Returns true on success, or false and the reason.
++function BlockInventory.giveBack(player: Player, blockType: unknown): (boolean, Failure?)
++	local counts = countsByPlayer[player]
++	if counts == nil then
++		return false, "NotLoaded"
++	end
++	if not BlockTypes.isBlockType(blockType) then
++		return false, "UnknownBlockType"
++	end
++	local typed = blockType :: string
++	local count = counts[typed]
++	if count >= MAX_COUNT then
++		return false, "AtLimit"
++	end
++	counts[typed] = count + 1
++	return true, nil
++end
++
++-- Gives blocks from daily rewards, admin commands, and similar. Not limited by MAX_COUNT.
++-- Returns true on success, or false and the reason.
++function BlockInventory.grant(
++	player: Player,
++	blockType: unknown,
++	amount: unknown
++): (boolean, Failure?)
++	local counts = countsByPlayer[player]
++	if counts == nil then
++		return false, "NotLoaded"
++	end
++	if not BlockTypes.isBlockType(blockType) then
++		return false, "UnknownBlockType"
++	end
++	if not isPositiveWholeNumber(amount) then
++		return false, "InvalidAmount"
++	end
++	local typed = blockType :: string
++	counts[typed] += amount :: number
++	return true, nil
++end
++
++Players.PlayerAdded:Connect(loadPlayer)
++Players.PlayerRemoving:Connect(unloadPlayer)
++-- Players who joined before this module was first required.
++for _, player in Players:GetPlayers() do
++	task.spawn(loadPlayer, player)
++end
++
++return BlockInventory

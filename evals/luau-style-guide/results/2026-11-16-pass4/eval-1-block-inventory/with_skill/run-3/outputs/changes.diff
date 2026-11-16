@@ -1,0 +1,159 @@
+diff --git a/src/ServerScriptService/BlockInventory.luau b/src/ServerScriptService/BlockInventory.luau
+new file mode 100644
+index 0000000..1328103
+--- /dev/null
++++ b/src/ServerScriptService/BlockInventory.luau
+@@ -0,0 +1,153 @@
++--!strict
++-- Tracks how many of each block type every player has left to place.
++
++local DataStoreService = game:GetService("DataStoreService")
++local Players = game:GetService("Players")
++local RunService = game:GetService("RunService")
++
++local BlockTypes = require("../ReplicatedStorage/Shared/BlockTypes")
++
++local DATA_STORE_NAME = "BlockInventory"
++local STARTING_COUNT = 20
++-- Only returned blocks stop here; rewards and admin grants may go past it.
++local MAX_RETURNED_COUNT = 99
++
++type BlockType = BlockTypes.BlockType
++type Counts = { [BlockType]: number }
++
++export type TakeFailure = "NotLoaded" | "OutOfBlocks"
++export type ReturnFailure = "NotLoaded" | "AtLimit"
++export type GrantFailure = "NotLoaded"
++
++local countsByPlayer: { [Player]: Counts? } = {}
++-- A load that finishes after its player left finds them missing here and is
++-- dropped, so it cannot bring back counts for a player who is gone.
++local pendingLoads: { [Player]: true? } = {}
++
++local function isValidCount(value: unknown): boolean
++	return type(value) == "number" and value >= 0 and value % 1 == 0 and value < math.huge
++end
++
++local function buildCounts(savedCounts: unknown): Counts
++	local savedTable: { [unknown]: unknown } = {}
++	if type(savedCounts) == "table" then
++		savedTable = savedCounts :: { [unknown]: unknown }
++	end
++
++	local counts: Counts = {}
++	for _, blockType in BlockTypes.Order do
++		local savedCount = savedTable[blockType]
++		counts[blockType :: BlockType] = if isValidCount(savedCount)
++			then savedCount :: number
++			else STARTING_COUNT
++	end
++	return counts
++end
++
++local function loadCountsAsync(player: Player)
++	pendingLoads[player] = true
++
++	-- GetDataStore throws in places without API access, and GetAsync throws
++	-- on outages and throttling.
++	local success, savedCounts = pcall(function()
++		local dataStore = DataStoreService:GetDataStore(DATA_STORE_NAME)
++		local savedValue: unknown = dataStore:GetAsync(`player_{player.UserId}`)
++		return savedValue
++	end)
++	if not success then
++		warn(`Failed to load block inventory for {player.UserId}: {savedCounts}`)
++	end
++
++	if not pendingLoads[player] then
++		return
++	end
++	pendingLoads[player] = nil
++	countsByPlayer[player] = buildCounts(if success then savedCounts else nil)
++end
++
++local function onPlayerRemoving(player: Player)
++	pendingLoads[player] = nil
++	countsByPlayer[player] = nil
++end
++
++local function getPlayerCounts(player: Player, blockType: BlockType): Counts?
++	if not BlockTypes.isBlockType(blockType) then
++		error(`Unknown block type {blockType}`)
++	end
++	return countsByPlayer[player]
++end
++
++local Module = {}
++
++--[[
++	Takes one block for placing. Fails with "NotLoaded" before the player's
++	counts load or after they leave, and with "OutOfBlocks" at zero.
++]]
++function Module:TakeBlock(player: Player, blockType: BlockType): (boolean, TakeFailure?)
++	local counts = getPlayerCounts(player, blockType)
++	if not counts then
++		return false, "NotLoaded"
++	end
++	if counts[blockType] <= 0 then
++		return false, "OutOfBlocks"
++	end
++	counts[blockType] -= 1
++	return true, nil
++end
++
++--[[
++	Gives back one block when the player removes a placed one. Fails with
++	"AtLimit", returning nothing, when they already hold 99 or more.
++]]
++function Module:ReturnBlock(player: Player, blockType: BlockType): (boolean, ReturnFailure?)
++	local counts = getPlayerCounts(player, blockType)
++	if not counts then
++		return false, "NotLoaded"
++	end
++	if counts[blockType] >= MAX_RETURNED_COUNT then
++		return false, "AtLimit"
++	end
++	counts[blockType] += 1
++	return true, nil
++end
++
++--[[
++	Gives blocks from rewards or admin commands, ignoring the 99 limit.
++	`amount` must be a positive integer.
++]]
++function Module:GrantBlocks(
++	player: Player,
++	blockType: BlockType,
++	amount: number
++): (boolean, GrantFailure?)
++	assert(amount > 0 and amount % 1 == 0, "Grant amount must be a positive integer")
++	local counts = getPlayerCounts(player, blockType)
++	if not counts then
++		return false, "NotLoaded"
++	end
++	counts[blockType] += amount
++	return true, nil
++end
++
++--[[
++	Returns nil before the player's counts load or after they leave.
++]]
++function Module:GetCount(player: Player, blockType: BlockType): number?
++	local counts = getPlayerCounts(player, blockType)
++	if not counts then
++		return nil
++	end
++	return counts[blockType]
++end
++
++-- Specs require this module in edit mode, where these connections would leak.
++if RunService:IsRunning() then
++	Players.PlayerAdded:Connect(loadCountsAsync)
++	Players.PlayerRemoving:Connect(onPlayerRemoving)
++	-- Catches players who joined before the first require.
++	for _, player in Players:GetPlayers() do
++		task.spawn(loadCountsAsync, player)
++	end
++end
++
++return Module

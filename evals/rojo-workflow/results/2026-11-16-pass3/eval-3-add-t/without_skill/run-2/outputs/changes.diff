@@ -1,0 +1,130 @@
+diff --git a/PR_DESCRIPTION.md b/PR_DESCRIPTION.md
+new file mode 100644
+index 0000000..14ce6bf
+--- /dev/null
++++ b/PR_DESCRIPTION.md
+@@ -0,0 +1,57 @@
++# Add t and use it to validate PlaceBlock arguments
++
++## What
++
++- Adds the [t](https://github.com/osyrisrblx/t) runtime type checker (`osyrisrblx/t`, pinned to `=3.1.1`, the latest
++  version on the Wally index) to `pesde.toml`, pulled from Wally through pesde like our other packages. It mounts at
++  `ReplicatedStorage.Packages.t`.
++- Switches the `PlaceBlock` handler in `src/ServerScriptService/BlockPlacement.server.luau` from hand-written
++  `typeof` checks to a `t.tuple` checker, so later remotes can follow the same pattern.
++- Lists t in the README's package table.
++
++## Checks kept
++
++All argument checks the handler made before still happen, in the same order, and a failing check still drops the
++request silently:
++
++| Before | After |
++|---|---|
++| `typeof(blockTypeName) == "string"` | `t.string` |
++| `typeof(position) == "Vector3"` | `t.Vector3` |
++| `position == position` (reject NaN components) | `isNotNaN`, combined with `t.Vector3` through `t.intersection` (t has no NaN check) |
++
++The game-rule checks after that (known block type, rate limit, character present, cell above ground and free, within
++reach) are unchanged.
++
++## Before testing
++
++**`pesde.lock` is not updated in this PR.** Installs couldn't be run where this change was written, so the lockfile
++has no entry for t yet. Before testing or merging:
++
++1. From the project root, run `pesde install`. This resolves t, updates `pesde.lock`, and creates
++   `roblox_packages/t`.
++2. Commit the updated `pesde.lock` to this branch.
++3. Regenerate the sourcemap so luau-lsp sees the new package, then run the usual checks:
++
++   ```sh
++   rojo sourcemap default.project.json -o sourcemap.json --include-non-scripts
++   luau-lsp analyze --platform=roblox --definitions:@roblox=globalTypes.d.luau --sourcemap=sourcemap.json --ignore=**/roblox_packages/** src
++   selene src
++   stylua --check src
++   ```
++
++   None of these were run for this change, so please treat the results as the first check.
++
++Without step 1, `require(ReplicatedStorage.Packages.t)` fails and the whole `BlockPlacement` script errors at load,
++so no blocks can be placed.
++
++## How to test
++
++In Studio after `rojo serve`, from a client (e.g. the command bar in client context):
++
++- `ReplicatedStorage.PlaceBlock:FireServer(<valid block name>, Vector3.new(0, 4, 0))` near the spawn places a block.
++- Each of these places nothing and raises no server error:
++  - a non-string block name, e.g. `FireServer(123, Vector3.new(0, 4, 0))`
++  - a non-Vector3 position, e.g. `FireServer(<name>, CFrame.new())` or `FireServer(<name>, nil)`
++  - a NaN position, e.g. `FireServer(<name>, Vector3.new(0/0, 4, 0))`
++  - an unknown block name
+diff --git a/README.md b/README.md
+index 9e549e3..5b1bda3 100644
+--- a/README.md
++++ b/README.md
+@@ -33,6 +33,7 @@ All of them come from Wally through pesde. Require each one through its link, ne
+ | CharmSync (`littensy/charm-sync`) | 0.4.1 | `require(ReplicatedStorage.Packages.CharmSync)` |
+ | UI Labs utilities (`pepeeltoro41/ui-labs`) | 2.4.2 | `require(ReplicatedStorage.Packages.UILabs)` |
+ | Module Loader (`crusherfire/module-loader`) | 4.0.1 | `require(ReplicatedStorage.Packages.ModuleLoader)` |
++| t (`osyrisrblx/t`) | 3.1.1 | `require(ReplicatedStorage.Packages.t)` |
+ | Jest Roblox (`roblox/jest`) | 3.20.1 | `require(ServerScriptService.Tests.Packages.Jest)` |
+ | Jest globals (`roblox/jest-globals`) | 3.20.1 | `require(ServerScriptService.Tests.Packages.JestGlobals)` |
+ 
+diff --git a/pesde.toml b/pesde.toml
+index d196787..e10bc52 100644
+--- a/pesde.toml
++++ b/pesde.toml
+@@ -23,6 +23,7 @@ VideCharm = { wally = "littensy/vide-charm", version = "=0.4.1" }
+ CharmSync = { wally = "littensy/charm-sync", version = "=0.4.1" }
+ UILabs = { wally = "pepeeltoro41/ui-labs", version = "=2.4.2" }
+ ModuleLoader = { wally = "crusherfire/module-loader", version = "=4.0.1" }
++t = { wally = "osyrisrblx/t", version = "=3.1.1" }
+ 
+ [dev_dependencies]
+ scripts_rojo = { name = "pesde/scripts_rojo", version = "^0.2.0", target = "lune" }
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index 812f4f9..2a0b0a3 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local Workspace = game:GetService("Workspace")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local t = require(ReplicatedStorage.Packages.t)
+ 
+ local BLOCK_SIZE = BlockTypes.BlockSize
+ -- How far from the player's character a block may be placed, in studs.
+@@ -34,14 +35,25 @@ local function snapToCell(position: Vector3): Vector3
+ 	return Vector3.new(snapAxis(position.X), snapAxis(position.Y), snapAxis(position.Z))
+ end
+ 
+-local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+-	if typeof(blockTypeName) ~= "string" or typeof(position) ~= "Vector3" then
+-		return
++local function isNotNaN(value: any): (boolean, string?)
++	-- NaN is the only value not equal to itself, and a Vector3 with a NaN component isn't either.
++	-- t has no NaN check of its own.
++	if value ~= value then
++		return false, "NaN value"
+ 	end
+-	-- NaN is the only value not equal to itself.
+-	if position ~= position then
++	return true
++end
++
++-- Arguments after the player: block type name, then the target position.
++local placeBlockArgs = t.tuple(t.string, t.intersection(t.Vector3, isNotNaN))
++
++local function onPlaceBlock(player: Player, rawBlockTypeName: unknown, rawPosition: unknown)
++	if not placeBlockArgs(rawBlockTypeName, rawPosition) then
+ 		return
+ 	end
++	-- placeBlockArgs has checked these types; Luau can't narrow through it, so cast.
++	local blockTypeName = rawBlockTypeName :: string
++	local position = rawPosition :: Vector3
+ 
+ 	local blockType = BlockTypes.ByName[blockTypeName]
+ 	if not blockType then

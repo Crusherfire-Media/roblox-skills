@@ -1,0 +1,78 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BuildHud.luau b/src/StarterPlayer/StarterPlayerScripts/BuildHud.luau
+index 128e406..f212ae0 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BuildHud.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BuildHud.luau
+@@ -12,6 +12,7 @@ local PlacedBlocks = require(script.Parent.PlacedBlocks)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ local VideCharm = require(ReplicatedStorage.Packages.VideCharm)
+ 
++local cleanup = Vide.cleanup
+ local create = Vide.create
+ 
+ local PANEL_SIZE = Vector2.new(220, 104)
+@@ -30,12 +31,14 @@ clickSound.Volume = 0.5
+ 
+ local function buildHud(): Frame
+ 	local count = VideCharm.useSignalState(PlacedBlocks.getCount)
++	local lastPlaced = VideCharm.useSignalState(PlacedBlocks.getLastPlaced)
+ 
+-	Charm.subscribe(PlacedBlocks.getLastPlaced, function(blockTypeName: string?)
+-		if blockTypeName then
++	-- Follows the count so placing the same block type twice still clicks.
++	cleanup(Charm.subscribe(PlacedBlocks.getCount, function(newCount: number, oldCount: number)
++		if newCount > oldCount then
+ 			SoundService:PlayLocalSound(clickSound)
+ 		end
+-	end)
++	end))
+ 
+ 	return create("Frame")({
+ 		Name = "BuildHud",
+@@ -79,8 +82,7 @@ local function buildHud(): Frame
+ 			TextColor3 = MUTED_TEXT_COLOR,
+ 			TextXAlignment = Enum.TextXAlignment.Left,
+ 			Text = function()
+-				local last = PlacedBlocks.getLastPlaced()
+-				return `Last: {last or "none"}`
++				return `Last: {lastPlaced() or "none"}`
+ 			end,
+ 		}),
+ 		create("TextButton")({
+diff --git a/src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau b/src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau
+index 8378be3..1392502 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau
+@@ -22,21 +22,24 @@ PlacedBlocks.getCount = Charm.computed(function(): number
+ end)
+ 
+ local function onBlockPlaced(blockTypeName: string)
+-	setLastPlaced(blockTypeName)
+-
+-	local history = getHistory()
+-	table.insert(history, blockTypeName)
+-	setHistory(history)
++	Charm.batch(function()
++		setLastPlaced(blockTypeName)
++		setHistory(function(history)
++			local nextHistory = table.clone(history)
++			table.insert(nextHistory, blockTypeName)
++			return nextHistory
++		end)
++	end)
+ end
+ 
+ --[[
+ 	Forgets every placed block. The HUD's Clear button calls it.
+ ]]
+ function PlacedBlocks.clear()
+-	local history = getHistory()
+-	table.clear(history)
+-	setHistory(history)
+-	setLastPlaced(nil)
++	Charm.batch(function()
++		setHistory({})
++		setLastPlaced(nil)
++	end)
+ end
+ 
+ --[[

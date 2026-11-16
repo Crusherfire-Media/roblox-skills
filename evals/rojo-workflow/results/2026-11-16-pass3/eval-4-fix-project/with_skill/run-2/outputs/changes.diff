@@ -1,0 +1,230 @@
+diff --git a/default.project.json b/default.project.json
+index 71017cf..4d0f5dc 100644
+--- a/default.project.json
++++ b/default.project.json
+@@ -1,6 +1,9 @@
+ ﻿{
+   "name": "eval-sandbox",
+   "servePort": 34872,
++  "globIgnorePaths": [
++    "src/ServerScriptService/Tests"
++  ],
+   "tree": {
+     "$className": "DataModel",
+     "ReplicatedStorage": {
+@@ -10,16 +13,16 @@
+       },
+       "Packages": {
+         "$path": "roblox_packages"
+-      },
+-      "TestPackages": {
+-        "$path": "test_packages/roblox_packages"
+       }
+     },
+     "ServerScriptService": {
+       "$className": "ServerScriptService",
+       "$path": "src/ServerScriptService",
+       "Tests": {
+-        "$path": "src/ServerScriptService/Tests"
++        "$path": "src/ServerScriptService/Tests",
++        "Packages": {
++          "$path": "test_packages/roblox_packages"
++        }
+       }
+     },
+     "StarterGui": {
+@@ -30,7 +33,7 @@
+       "$className": "StarterPlayer",
+       "StarterPlayerScripts": {
+         "$className": "StarterPlayerScripts",
+-        "$path": "src/StarterPlayer/StarterPlayerScript"
++        "$path": "src/StarterPlayer/StarterPlayerScripts"
+       }
+     },
+     "Players": {
+diff --git a/docs/rojo-workflow.md b/docs/rojo-workflow.md
+new file mode 100644
+index 0000000..18834ab
+--- /dev/null
++++ b/docs/rojo-workflow.md
+@@ -0,0 +1,83 @@
++# Working with Rojo day to day
++
++Git is the source of truth for this game. Code lives in files under `src/`, and `rojo serve`
++syncs those files into **your own dev place** in Studio. Studio is where you run, test, and
++playtest. You don't edit code there.
++
++## First-time setup
++
++1. Install the tools with `rokit install`. Packages come from `pesde install` here and again in
++   `test_packages/`.
++2. Make your own dev place in Studio, a copy of the Baseplate place. Never serve into a shared or
++   live place.
++3. Add your dev place's id to `servePlaceIds` in `default.project.json`. Rojo then refuses to sync
++   into any other place, so a stray Connect can't overwrite someone else's work.
++4. Run `rojo serve` from the repo root (port 34872), open your dev place, and click **Connect** in
++   the Rojo plugin.
++
++## Where to make changes
++
++- **Make every change in the files under `src/`.** README.md's Layout table shows where each
++  folder lands in the place. A script you edit in Studio is overwritten by the next sync, and
++  Git never sees the edit. The same goes for a property, attribute, tag, or new instance under a
++  synced folder.
++- File names decide instance types: `*.server.luau` is a Script, `*.client.luau` is a LocalScript,
++  and any other `.luau` file is a ModuleScript. Jest specs go in
++  `src/ServerScriptService/Tests/Specs` as `Name.spec.luau`.
++- Attributes and tags go in a `Name.meta.json` beside the file (or `init.meta.json` in a folder).
++- **Never edit `roblox_packages/` or `test_packages/roblox_packages/`.** pesde regenerates them,
++  and the files are hardlinked to a store other projects share. Change `pesde.toml` and
++  reinstall instead. Require packages through their links (`ReplicatedStorage.Packages.Vide`),
++  never through a `.pesde/...` path.
++- If you really do build something in Studio (a model, a GUI), save it back over its `.rbxm` file
++  with **Save to File**, or ask about `rojo syncback`. Otherwise the next sync deletes it.
++- Work on your own branch. When working in parallel, use your own `git worktree` with its own
++  `rojo serve --port`.
++
++## What to check while serving
++
++- **Is your change actually in Studio?** After saving, open the script in Studio and check that
++  the new text is there before you playtest or run specs. A check that runs too early tests the
++  old code.
++- **Is `rojo serve` still running?** Rojo 7.7.0 and 7.7.1 sometimes crash (`Rojo crashed!` ...
++  `change_processor.rs`) when you delete, move, or rename a file or folder. Studio then quietly
++  stops getting changes. After a delete or rename, look at the serve terminal. If it died,
++  restart `rojo serve` and click Connect again.
++- **Which code is being served?** Rojo serves the folder it was started in, on whatever branch is
++  checked out there. A merged pull request changes nothing locally until you pull.
++- **Stop `rojo serve` first** before anything that rewrites many files at once: `git checkout`,
++  `switch`, `pull`, `rebase`, `reset`, `stash`, `pesde install`, or a bulk delete. Restart it
++  afterward.
++- Before pushing, run the checks from README.md (`rojo sourcemap`, `luau-lsp analyze`, `selene`,
++  `stylua --check`) and run the specs in Studio.
++
++## Don't break `default.project.json`
++
++`default.project.json` decides where every folder lands in the place. A bad edit can break
++Studio sync, luau-lsp, and Jest all at once. In past breakages, `StarterPlayerScripts` lost its
++final `s`, the Jest packages ended up in `ReplicatedStorage` instead of
++`ServerScriptService.Tests.Packages`, and the file was saved with a byte order mark.
++
++- **Edit it only when the layout is really changing**, and update README.md's Layout table in
++  the same commit. The table and the project file must agree.
++- **Keep `globIgnorePaths` and the `Tests` node together.** `ServerScriptService` mounts all of
++  `src/ServerScriptService`. `Tests` is mounted again as its own node so that the Jest packages
++  can sit beside `Specs`, and `globIgnorePaths` stops the first mount from adding a second
++  `Tests` folder.
++- **Save it as UTF-8 without a BOM.** Rojo fails with `Failed to parse JSONC` on a file that
++  starts with one. Windows PowerShell 5.1's `Set-Content`/`Out-File` and some editors add it. To
++  check, run `head -c 3 default.project.json | od -An -tx1` in Git Bash; the output must not be
++  `ef bb bf`.
++- **Resolving a merge conflict in it:** don't just pick one side. Keep both sides' intent, then
++  compare the result against the Layout table, path by path. Look out for typos in `$path`
++  values, since a path that doesn't exist fails the whole project.
++- **Validate before committing** with:
++
++  ```sh
++  rojo sourcemap default.project.json -o sourcemap.json --include-non-scripts
++  ```
++
++  It must succeed. Spot-check `sourcemap.json`: you should see one `Tests` folder holding `Specs`
++  and `Packages` (with `Jest` and `JestGlobals`), and `StarterPlayerScripts` holding
++  `Main.client.luau`.
++- Ask for a review on any pull request that touches the project file.
+diff --git a/verify.project.json b/verify.project.json
+new file mode 100644
+index 0000000..8ceb2fc
+--- /dev/null
++++ b/verify.project.json
+@@ -0,0 +1,91 @@
++{
++  "name": "eval-sandbox",
++  "servePort": 34872,
++  "globIgnorePaths": [
++    "src/ServerScriptService/Tests"
++  ],
++  "tree": {
++    "$className": "DataModel",
++    "ReplicatedStorage": {
++      "$className": "ReplicatedStorage",
++      "Shared": {
++        "$path": "src/ReplicatedStorage/Shared"
++      },
++      "Packages": {
++        "$path": "roblox_packages"
++      }
++    },
++    "ServerScriptService": {
++      "$className": "ServerScriptService",
++      "$path": "src/ServerScriptService",
++      "Tests": {
++        "$path": "src/ServerScriptService/Tests",
++        "Packages": {
++          "$path": "test_packages/roblox_packages"
++        }
++      }
++    },
++    "StarterGui": {
++      "$className": "StarterGui",
++      "$path": "src/StarterGui"
++    },
++    "StarterPlayer": {
++      "$className": "StarterPlayer",
++      "StarterPlayerScripts": {
++        "$className": "StarterPlayerScripts",
++        "$path": "src/StarterPlayer/StarterPlayerScripts"
++      }
++    },
++    "Players": {
++      "$className": "Players"
++    },
++    "Lighting": {
++      "$className": "Lighting"
++    },
++    "Workspace": {
++      "$className": "Workspace",
++      "$properties": {
++        "SignalBehavior": "Deferred"
++      },
++      "Baseplate": {
++        "$className": "Part",
++        "$properties": {
++          "Anchored": true,
++          "Locked": true,
++          "Size": [
++            2048,
++            16,
++            2048
++          ],
++          "Position": [
++            0,
++            -8,
++            0
++          ],
++          "Material": "Plastic",
++          "Color": [
++            0.388,
++            0.373,
++            0.384
++          ]
++        }
++      },
++      "SpawnLocation": {
++        "$className": "SpawnLocation",
++        "$properties": {
++          "Anchored": true,
++          "Size": [
++            12,
++            1,
++            12
++          ],
++          "Position": [
++            0,
++            0.5,
++            0
++          ]
++        }
++      }
++    }
++  }
++}

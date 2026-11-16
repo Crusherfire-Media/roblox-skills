@@ -1,0 +1,147 @@
+diff --git a/src/ReplicatedStorage/Shared/StarterKit.model.json b/src/ReplicatedStorage/Shared/StarterKit.model.json
+new file mode 100644
+index 0000000..ffb152d
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/StarterKit.model.json
+@@ -0,0 +1,10 @@
++{
++  "className": "Configuration",
++  "attributes": {
++    "Brick": 20,
++    "Dirt": 20,
++    "Grass": 10,
++    "Window": 0,
++    "Wood": 10
++  }
++}
+diff --git a/src/ServerScriptService/StarterKit.server.luau b/src/ServerScriptService/StarterKit.server.luau
+new file mode 100644
+index 0000000..a847faa
+--- /dev/null
++++ b/src/ServerScriptService/StarterKit.server.luau
+@@ -0,0 +1,54 @@
++--[[
++	Gives every joining player their starter kit: one number attribute per block type on the
++	Player (for example Player:GetAttribute("Brick") == 20).
++
++	The counts come from the attributes of the Configuration named StarterKit under
++	ReplicatedStorage, so designers can tune them in Studio's Properties window.
++]]
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++local CONFIG_NAME = "StarterKit"
++
++local function findConfig(): Configuration
++	local config = ReplicatedStorage:FindFirstChild(CONFIG_NAME, true)
++	if config == nil or not config:IsA("Configuration") then
++		error(`Expected a Configuration named {CONFIG_NAME} under ReplicatedStorage`)
++	end
++	return config :: Configuration
++end
++
++local config = findConfig()
++
++-- Reads the configured count for a block type, falling back to 0 if it's missing or invalid.
++local function getStarterCount(blockName: string): number
++	local value = config:GetAttribute(blockName)
++	if value == nil then
++		warn(`{CONFIG_NAME} has no attribute for block type {blockName}; giving 0`)
++		return 0
++	end
++	if typeof(value) ~= "number" or value ~= value then
++		warn(`{CONFIG_NAME}.{blockName} should be a number, got {typeof(value)}; giving 0`)
++		return 0
++	end
++	return math.max(0, math.floor(value :: number))
++end
++
++local function giveStarterKit(player: Player)
++	for _, blockType in BlockTypes.List do
++		-- Don't overwrite counts that something else already set for this player.
++		if player:GetAttribute(blockType.Name) == nil then
++			player:SetAttribute(blockType.Name, getStarterCount(blockType.Name))
++		end
++	end
++end
++
++Players.PlayerAdded:Connect(giveStarterKit)
++
++-- Players who joined before this script connected (possible in Studio play tests).
++for _, player in Players:GetPlayers() do
++	task.spawn(giveStarterKit, player)
++end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/StarterKitNotification.client.luau b/src/StarterPlayer/StarterPlayerScripts/StarterKitNotification.client.luau
+new file mode 100644
+index 0000000..57a3b52
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/StarterKitNotification.client.luau
+@@ -0,0 +1,65 @@
++--[[
++	Once the server has set the local player's starter block counts, shows a one-time Roblox
++	notification listing what they got.
++]]
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local StarterGui = game:GetService("StarterGui")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++local NOTIFICATION_TITLE = "Starter kit"
++local NOTIFICATION_DURATION = 8
++-- SetCore fails until the CoreScripts register it, so retry for a while.
++local SET_CORE_ATTEMPTS = 20
++local SET_CORE_RETRY_DELAY = 0.5
++
++local localPlayer = Players.LocalPlayer
++
++local function allCountsSet(): boolean
++	for _, blockType in BlockTypes.List do
++		if typeof(localPlayer:GetAttribute(blockType.Name)) ~= "number" then
++			return false
++		end
++	end
++	return true
++end
++
++local function waitForCounts()
++	while not allCountsSet() do
++		localPlayer.AttributeChanged:Wait()
++	end
++end
++
++local function buildMessage(): string
++	local lines = {}
++	for _, blockType in BlockTypes.List do
++		local count = localPlayer:GetAttribute(blockType.Name) :: number
++		if count > 0 then
++			table.insert(lines, `{blockType.DisplayName} x{count}`)
++		end
++	end
++	if #lines == 0 then
++		return "You start with no blocks."
++	end
++	return "You got:\n" .. table.concat(lines, "\n")
++end
++
++local function sendNotification(text: string)
++	for _ = 1, SET_CORE_ATTEMPTS do
++		local ok = pcall(StarterGui.SetCore, StarterGui, "SendNotification", {
++			Title = NOTIFICATION_TITLE,
++			Text = text,
++			Duration = NOTIFICATION_DURATION,
++		})
++		if ok then
++			return
++		end
++		task.wait(SET_CORE_RETRY_DELAY)
++	end
++	warn("Couldn't show the starter kit notification")
++end
++
++waitForCounts()
++sendNotification(buildMessage())

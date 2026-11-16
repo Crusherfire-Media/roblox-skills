@@ -1,0 +1,181 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+new file mode 100644
+index 0000000..0c5ff15
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+@@ -0,0 +1,175 @@
++--!strict
++--[[
++	A see-through copy of the selected block that follows the mouse, snapped to the grid, so the
++	player can see where a click would place a block. Tinted red where PlacementRules says the
++	block can't go.
++
++	Usage:
++		local ghost = GhostPreview.new("Brick")
++		ghost:setBlockType("Wood")
++		local placeable, position = ghost:getPlacement()
++		ghost:destroy()
++]]
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
++local UserInputService = game:GetService("UserInputService")
++local Workspace = game:GetService("Workspace")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
++
++type BlockType = BlockTypes.BlockType
++
++export type Options = {
++	-- How see-through the ghost is, from 0 (opaque) to 1 (invisible). Defaults to 0.5.
++	Transparency: number?,
++	-- How far the mouse ray reaches, in studs. Defaults to 500.
++	RaycastDistance: number?,
++}
++
++local DEFAULT_TRANSPARENCY = 0.5
++local DEFAULT_RAYCAST_DISTANCE = 500
++local BLOCKED_COLOR = Color3.fromRGB(255, 60, 60)
++local PLACED_BLOCKS_FOLDER_NAME = "PlacedBlocks"
++
++local GhostPreview = {}
++GhostPreview.__index = GhostPreview
++
++type GhostPreviewFields = {
++	_blockType: BlockType,
++	_transparency: number,
++	_raycastDistance: number,
++	_part: Part,
++	_raycastParams: RaycastParams,
++	_connection: RBXScriptConnection?,
++	_position: Vector3?,
++	_placeable: boolean,
++}
++
++export type GhostPreview = typeof(setmetatable({} :: GhostPreviewFields, GhostPreview))
++
++function GhostPreview.new(blockType: BlockType, options: Options?): GhostPreview
++	assert(BlockTypes.isBlockType(blockType), `GhostPreview: unknown block type {blockType}`)
++
++	local transparency = options and options.Transparency or DEFAULT_TRANSPARENCY
++	local raycastDistance = options and options.RaycastDistance or DEFAULT_RAYCAST_DISTANCE
++
++	local part = Instance.new("Part")
++	part.Name = "GhostPreview"
++	part.Size = Vector3.one * BlockTypes.BlockSize
++	part.Anchored = true
++	part.CanCollide = false
++	part.CanTouch = false
++	-- Keeps the ghost out of every spatial query, including PlacementRules.check's.
++	part.CanQuery = false
++	part.CastShadow = false
++	part.Transparency = transparency
++
++	local raycastParams = RaycastParams.new()
++	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
++
++	local self: GhostPreview = setmetatable({
++		_blockType = blockType,
++		_transparency = transparency,
++		_raycastDistance = raycastDistance,
++		_part = part,
++		_raycastParams = raycastParams,
++		_connection = nil,
++		_position = nil,
++		_placeable = false,
++	}, GhostPreview)
++
++	self:_applyStyle()
++	self._connection = RunService.RenderStepped:Connect(function()
++		self:_update()
++	end)
++
++	return self
++end
++
++-- Switches the ghost to another block type. Takes effect immediately.
++function GhostPreview.setBlockType(self: GhostPreview, blockType: BlockType)
++	assert(BlockTypes.isBlockType(blockType), `GhostPreview: unknown block type {blockType}`)
++	self._blockType = blockType
++	self:_applyStyle()
++end
++
++function GhostPreview.getBlockType(self: GhostPreview): BlockType
++	return self._blockType
++end
++
++--[[
++	Returns whether a block can go where the ghost is right now, and the center of that cell.
++	The position is nil when the mouse points at nothing; it is still returned when the spot is
++	blocked, so callers can show feedback there.
++]]
++function GhostPreview.getPlacement(self: GhostPreview): (boolean, Vector3?)
++	return self._placeable, self._position
++end
++
++-- Stops following the mouse and removes the ghost. Safe to call more than once.
++function GhostPreview.destroy(self: GhostPreview)
++	if self._connection then
++		self._connection:Disconnect()
++		self._connection = nil
++	end
++	self._part:Destroy()
++	self._position = nil
++	self._placeable = false
++end
++
++function GhostPreview._applyStyle(self: GhostPreview)
++	local style = BlockTypes.Styles[self._blockType]
++	self._part.Material = style.Material
++	self._part.Color = if self._placeable then style.Color else BLOCKED_COLOR
++end
++
++function GhostPreview._hide(self: GhostPreview)
++	self._position = nil
++	self._placeable = false
++	self._part.Parent = nil
++end
++
++function GhostPreview._update(self: GhostPreview)
++	local camera = Workspace.CurrentCamera
++	if not camera then
++		self:_hide()
++		return
++	end
++
++	local character = Players.LocalPlayer.Character
++	-- The character can change on respawn, so refresh the filter every frame.
++	self._raycastParams.FilterDescendantsInstances = if character
++		then { character, self._part }
++		else { self._part }
++
++	local mouseLocation = UserInputService:GetMouseLocation()
++	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
++	local result =
++		Workspace:Raycast(ray.Origin, ray.Direction * self._raycastDistance, self._raycastParams)
++	if not result then
++		self:_hide()
++		return
++	end
++
++	-- Step half a block off the hit surface so the ghost lands in the neighboring cell
++	-- instead of inside the part that was hit.
++	local position =
++		PlacementRules.snap(result.Position + result.Normal * (BlockTypes.BlockSize / 2))
++
++	local blocksFolder = Workspace:FindFirstChild(PLACED_BLOCKS_FOLDER_NAME)
++	-- Until the server has created the folder, the server can't accept placements either.
++	local placeable = if blocksFolder
++		then (PlacementRules.check(position, character, blocksFolder))
++		else false
++
++	self._position = position
++	self._placeable = placeable
++	self._part.CFrame = CFrame.new(position)
++	self:_applyStyle()
++	self._part.Parent = camera
++end
++
++return GhostPreview

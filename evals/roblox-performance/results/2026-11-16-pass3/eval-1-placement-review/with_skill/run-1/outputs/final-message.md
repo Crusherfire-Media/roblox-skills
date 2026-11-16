@@ -1,0 +1,5 @@
+I checked the type-checker error, and it's outside this task. It points at line 10 of `BlockPlacement.server.luau`, the `require(ReplicatedStorage.Shared.BlockTypes)` line, which I didn't touch. My edit only removed `VALID_NAMES` and changed the name check.
+
+The likely cause is that `sourcemap.json` is out of date. That file maps code paths to files for the type checker, and searching it for `BlockTypes` and `"Shared"` together found only one line, so `BlockTypes` doesn't seem to be mapped. The client script has the same require, so the error doesn't come from my change. Regenerating the sourcemap with Rojo should clear it. I left it alone because it's outside this change.
+
+Everything from my last message still stands: one simplification in the server script, the review in `docs/perf/placement-review.md`, nothing tested in Studio, and nothing committed.

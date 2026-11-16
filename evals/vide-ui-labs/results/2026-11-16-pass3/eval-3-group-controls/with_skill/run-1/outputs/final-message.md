@@ -1,0 +1,6 @@
+The control grouping is unchanged. The three errors the Luau check reported come from an out-of-date `sourcemap.json`, not from the regrouping, so I didn't change any code for them.
+
+- **Lines 4 and 5, "Unknown require":** both target files exist, at `src/StarterPlayer/StarterPlayerScripts/BlockTile.luau` and `src/ReplicatedStorage/Shared/BlockTypes.luau`. But `sourcemap.json` contains neither `BlockTile` nor `BlockTypes`, so the checker can't find them. I didn't touch these two lines; they were the same before.
+- **Line 88, "Unknown type 'BlockTypes.BlockType'":** this follows from the line 5 error. The annotation is the same one the file had before (it was on line 57).
+
+I tried to rebuild the sourcemap into a temp file and re-check the story against it, but the command needed approval and this session can't grant any. To clear these errors, run `rojo sourcemap default.project.json --output sourcemap.json` (or keep `rojo sourcemap --watch` running), then run `luau-lsp analyze` again. Until then, nothing has type-checked the regrouped controls either, including the grouped `StoryProps` type.

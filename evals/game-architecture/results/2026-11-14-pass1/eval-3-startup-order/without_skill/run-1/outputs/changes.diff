@@ -1,0 +1,59 @@
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
+index 9ac9e39..f14d504 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
+@@ -9,7 +9,10 @@ local PlotServerService = require("../SystemPackage/PlotServerService")
+ 
+ local PlotPlacementMediator = {}
+ 
+-function PlotPlacementMediator:Init()
++-- Start, not Init: the loader runs Init on modules in no fixed order when their LoaderPriority is
++-- equal, so PlotServerService may not have built its plots yet during this module's Init. Every
++-- Init has finished before any Start runs.
++function PlotPlacementMediator:Start()
+ 	for _, plot in PlotServerService:GetPlots() do
+ 		PlacementServerService:AddBuildArea(plot)
+ 	end
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/SystemPackage/PlotServerService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/SystemPackage/PlotServerService.luau
+index 2ae3e46..ff71d04 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/SystemPackage/PlotServerService.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/SystemPackage/PlotServerService.luau
+@@ -17,10 +17,11 @@ local PlotServerService = {}
+ local plots: { BasePart }? = nil
+ 
+ --[[
+-	Returns the plot parts.
++	Returns the plot parts. The plots are built in Init, so call this from Start or later.
+ ]]
+ function PlotServerService:GetPlots(): { BasePart }
+-	return plots :: { BasePart }
++	assert(plots, "PlotServerService:GetPlots() called before Init; call it from Start or later")
++	return plots
+ end
+ 
+ function PlotServerService:Init()
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
+index b7b787b..b186f2b 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
+@@ -33,7 +33,7 @@ local function runRound()
+ 	roundEnded:Fire()
+ end
+ 
+-function RoundServerService:Start()
++local function runRoundsForever()
+ 	-- Every other system has to be running before the first round starts.
+ 	while not ModuleLoader.IsServerLoaded() do
+ 		task.wait()
+@@ -47,4 +47,11 @@ function RoundServerService:Start()
+ 	end
+ end
+ 
++function RoundServerService:Start()
++	-- The loader waits for each Start to return before starting the next module, and only marks
++	-- the server loaded after the last one. Waiting for that inside Start would never finish, so
++	-- the round loop runs in its own thread.
++	task.spawn(runRoundsForever)
++end
++
+ return RoundServerService

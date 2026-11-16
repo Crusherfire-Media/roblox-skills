@@ -1,0 +1,240 @@
+diff --git a/docs/perf/ui-sounds.md b/docs/perf/ui-sounds.md
+new file mode 100644
+index 0000000..4892163
+--- /dev/null
++++ b/docs/perf/ui-sounds.md
+@@ -0,0 +1,51 @@
++# UI sounds playing late
++
++## Cause
++
++`UiSounds.play` created a new `Sound` on every call and played it straight away. A new `Sound`
++has to load its asset before it can make any noise, so every click waited on a load. That's why
++`IsLoaded` was `false` when a cue played, and why phones were worst. The
++`ContentProvider:PreloadAsync({ ids... })` call in `Main.client.luau` only warmed the asset
++cache with the id strings. It never gave the game a loaded `Sound` to play, so the first play
++still waited on a load.
++
++## What changed
++
++- **`UiSounds.use(soundId)`** (new): call it while building any UI that plays a sound. It keeps
++  one `Sound` per id under `SoundService` and preloads that instance. Uses are counted and tied
++  to the current Vide scope. When the last scope using a sound is cleaned up, the `Sound` is
++  destroyed, after it finishes if it's playing. Several screens can share the click this way,
++  and nothing stays loaded once no UI needs it.
++- **`UiSounds.play(soundId)`** now restarts the `Sound` that's already loaded, so it plays
++  straight away. If nothing has called `use` for that id, it falls back to the old one-shot
++  behavior (late) and prints a warning in Studio.
++- **`BlockPicker`** now returns `{ Sounds, new }`. `Sounds` lists what the picker plays (click,
++  open, close), and the picker calls `use` on them itself. The close-sound cleanup is registered
++  first so the close sound starts before the picker releases its references.
++- **Build button** (`Main.client.luau`) calls `use` on the click and on `BlockPicker.Sounds`.
++  The open sound plays the moment the picker appears, so it has to be loaded by whatever can
++  open the picker, before the picker exists. The button is that entry point. If it later moves
++  into a screen that isn't always mounted, the picker sounds are released along with it.
++- Removed the startup `PreloadAsync` of id strings.
++
++When you add a new screen, call `UiSounds.use(SoundIds.Click)` (and any other sounds it plays) in
++its component. If a sound plays as the screen opens, call `use` from whatever opens the screen.
++
++## Checking in Studio
++
++1. Play Solo. In the Explorer, open `SoundService`. You should see one `Sound` each for the
++   click, picker-open and picker-close ids, created when the Build button mounts. They should
++   **not** appear and disappear on each click the way they did before.
++2. Select each of those Sounds and check that `IsLoaded` is `true` within a moment of joining.
++3. Click Build and the tiles quickly. The click should land on the press, and the open sound
++   should play as the picker appears. No `UiSounds.play: ... is not in use` warning should show
++   in the Output window. If one does, the UI that plays that sound is missing a `use` call.
++4. To simulate a phone connection: in Studio Settings → Network, set *Incoming Replication Lag*
++   (for example 0.5 s), or use the Device Emulator with network throttling. Then repeat step 3.
++   Before this change, cues were delayed by about the load time. Now only the very first second
++   after joining can be affected.
++5. Release check (optional): sounds are released when their Vide scope is cleaned up.
++   Destroying the ScreenGui alone does **not** do this. To try it, temporarily change
++   `mount(app, playerGui)` to `local unmount = mount(app, playerGui)` and add
++   `task.delay(10, unmount)`. About 10 s after joining, once any playing sound ends, the three
++   Sounds should be removed from `SoundService`.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index 4a1efce..5c4e769 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -65,11 +65,23 @@ export type BlockPickerProps = {
+ 	Select: (name: string) -> (),
+ }
+ 
++--[[
++	The sounds the picker plays. Whatever opens the picker should `UiSounds.use` these while the
++	picker can be opened, so the open sound has loaded before the picker first appears.
++]]
++local SOUNDS = table.freeze({ SoundIds.Click, SoundIds.PickerOpen, SoundIds.PickerClose })
++
+ local function blockPicker(props: BlockPickerProps): Frame
+-	UiSounds.play(SoundIds.PickerOpen)
++	-- Registered before the uses below so the close sound starts before they are released.
+ 	cleanup(function()
+ 		UiSounds.play(SoundIds.PickerClose)
+ 	end)
++	-- The opener should already hold these; using them here too keeps the picker self-contained.
++	for _, soundId in SOUNDS do
++		UiSounds.use(soundId)
++	end
++
++	UiSounds.play(SoundIds.PickerOpen)
+ 
+ 	local tiles = {}
+ 	for index, blockType in BlockTypes.List do
+@@ -114,4 +126,7 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 	})
+ end
+ 
+-return blockPicker
++return {
++	Sounds = SOUNDS,
++	new = blockPicker,
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 6fc7d18..908a7e2 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,4 +1,3 @@
+-local ContentProvider = game:GetService("ContentProvider")
+ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local UserInputService = game:GetService("UserInputService")
+@@ -35,6 +34,12 @@ local function setBuildMode(enabled: boolean)
+ end
+ 
+ local function buildButton()
++	UiSounds.use(SoundIds.Click)
++	-- This button opens the picker, so the picker's sounds stay loaded while it is on screen.
++	for _, soundId in BlockPicker.Sounds do
++		UiSounds.use(soundId)
++	end
++
+ 	return create("TextButton")({
+ 		Name = "BuildButton",
+ 		AnchorPoint = Vector2.new(1, 0),
+@@ -66,7 +71,7 @@ local function app()
+ 		buildButton(),
+ 
+ 		show(isBuildMode, function()
+-			return BlockPicker({
++			return BlockPicker.new({
+ 				Selected = selected,
+ 				Select = BlockPlacer.setBlockType,
+ 			})
+@@ -84,10 +89,5 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEv
+ 	setBuildMode(not isBuildMode())
+ end)
+ 
+--- Tried to warm the UI sounds up front; clicks still play late.
+-task.spawn(function()
+-	ContentProvider:PreloadAsync({ SoundIds.Click, SoundIds.PickerOpen, SoundIds.PickerClose })
+-end)
+-
+ BlockPlacer.setEnabled(false)
+ BlockPlacer.start()
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UiSounds.luau b/src/StarterPlayer/StarterPlayerScripts/UiSounds.luau
+index 96c3d10..6bf78d8 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/UiSounds.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/UiSounds.luau
+@@ -1,15 +1,97 @@
+ --[[
+ 	Plays UI sounds for the local player.
++
++	A Sound has to load its asset before it can play, so a Sound made at the moment of a click plays
++	late. Instead, UI that plays a sound declares it with `UiSounds.use(soundId)` while it is built.
++	That keeps one loaded Sound per id for as long as anything is using it, and `UiSounds.play` then
++	plays that Sound straight away.
++
++	Uses are counted, so several screens can share a sound. When the last use goes away (its Vide
++	scope is cleaned up) the Sound is destroyed, after it finishes playing if it is playing.
+ ]]
+ 
++local ContentProvider = game:GetService("ContentProvider")
++local RunService = game:GetService("RunService")
+ local SoundService = game:GetService("SoundService")
+ 
++local Vide = require(game:GetService("ReplicatedStorage").Packages.Vide)
++
++local cleanup = Vide.cleanup
++
++type Entry = {
++	sound: Sound,
++	uses: number,
++}
++
++local entries: { [string]: Entry } = {}
++
+ local UiSounds = {}
+ 
++local function destroyIfUnused(soundId: string, entry: Entry)
++	if entry.uses > 0 or entries[soundId] ~= entry then
++		return
++	end
++	entries[soundId] = nil
++	entry.sound:Destroy()
++end
++
+ --[[
+-	Plays the sound with <soundId> once.
++	Keeps the sound with <soundId> loaded until the current Vide scope is cleaned up. Call it while
++	building any UI that plays the sound, and early enough that it has loaded before it plays: for
++	a sound that plays as a screen opens, call it from whatever opens the screen.
++]]
++function UiSounds.use(soundId: string)
++	local entry = entries[soundId]
++	if entry then
++		entry.uses += 1
++	else
++		local sound = Instance.new("Sound")
++		sound.Name = soundId
++		sound.SoundId = soundId
++		sound.Parent = SoundService
++		entry = { sound = sound, uses = 1 }
++		entries[soundId] = entry
++		task.spawn(function()
++			ContentProvider:PreloadAsync({ sound })
++		end)
++	end
++
++	local released = false
++	cleanup(function()
++		if released then
++			return
++		end
++		released = true
++		entry.uses -= 1
++		if entry.uses > 0 then
++			return
++		end
++		if entry.sound.IsPlaying then
++			-- Let a sound played during cleanup (like a close sound) finish first.
++			entry.sound.Ended:Once(function()
++				destroyIfUnused(soundId, entry)
++			end)
++		else
++			destroyIfUnused(soundId, entry)
++		end
++	end)
++end
++
++--[[
++	Plays the sound with <soundId> from the start. The sound should be in use (see `UiSounds.use`);
++	if it isn't, it still plays, but late, because it has to load first.
+ ]]
+ function UiSounds.play(soundId: string)
++	local entry = entries[soundId]
++	if entry then
++		entry.sound.TimePosition = 0
++		entry.sound:Play()
++		return
++	end
++
++	if RunService:IsStudio() then
++		warn(`UiSounds.play: {soundId} is not in use, so it will play late. Call UiSounds.use for it.`)
++	end
+ 	local sound = Instance.new("Sound")
+ 	sound.SoundId = soundId
+ 	sound.Parent = SoundService

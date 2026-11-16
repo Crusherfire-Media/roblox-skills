@@ -1,0 +1,3 @@
+That analyzer error isn't caused by my change. Line 10 of `BlockPlacement.server.luau`, `require(ReplicatedStorage.Shared.BlockTypes)`, was already in the file before I edited it. It's a correct path, as long as Rojo puts `src/ReplicatedStorage/Shared/BlockTypes.luau` at `ReplicatedStorage.Shared.BlockTypes`.
+
+The checker reports any `game/...` require it can't trace as "Unknown require". The likely cause is that it ran without a Rojo sourcemap, so it doesn't know where files end up in the game. I didn't confirm that. The client script loads `BlockTypes` the same way, so it would hit the same error. Generating a sourcemap with `rojo sourcemap` and passing it to `luau-lsp` should clear it. I left the require line as it was.

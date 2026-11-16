@@ -1,0 +1,122 @@
+diff --git a/PR_DESCRIPTION.md b/PR_DESCRIPTION.md
+new file mode 100644
+index 0000000..bf88bb4
+--- /dev/null
++++ b/PR_DESCRIPTION.md
+@@ -0,0 +1,62 @@
++# Add t and use it to validate PlaceBlock arguments
++
++## Summary
++
++- Adds the [t](https://github.com/osyrisrblx/t) runtime type checker as a dependency, so we can validate remote arguments with it now and in remotes we add later.
++- Switches the `PlaceBlock` handler in `src/ServerScriptService/BlockPlacement.server.luau` from hand-written `typeof` checks to a `t` checker.
++
++## Changes
++
++### `pesde.toml`
++
++This repo installs packages with pesde, which pulls Wally packages through `[wally_indices]`. There's no `wally.toml`. t goes into `[dependencies]`, pinned exactly like the other packages:
++
++```toml
++t = { wally = "osyrisrblx/t", version = "=3.1.1" }
++```
++
++3.1.1 is the newest version on the Wally index. After installing, it's at `ReplicatedStorage.Packages.t`.
++
++### `BlockPlacement.server.luau`
++
++The argument checks are now one checker built once, when the module loads:
++
++```lua
++local finiteVector3 = t.intersection(t.Vector3, function(value: Vector3) ... end)
++local checkPlaceBlockArgs = t.tuple(t.string, finiteVector3)
++```
++
++It does the same checks as before:
++
++| Check before | Check now |
++| --- | --- |
++| `typeof(blockTypeName) ~= "string"` | `t.string` |
++| `typeof(position) ~= "Vector3"` | `t.Vector3` |
++| `position ~= position` (rejects NaN) | the custom predicate in `finiteVector3`. **`t.Vector3` doesn't reject NaN by itself**, so this predicate is needed. |
++
++All the checks after that are unchanged: the block type must exist in `BlockTypes.ByName`, the per-player rate limit, the character/`HumanoidRootPart` check, `cell.Y < 0`, the occupied cell, and `MAX_REACH`. Like before, extra arguments beyond the first two are ignored. Invalid requests are still dropped without an error or a warning.
++
++## Before testing (reviewer steps)
++
++1. **Install packages.** The `t` package isn't in `roblox_packages/` yet, and until it is, `BlockPlacement` errors at `require(ReplicatedStorage.Packages.t)`. Run this from the repo root:
++   ```sh
++   pesde install
++   ```
++   (pesde is pinned in `rokit.toml`. Run `rokit install` first if you don't have it.)
++2. **Commit the updated `pesde.lock`.** This PR changes `pesde.toml` but **doesn't** change `pesde.lock`, because it was written without running the install. The `pesde install` in step 1 updates the lockfile. Commit that change to this branch so everyone resolves the same t version.
++3. **Rebuild the sourcemap if you use luau-lsp** so it picks up the new `Packages.t` alias. Run `rojo sourcemap default.project.json -o sourcemap.json` or restart your editor's Rojo/luau-lsp integration.
++4. Run `rojo serve` (or rebuild the place) as usual.
++
++## Testing
++
++None of this has been run yet: no install, no build, no play test. Please check:
++
++- [ ] A normal block placement from the client still works.
++- [ ] From the server-side command bar or a test client, firing `PlaceBlock` with bad arguments places nothing and logs no errors:
++  - a non-string block type (e.g. `123`, `nil`)
++  - a non-Vector3 position (e.g. `"0,0,0"`, `CFrame.new()`, `nil`)
++  - a NaN position: `Vector3.new(0/0, 0, 0)`
++  - an unknown block type name (e.g. `"Bedrock"`)
++- [ ] The rate limit, reach limit, below-ground, and occupied-cell rejections still work.
++
++🤖 Generated with [Claude Code](https://claude.com/claude-code)
+diff --git a/pesde.toml b/pesde.toml
+index d196787..e10bc52 100644
+--- a/pesde.toml
++++ b/pesde.toml
+@@ -23,6 +23,7 @@ VideCharm = { wally = "littensy/vide-charm", version = "=0.4.1" }
+ CharmSync = { wally = "littensy/charm-sync", version = "=0.4.1" }
+ UILabs = { wally = "pepeeltoro41/ui-labs", version = "=2.4.2" }
+ ModuleLoader = { wally = "crusherfire/module-loader", version = "=4.0.1" }
++t = { wally = "osyrisrblx/t", version = "=3.1.1" }
+ 
+ [dev_dependencies]
+ scripts_rojo = { name = "pesde/scripts_rojo", version = "^0.2.0", target = "lune" }
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index 812f4f9..8c32cdb 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local Workspace = game:GetService("Workspace")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local t = require(ReplicatedStorage.Packages.t)
+ 
+ local BLOCK_SIZE = BlockTypes.BlockSize
+ -- How far from the player's character a block may be placed, in studs.
+@@ -34,14 +35,24 @@ local function snapToCell(position: Vector3): Vector3
+ 	return Vector3.new(snapAxis(position.X), snapAxis(position.Y), snapAxis(position.Z))
+ end
+ 
+-local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+-	if typeof(blockTypeName) ~= "string" or typeof(position) ~= "Vector3" then
+-		return
++-- A Vector3 with no NaN components. NaN is the only value not equal to itself, and a Vector3
++-- with any NaN component is not equal to itself either. t.Vector3 alone lets NaN through.
++local finiteVector3 = t.intersection(t.Vector3, function(value: Vector3)
++	if value ~= value then
++		return false, "Vector3 has a NaN component"
+ 	end
+-	-- NaN is the only value not equal to itself.
+-	if position ~= position then
++	return true
++end)
++
++-- PlaceBlock arguments after the player: block type name, target position.
++local checkPlaceBlockArgs = t.tuple(t.string, finiteVector3)
++
++local function onPlaceBlock(player: Player, rawBlockTypeName: unknown, rawPosition: unknown)
++	if not checkPlaceBlockArgs(rawBlockTypeName, rawPosition) then
+ 		return
+ 	end
++	local blockTypeName = rawBlockTypeName :: string
++	local position = rawPosition :: Vector3
+ 
+ 	local blockType = BlockTypes.ByName[blockTypeName]
+ 	if not blockType then

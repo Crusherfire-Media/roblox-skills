@@ -1,0 +1,115 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "The runtime behaviour and teardown are almost the same in both attempts. B fails luau-lsp because of its own `WaitForChild`-based requires, which also leaves its BlockType type unresolved. A uses the project's `@game/` string requires, passes every check, and has fully enforced types. B handles a missing PlacedBlocks folder a little better, but that doesn't make up for the failed type analysis.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 4,
+          "note": "Raycasts each PreRender from `GetMouseLocation` and excludes `{ self._Part, character }`. It steps out by `result.Normal * (BlockTypes.BlockSize / 2)` before `PlacementRules.snap`, hides on a miss with `Parent = nil`, and tints red when `check` fails. One flaw: with no PlacedBlocks folder, `canPlace` stays false, so the ghost shows red everywhere."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "`Destroy` disconnects `_Connection` and destroys `_Part`. That is the only connection, so no frame update can run afterwards."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 5,
+          "note": "The `typeof(setmetatable({} :: {...}, GhostPreview))` type declares every field, and the constructor sets them all together. The part has `CanCollide = false` and `CanQuery = false`, and the raycast filter also excludes it."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "The block type parameter is typed `BlockTypes.BlockType` and resolves under the checker. `GetPlacement` returns `(boolean, Vector3?)`, with the position nil on a miss."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "An `Options` table carries `Transparency` and `RaycastDistance`, with defaults `DEFAULT_TRANSPARENCY` and `DEFAULT_RAYCAST_DISTANCE`."
+        },
+        {
+          "criterion": "Scope and merge-ready",
+          "score": 5,
+          "note": "It adds one file and nothing else, and luau-lsp, selene and StyLua all pass."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 4,
+          "note": "The logic is correct: half-block normal offset, snap, check against PlacedBlocks or an empty fallback folder, hide on a miss, and a nil-camera guard. It also relies on `BlockTypes.isBlockType` and `style.Transparency`, which luau-lsp could not verify because the require fails."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "`destroy` disconnects `_connection` and destroys `_part`. It is safe to call twice."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 5,
+          "note": "`GhostPreviewData` declares all fields and is cast into `setmetatable`. The part does not collide and is excluded from queries."
+        },
+        {
+          "criterion": "Typing",
+          "score": 2,
+          "note": "The `WaitForChild` requires fail in luau-lsp (`Unknown require: unsupported path`), so `BlockTypes.BlockType` is unknown and the block type parameters are not really type-checked. `getTarget`'s `(Vector3?, boolean, string?)` return is reasonable."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "An `Options` table holds documented fields, with named default constants and validating asserts."
+        },
+        {
+          "criterion": "Scope and merge-ready",
+          "score": 2,
+          "note": "The file is in scope, but luau-lsp reports 3 errors in this attempt's own require lines, so it isn't ready to merge."
+        }
+      ],
+      "overall_score": 6
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Clean and correct per-frame logic that reuses PlacementRules",
+        "Complete teardown",
+        "Types are enforced and pass luau-lsp",
+        "Uses the project's `@game/` string requires"
+      ],
+      "weaknesses": [
+        "The ghost is red everywhere until the PlacedBlocks folder exists",
+        "Ignores the block style's own transparency"
+      ]
+    },
+    "B": {
+      "score": 6,
+      "strengths": [
+        "Handles a missing PlacedBlocks folder with an empty stand-in",
+        "Exposes the check's reason",
+        "Validates options and guards against a nil camera"
+      ],
+      "weaknesses": [
+        "The instance-path requires break type analysis, so luau-lsp fails",
+        "The BlockType type resolves as unknown, which weakens the typing",
+        "Calls BlockTypes APIs that the checker couldn't verify"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 6
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

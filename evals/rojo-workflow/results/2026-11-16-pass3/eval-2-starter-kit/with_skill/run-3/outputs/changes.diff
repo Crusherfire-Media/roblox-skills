@@ -1,0 +1,131 @@
+diff --git a/src/ReplicatedStorage/Shared/StarterKit.model.json b/src/ReplicatedStorage/Shared/StarterKit.model.json
+new file mode 100644
+index 0000000..ffb152d
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/StarterKit.model.json
+@@ -0,0 +1,10 @@
++{
++  "className": "Configuration",
++  "attributes": {
++    "Brick": 20,
++    "Dirt": 20,
++    "Grass": 10,
++    "Window": 0,
++    "Wood": 10
++  }
++}
+diff --git a/src/ServerScriptService/StarterKit.server.luau b/src/ServerScriptService/StarterKit.server.luau
+new file mode 100644
+index 0000000..ade64b0
+--- /dev/null
++++ b/src/ServerScriptService/StarterKit.server.luau
+@@ -0,0 +1,42 @@
++--!strict
++const Players = game:GetService("Players")
++const ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++const BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++const CONFIGURATION_NAME = "StarterKit"
++
++--[[
++	Designers may move the StarterKit Configuration anywhere under
++	ReplicatedStorage, so it is found by name and class, not by path.
++]]
++local function findConfiguration(): Configuration
++	for _, descendant in ReplicatedStorage:GetDescendants() do
++		if descendant.Name == CONFIGURATION_NAME and descendant:IsA("Configuration") then
++			return descendant
++		end
++	end
++	error(`No Configuration named {CONFIGURATION_NAME} under ReplicatedStorage`)
++end
++
++const configuration = findConfiguration()
++
++local function getStartingCount(blockName: string): number
++	const count = configuration:GetAttribute(blockName)
++	if typeof(count) ~= "number" or count ~= count or count < 0 then
++		warn(`{CONFIGURATION_NAME} has no valid count for {blockName}, giving 0`)
++		return 0
++	end
++	return math.floor(count)
++end
++
++local function onPlayerAdded(player: Player)
++	for _, blockType in BlockTypes.List do
++		player:SetAttribute(blockType.Name, getStartingCount(blockType.Name))
++	end
++end
++
++Players.PlayerAdded:Connect(onPlayerAdded)
++for _, player in Players:GetPlayers() do
++	task.spawn(onPlayerAdded, player)
++end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/StarterKit.client.luau b/src/StarterPlayer/StarterPlayerScripts/StarterKit.client.luau
+new file mode 100644
+index 0000000..25b9f40
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/StarterKit.client.luau
+@@ -0,0 +1,61 @@
++--!strict
++const Players = game:GetService("Players")
++const ReplicatedStorage = game:GetService("ReplicatedStorage")
++const StarterGui = game:GetService("StarterGui")
++
++const BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++const NOTIFICATION_TITLE = "Starter kit"
++const NOTIFICATION_DURATION = 8 -- seconds
++const SET_CORE_RETRY_DELAY = 0.5 -- seconds
++
++const localPlayer = Players.LocalPlayer
++
++local function hasAllCounts(): boolean
++	for _, blockType in BlockTypes.List do
++		if typeof(localPlayer:GetAttribute(blockType.Name)) ~= "number" then
++			return false
++		end
++	end
++	return true
++end
++
++local function waitForCounts()
++	while not hasAllCounts() do
++		localPlayer.AttributeChanged:Wait()
++	end
++end
++
++local function describeKit(): string
++	const lines = {}
++	for _, blockType in BlockTypes.List do
++		const count = localPlayer:GetAttribute(blockType.Name)
++		if typeof(count) == "number" and count > 0 then
++			table.insert(lines, `{blockType.DisplayName} x{count}`)
++		end
++	end
++	return table.concat(lines, ", ")
++end
++
++local function sendNotificationAsync(text: string)
++	-- SetCore errors until the CoreScripts register the callback after join.
++	while true do
++		const success = pcall(function()
++			StarterGui:SetCore("SendNotification", {
++				Title = NOTIFICATION_TITLE,
++				Text = text,
++				Duration = NOTIFICATION_DURATION,
++			})
++		end)
++		if success then
++			return
++		end
++		task.wait(SET_CORE_RETRY_DELAY)
++	end
++end
++
++waitForCounts()
++const kit = describeKit()
++if kit ~= "" then
++	sendNotificationAsync(`You got: {kit}`)
++end

@@ -1,0 +1,433 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index daf599e..929ae5c 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -2,6 +2,8 @@ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local CoinCounter = require(script.Parent.UI.CoinCounter)
++local QuestCard = require(script.Parent.UI.QuestCard)
+ local Screen = require(script.Parent.UI.Screen)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+@@ -13,8 +15,12 @@ local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+ mount(function()
+ 	return create("ScreenGui")({
+ 		Name = "GameGui",
++		-- This script runs once, so the gui must survive respawns instead of being destroyed.
++		ResetOnSpawn = false,
+ 
+ 		Screen.uiScale(),
++		CoinCounter(),
++		QuestCard(),
+ 	})
+ end, playerGui)
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau b/src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau
+new file mode 100644
+index 0000000..9dfc7ae
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau
+@@ -0,0 +1,126 @@
++--[[
++	The coin pill at the top center of the HUD (Figma "HUD / 4K" > "Coin Pill", node 40:13). Shows
++	HudData's coins and updates when HudData.Changed fires.
++
++	The design is drawn on a 3840 x 2160 canvas. UI here is authored for a screen 1080 pixels tall
++	(see Screen.luau, whose UIScale doubles it on 4K), so every Figma measurement is halved.
++	Figma's background blur has no Roblox equivalent and is left out.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local HudData = require(script.Parent.Parent.HudData)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local cleanup = Vide.cleanup
++local create = Vide.create
++local source = Vide.source
++
++-- TODO: replace with the real assets. The icon should be a white coin silhouette; it is tinted
++-- with COIN_COLOR. The glow should be a soft white radial blob.
++local COIN_ICON_IMAGE = "rbxassetid://0"
++local COIN_GLOW_IMAGE = "rbxassetid://0"
++
++local BUILDER_SANS = "rbxasset://fonts/families/BuilderSans.json"
++
++local COIN_COLOR = Color3.fromRGB(255, 200, 60)
++local GLOW_COLOR = Color3.fromRGB(255, 204, 51)
++
++local TOP_MARGIN = 20
++local HEIGHT = 44
++local ICON_SIZE = 32
++local GLOW_RADIUS = 8
++
++local function formatCoins(amount: number): string
++	local digits = tostring(math.floor(math.abs(amount)))
++	local grouped = digits:reverse():gsub("(%d%d%d)", "%1,"):reverse()
++	if grouped:sub(1, 1) == "," then
++		grouped = grouped:sub(2)
++	end
++	return if amount < 0 then "-" .. grouped else grouped
++end
++
++local function CoinCounter()
++	local coins = source(HudData.getCoins())
++	cleanup(HudData.Changed:Connect(function()
++		coins(HudData.getCoins())
++	end))
++
++	return create("Frame")({
++		Name = "CoinCounter",
++		AnchorPoint = Vector2.new(0.5, 0),
++		Position = UDim2.new(0.5, 0, 0, TOP_MARGIN),
++		Size = UDim2.fromOffset(0, HEIGHT),
++		AutomaticSize = Enum.AutomaticSize.X,
++		BackgroundColor3 = Color3.new(0, 0, 0),
++		BackgroundTransparency = 0.5,
++		BorderSizePixel = 0,
++
++		create("UICorner")({
++			CornerRadius = UDim.new(0.5, 0),
++		}),
++		create("UIPadding")({
++			PaddingLeft = UDim.new(0, 12),
++			PaddingRight = UDim.new(0, 16),
++			PaddingTop = UDim.new(0, 6),
++			PaddingBottom = UDim.new(0, 6),
++		}),
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++			SortOrder = Enum.SortOrder.LayoutOrder,
++			Padding = UDim.new(0, 8),
++		}),
++
++		create("Frame")({
++			Name = "Icon",
++			LayoutOrder = 1,
++			Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE),
++			BackgroundTransparency = 1,
++
++			-- Figma's 16px (8px here) gold drop shadow with no offset, i.e. a glow.
++			create("ImageLabel")({
++				Name = "Glow",
++				AnchorPoint = Vector2.new(0.5, 0.5),
++				Position = UDim2.fromScale(0.5, 0.5),
++				Size = UDim2.fromOffset(ICON_SIZE + GLOW_RADIUS * 2, ICON_SIZE + GLOW_RADIUS * 2),
++				BackgroundTransparency = 1,
++				Image = COIN_GLOW_IMAGE,
++				ImageColor3 = GLOW_COLOR,
++				ImageTransparency = 0.3,
++				ZIndex = 0,
++			}),
++			create("ImageLabel")({
++				Name = "Coin",
++				Size = UDim2.fromScale(1, 1),
++				BackgroundTransparency = 1,
++				Image = COIN_ICON_IMAGE,
++				ImageColor3 = COIN_COLOR,
++				ZIndex = 1,
++			}),
++		}),
++
++		create("TextLabel")({
++			Name = "Amount",
++			LayoutOrder = 2,
++			Size = UDim2.fromOffset(0, 28),
++			AutomaticSize = Enum.AutomaticSize.X,
++			BackgroundTransparency = 1,
++			FontFace = Font.new(BUILDER_SANS, Enum.FontWeight.ExtraBold),
++			TextSize = 24,
++			TextColor3 = Color3.new(1, 1, 1),
++			TextXAlignment = Enum.TextXAlignment.Left,
++			TextYAlignment = Enum.TextYAlignment.Center,
++			Text = function()
++				return formatCoins(coins())
++			end,
++
++			create("UIStroke")({
++				Color = Color3.new(0, 0, 0),
++				Thickness = 2,
++			}),
++		}),
++	})
++end
++
++return CoinCounter
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau b/src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau
+new file mode 100644
+index 0000000..91c3437
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau
+@@ -0,0 +1,269 @@
++--[[
++	The current-quest card at the top right of the HUD (Figma "HUD / 4K" > "Quest Card", node
++	40:10). Shows HudData's quest and updates when HudData.Changed fires.
++
++	The design is drawn on a 3840 x 2160 canvas. UI here is authored for a screen 1080 pixels tall
++	(see Screen.luau, whose UIScale doubles it on 4K), so every Figma measurement is halved.
++
++	The card is a fixed width and grows downward to fit its text. Titles wrap to at most two lines
++	and descriptions to at most four, then end in an ellipsis, so very long quests can't push the
++	card off the screen.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local HudData = require(script.Parent.Parent.HudData)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local cleanup = Vide.cleanup
++local create = Vide.create
++local source = Vide.source
++
++-- TODO: replace with the real assets. The icon is the scroll with its red seal, in full color.
++-- The shadow should be a soft black rounded rectangle, 9-sliced with SHADOW_SLICE.
++local QUEST_ICON_IMAGE = "rbxassetid://0"
++local SHADOW_IMAGE = "rbxassetid://0"
++local SHADOW_SLICE = Rect.new(32, 32, 96, 96)
++
++local BUILDER_SANS = "rbxasset://fonts/families/BuilderSans.json"
++
++local MARGIN_RIGHT = 24
++local MARGIN_TOP = 80
++local WIDTH = 360
++local PADDING = 16
++local GAP = 8
++local CORNER_RADIUS = 16
++
++local ICON_SIZE = 24
++
++local TITLE_SIZE = 24
++local TITLE_LINE_HEIGHT = 28
++local TITLE_MAX_LINES = 2
++
++local BODY_SIZE = 16
++local BODY_LINE_HEIGHT = 24
++local BODY_MAX_LINES = 4
++
++local PROGRESS_HEIGHT = 20
++local TRACK_HEIGHT = 12
++
++-- Figma's two drop shadows (y 8 blur 24 at 35%, y 2 blur 4 at 20%), merged into one image.
++local SHADOW_BLUR = 12
++local SHADOW_OFFSET_Y = 4
++local SHADOW_TRANSPARENCY = 0.6
++
++local function QuestCard()
++	local quest = source(HudData.getQuest())
++	cleanup(HudData.Changed:Connect(function()
++		quest(HudData.getQuest())
++	end))
++
++	local function progressRatio(): number
++		local current = quest()
++		if current.Goal <= 0 then
++			return 1
++		end
++		return math.clamp(current.Progress / current.Goal, 0, 1)
++	end
++
++	return create("Frame")({
++		Name = "QuestCard",
++		AnchorPoint = Vector2.new(1, 0),
++		Position = UDim2.new(1, -MARGIN_RIGHT, 0, MARGIN_TOP),
++		Size = UDim2.fromOffset(WIDTH, 0),
++		AutomaticSize = Enum.AutomaticSize.Y,
++		BackgroundTransparency = 1,
++
++		create("ImageLabel")({
++			Name = "Shadow",
++			AnchorPoint = Vector2.new(0.5, 0.5),
++			Position = UDim2.new(0.5, 0, 0.5, SHADOW_OFFSET_Y),
++			Size = UDim2.new(1, SHADOW_BLUR * 2, 1, SHADOW_BLUR * 2),
++			BackgroundTransparency = 1,
++			Image = SHADOW_IMAGE,
++			ImageColor3 = Color3.new(0, 0, 0),
++			ImageTransparency = SHADOW_TRANSPARENCY,
++			ScaleType = Enum.ScaleType.Slice,
++			SliceCenter = SHADOW_SLICE,
++			ZIndex = 0,
++		}),
++
++		create("Frame")({
++			Name = "Card",
++			Size = UDim2.fromScale(1, 0),
++			AutomaticSize = Enum.AutomaticSize.Y,
++			BackgroundColor3 = Color3.new(1, 1, 1),
++			BackgroundTransparency = 0.06,
++			BorderSizePixel = 0,
++			ZIndex = 1,
++
++			create("UIGradient")({
++				Color = ColorSequence.new(Color3.fromRGB(24, 27, 44), Color3.fromRGB(38, 29, 61)),
++			}),
++			create("UICorner")({
++				CornerRadius = UDim.new(0, CORNER_RADIUS),
++			}),
++			create("UIStroke")({
++				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++				Color = Color3.new(1, 1, 1),
++				Transparency = 0.86,
++				Thickness = 2,
++			}),
++			create("UIPadding")({
++				PaddingLeft = UDim.new(0, PADDING),
++				PaddingRight = UDim.new(0, PADDING),
++				PaddingTop = UDim.new(0, PADDING),
++				PaddingBottom = UDim.new(0, PADDING),
++			}),
++			create("UIListLayout")({
++				FillDirection = Enum.FillDirection.Vertical,
++				SortOrder = Enum.SortOrder.LayoutOrder,
++				Padding = UDim.new(0, GAP),
++			}),
++
++			create("Frame")({
++				Name = "Header",
++				LayoutOrder = 1,
++				Size = UDim2.fromScale(1, 0),
++				AutomaticSize = Enum.AutomaticSize.Y,
++				BackgroundTransparency = 1,
++
++				create("UIListLayout")({
++					FillDirection = Enum.FillDirection.Horizontal,
++					VerticalAlignment = Enum.VerticalAlignment.Center,
++					SortOrder = Enum.SortOrder.LayoutOrder,
++					Padding = UDim.new(0, GAP),
++				}),
++
++				create("ImageLabel")({
++					Name = "Icon",
++					LayoutOrder = 1,
++					Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE),
++					BackgroundTransparency = 1,
++					Image = QUEST_ICON_IMAGE,
++				}),
++
++				create("TextLabel")({
++					Name = "Title",
++					LayoutOrder = 2,
++					Size = UDim2.new(1, -(ICON_SIZE + GAP), 0, 0),
++					AutomaticSize = Enum.AutomaticSize.Y,
++					BackgroundTransparency = 1,
++					FontFace = Font.new(BUILDER_SANS, Enum.FontWeight.Bold),
++					TextSize = TITLE_SIZE,
++					LineHeight = TITLE_LINE_HEIGHT / TITLE_SIZE,
++					TextColor3 = Color3.new(1, 1, 1),
++					TextXAlignment = Enum.TextXAlignment.Left,
++					TextYAlignment = Enum.TextYAlignment.Center,
++					TextWrapped = true,
++					TextTruncate = Enum.TextTruncate.AtEnd,
++					Text = function()
++						return quest().Title
++					end,
++
++					create("UISizeConstraint")({
++						MinSize = Vector2.new(0, TITLE_LINE_HEIGHT),
++						MaxSize = Vector2.new(math.huge, TITLE_LINE_HEIGHT * TITLE_MAX_LINES),
++					}),
++				}),
++			}),
++
++			create("TextLabel")({
++				Name = "Description",
++				LayoutOrder = 2,
++				Size = UDim2.fromScale(1, 0),
++				AutomaticSize = Enum.AutomaticSize.Y,
++				BackgroundTransparency = 1,
++				FontFace = Font.new(BUILDER_SANS, Enum.FontWeight.Regular),
++				TextSize = BODY_SIZE,
++				LineHeight = BODY_LINE_HEIGHT / BODY_SIZE,
++				TextColor3 = Color3.fromRGB(199, 204, 224),
++				TextXAlignment = Enum.TextXAlignment.Left,
++				TextYAlignment = Enum.TextYAlignment.Top,
++				TextWrapped = true,
++				TextTruncate = Enum.TextTruncate.AtEnd,
++				Text = function()
++					return quest().Description
++				end,
++
++				create("UISizeConstraint")({
++					MaxSize = Vector2.new(math.huge, BODY_LINE_HEIGHT * BODY_MAX_LINES),
++				}),
++			}),
++
++			create("Frame")({
++				Name = "Progress",
++				LayoutOrder = 3,
++				Size = UDim2.new(1, 0, 0, PROGRESS_HEIGHT),
++				BackgroundTransparency = 1,
++
++				create("UIListLayout")({
++					FillDirection = Enum.FillDirection.Horizontal,
++					VerticalAlignment = Enum.VerticalAlignment.Center,
++					SortOrder = Enum.SortOrder.LayoutOrder,
++					Padding = UDim.new(0, GAP),
++				}),
++
++				create("Frame")({
++					Name = "Track",
++					LayoutOrder = 1,
++					Size = UDim2.fromOffset(0, TRACK_HEIGHT),
++					BackgroundColor3 = Color3.new(1, 1, 1),
++					BackgroundTransparency = 0.88,
++					BorderSizePixel = 0,
++					ClipsDescendants = true,
++
++					-- Takes whatever width the count leaves, so "120/1000" fits as well as "6/10".
++					create("UIFlexItem")({
++						FlexMode = Enum.UIFlexMode.Fill,
++					}),
++					create("UICorner")({
++						CornerRadius = UDim.new(0.5, 0),
++					}),
++
++					create("Frame")({
++						Name = "Fill",
++						Size = function()
++							return UDim2.fromScale(progressRatio(), 1)
++						end,
++						Visible = function()
++							return progressRatio() > 0
++						end,
++						BackgroundColor3 = Color3.new(1, 1, 1),
++						BorderSizePixel = 0,
++
++						create("UIGradient")({
++							Color = ColorSequence.new(
++								Color3.fromRGB(102, 230, 128),
++								Color3.fromRGB(51, 179, 89)
++							),
++							Rotation = 90,
++						}),
++						create("UICorner")({
++							CornerRadius = UDim.new(0.5, 0),
++						}),
++					}),
++				}),
++
++				create("TextLabel")({
++					Name = "Count",
++					LayoutOrder = 2,
++					Size = UDim2.fromOffset(0, PROGRESS_HEIGHT),
++					AutomaticSize = Enum.AutomaticSize.X,
++					BackgroundTransparency = 1,
++					FontFace = Font.new(BUILDER_SANS, Enum.FontWeight.Bold),
++					TextSize = 16,
++					TextColor3 = Color3.new(1, 1, 1),
++					TextXAlignment = Enum.TextXAlignment.Right,
++					TextYAlignment = Enum.TextYAlignment.Center,
++					Text = function()
++						local current = quest()
++						return `{current.Progress}/{current.Goal}`
++					end,
++				}),
++			}),
++		}),
++	})
++end
++
++return QuestCard

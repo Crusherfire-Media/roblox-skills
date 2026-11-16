@@ -1,0 +1,114 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "The two attempts match on grouping, order, updated reads, types and preserved behaviour. B's direct `Order` assignment has the same runtime effect as `Ordered`, so its groups are ordered too. The difference is that A uses the library's public `Ordered` API at both levels, as the rubric asks. B depends on an internal field name, so it falls short on criterion 1 and on the check that counts `Ordered` calls. A wins narrowly.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Fixed order via Ordered",
+          "score": 5,
+          "note": "All 13 controls and all 4 groups are wrapped, for example `UILabs.Ordered(UILabs.ControlGroup({...}), 1)`, and the numbers restart at each level."
+        },
+        {
+          "criterion": "Coherent, well-named groups",
+          "score": 5,
+          "note": "The groups are Content (block, name override, show name, count, show count), State (selected, locked), Look (size, corner radius, highlight color and thickness) and Preview (backdrop, centered)."
+        },
+        {
+          "criterion": "Order follows request",
+          "score": 5,
+          "note": "Content=1, State=2, Look=3, Preview=4."
+        },
+        {
+          "criterion": "Reads and StoryProps updated",
+          "score": 5,
+          "note": "Every read goes through `content`, `state`, `look` or `preview` (for example `look.TileSize`), and StoryProps nests to match."
+        },
+        {
+          "criterion": "Behavior preserved, BlockTile untouched",
+          "score": 5,
+          "note": "The defaults and slider ranges are the same, all 13 controls are still there, and only the story changed."
+        },
+        {
+          "criterion": "Tooling passes",
+          "score": 5,
+          "note": "luau-lsp, selene and StyLua all pass."
+        }
+      ],
+      "overall_score": 9.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Fixed order via Ordered",
+          "score": 4,
+          "note": "All 13 controls use `Ordered`, but the groups get their order from a local `group()` helper that sets `controlGroup.Order = order`. That works the same at runtime, but it doesn't wrap the groups in `Ordered` as the rubric asks, and it relies on the `Order` field name instead of the public API."
+        },
+        {
+          "criterion": "Coherent, well-named groups",
+          "score": 5,
+          "note": "The groups are Content, State, Appearance and Story, with the same sensible membership as A."
+        },
+        {
+          "criterion": "Order follows request",
+          "score": 5,
+          "note": "`group(1..4)` puts Content, State, Appearance and Story in the requested order."
+        },
+        {
+          "criterion": "Reads and StoryProps updated",
+          "score": 5,
+          "note": "Every read goes through `content`, `state`, `appearance` or `storyOptions`, and StoryProps nests to match."
+        },
+        {
+          "criterion": "Behavior preserved, BlockTile untouched",
+          "score": 5,
+          "note": "The defaults and ranges are the same, and all 13 controls are still there."
+        },
+        {
+          "criterion": "Tooling passes",
+          "score": 5,
+          "note": "luau-lsp, selene and StyLua all pass. The failed check only counts `Ordered` calls."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9.5,
+      "strengths": [
+        "Uses the documented `Ordered` API at both levels.",
+        "Group names are clear and match the request.",
+        "Every read and the StoryProps type are updated consistently.",
+        "Adds helpful comments about pixel units and what turning Centered off does."
+      ],
+      "weaknesses": [
+        "Each group needs a multi-line `Ordered(ControlGroup(...), n)` wrapper, which makes the table a little long."
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Its comment correctly notes that `ControlGroup` takes no order argument in Luau.",
+        "The `group()` helper keeps the controls table compact.",
+        "Groups and reads are correct."
+      ],
+      "weaknesses": [
+        "Writes the group's `Order` field directly instead of using `UILabs.Ordered`, which couples the story to an internal field.",
+        "Fails the check that counts `Ordered` calls (13 found, at least 16 expected).",
+        "The group name `Story` sits close to the `story` function name."
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9.5,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

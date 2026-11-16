@@ -1,0 +1,126 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both are correct and nearly the same: one owning signal, clone-and-set updates, a useSignalState bridge in the mounted scope, live tile and label updates, and a direct Charm guard. Neither defines a shared computed. B edges ahead because it checks block type names, grays the selected-count label at 0, and keeps the existing code style. A mixes in `const`/string requires and a method-style getter.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Single owning Charm signal",
+          "score": 5,
+          "note": "BlockStock.luau owns `Charm.signal({} :: Stock)`, exposes `getStock`/`GetCount`, and only `onStockChanged` writes it."
+        },
+        {
+          "criterion": "New table per update",
+          "score": 5,
+          "note": "`setStock(function(stock) local nextStock = table.clone(stock) ... return nextStock end)`."
+        },
+        {
+          "criterion": "Shared derived values / guard reads Charm",
+          "score": 3,
+          "note": "Guard uses `BlockStock:GetCount(getSelected())` directly via Charm, but no shared computed for selected count; UI recomputes `props.Stock()[props.Selected()]` separately."
+        },
+        {
+          "criterion": "Vide-tracked bridge",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` inside `app`, passed as `Stock` source to BlockPicker."
+        },
+        {
+          "criterion": "Live updates and initial state",
+          "score": 5,
+          "note": "Tile Text/BackgroundColor3/TextColor3 and the `SelectedCount` label are functions of `props.Stock()` and `props.Selected()`; missing entries show 0."
+        },
+        {
+          "criterion": "No yields in Charm callbacks / no leaks",
+          "score": 5,
+          "note": "Updater is pure; the only listener comes from useSignalState and is cleaned up with the scope."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "All checks pass; story files are neutral, but `const`/string-require syntax and the method-style `:GetCount` are inconsistent with the existing code style."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Single owning Charm signal",
+          "score": 5,
+          "note": "BlockStock.luau owns the signal, exposes `getStock`/`getCount`, and only `onStockChanged` writes it, after checking against `BlockTypes.ByName`."
+        },
+        {
+          "criterion": "New table per update",
+          "score": 5,
+          "note": "`setStock(function(current) local nextStock = table.clone(current) ... end)`."
+        },
+        {
+          "criterion": "Shared derived values / guard reads Charm",
+          "score": 3,
+          "note": "Guard uses `BlockStock.getCount(blockType)` directly via Charm, but no shared computed for the selected count; the UI derives it with `countOf(props.Selected())`."
+        },
+        {
+          "criterion": "Vide-tracked bridge",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` in `app`, passed down as the `Stock` source."
+        },
+        {
+          "criterion": "Live updates and initial state",
+          "score": 5,
+          "note": "Tile count, gray-out, and the `StockLabel` text and color all depend on the `Stock` and `Selected` sources; missing entries show 0."
+        },
+        {
+          "criterion": "No yields in Charm callbacks / no leaks",
+          "score": 5,
+          "note": "Updater is pure; the listener from useSignalState is scope-cleaned."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "All checks pass; changes stay in the client files plus the new module and keep the existing code style."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Clean owning module with immutable updates",
+        "Correct vide-charm bridge in the mounted scope",
+        "Live tile counts, gray-out, and selected label",
+        "Direct Charm guard in BlockPlacer"
+      ],
+      "weaknesses": [
+        "No shared computed for selected count or can-place",
+        "Style inconsistent with existing files (`const`, string requires, colon methods)",
+        "Doesn't validate block type names"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Clean owning module with immutable updates and name validation",
+        "Correct vide-charm bridge",
+        "Selected-count label also grays at 0",
+        "Consistent style and helpful docs"
+      ],
+      "weaknesses": [
+        "No shared computed for selected count or can-place",
+        "`BlockStock.start()` waits for the remote before `BlockPlacer.start()` runs (harmless)"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8,
+    "without_skill": 8.5
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

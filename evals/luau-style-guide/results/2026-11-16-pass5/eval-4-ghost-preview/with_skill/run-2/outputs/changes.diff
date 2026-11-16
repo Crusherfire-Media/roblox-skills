@@ -1,0 +1,175 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+new file mode 100644
+index 0000000..123c93a
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+@@ -0,0 +1,169 @@
++--!strict
++-- A see-through copy of the selected block that follows the mouse, snapped to the grid.
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
++local UserInputService = game:GetService("UserInputService")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
++
++local DEFAULT_TRANSPARENCY = 0.5
++local DEFAULT_RAYCAST_DISTANCE = 500
++local BLOCKED_COLOR = Color3.fromRGB(255, 40, 40)
++-- How far the block color moves toward BLOCKED_COLOR where placement is not allowed.
++local BLOCKED_TINT = 0.75
++
++type BlockType = BlockTypes.BlockType
++
++export type Options = {
++	Transparency: number?,
++	RaycastDistance: number?,
++}
++
++local localPlayer = Players.LocalPlayer
++
++local GhostPreview = {}
++GhostPreview.__index = GhostPreview
++
++export type GhostPreview = typeof(setmetatable(
++	{} :: {
++		_Part: Part,
++		_BlockType: BlockType,
++		_Transparency: number,
++		_RaycastDistance: number,
++		_RaycastParams: RaycastParams,
++		_FilteredCharacter: Model?,
++		_BlocksFolder: Instance?,
++		_Cell: Vector3?,
++		_CanPlace: boolean,
++		_Connection: RBXScriptConnection?,
++	},
++	GhostPreview
++))
++
++local function createPart(): Part
++	local part = Instance.new("Part")
++	part.Name = "GhostPreview"
++	part.Size = Vector3.one * BlockTypes.BlockSize
++	part.Anchored = true
++	part.CanCollide = false
++	part.CanTouch = false
++	part.CanQuery = false
++	part.CastShadow = false
++	part.Transparency = 1
++	part.Parent = workspace
++	return part
++end
++
++--[[
++	Creates the ghost and starts updating it every frame. Call Destroy when
++	build mode ends.
++]]
++function GhostPreview.new(blockType: BlockType, options: Options?): GhostPreview
++	local raycastParams = RaycastParams.new()
++	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
++
++	local self = setmetatable({
++		_Part = createPart(),
++		_BlockType = blockType,
++		_Transparency = if options and options.Transparency
++			then options.Transparency
++			else DEFAULT_TRANSPARENCY,
++		_RaycastDistance = if options and options.RaycastDistance
++			then options.RaycastDistance
++			else DEFAULT_RAYCAST_DISTANCE,
++		_RaycastParams = raycastParams,
++		_FilteredCharacter = nil,
++		_BlocksFolder = nil,
++		_Cell = nil,
++		_CanPlace = false,
++		_Connection = nil,
++	}, GhostPreview)
++
++	self._Part.Material = BlockTypes.Styles[blockType].Material
++	self._Connection = RunService.PreRender:Connect(function()
++		self:_Update()
++	end)
++
++	return self
++end
++
++function GhostPreview.SetBlockType(self: GhostPreview, blockType: BlockType)
++	self._BlockType = blockType
++	self._Part.Material = BlockTypes.Styles[blockType].Material
++end
++
++function GhostPreview.GetBlockType(self: GhostPreview): BlockType
++	return self._BlockType
++end
++
++--[[
++	Returns whether a block can go where the ghost is, and the center of that
++	cell. The cell is nil when the mouse points at the sky. Reflects the last
++	rendered frame, so it matches what the player sees.
++]]
++function GhostPreview.GetPlacement(self: GhostPreview): (boolean, Vector3?)
++	return self._CanPlace, self._Cell
++end
++
++function GhostPreview.Destroy(self: GhostPreview)
++	if self._Connection then
++		self._Connection:Disconnect()
++		self._Connection = nil
++	end
++	self._Part:Destroy()
++	self._Cell = nil
++	self._CanPlace = false
++end
++
++function GhostPreview._Hide(self: GhostPreview)
++	self._Part.Transparency = 1
++	self._Cell = nil
++	self._CanPlace = false
++end
++
++function GhostPreview._Update(self: GhostPreview)
++	local camera = workspace.CurrentCamera
++	if not camera then
++		self:_Hide()
++		return
++	end
++
++	-- The character is replaced on respawn, so the filter follows it.
++	local character = localPlayer.Character
++	if character ~= self._FilteredCharacter then
++		self._FilteredCharacter = character
++		self._RaycastParams.FilterDescendantsInstances = if character
++			then { self._Part, character }
++			else { self._Part }
++	end
++
++	local mouseLocation = UserInputService:GetMouseLocation()
++	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
++	local result =
++		workspace:Raycast(ray.Origin, ray.Direction * self._RaycastDistance, self._RaycastParams)
++	if not result then
++		self:_Hide()
++		return
++	end
++
++	-- Stepping half a block off the surface lands in the cell beside it.
++	local cell = PlacementRules.snap(result.Position + result.Normal * (BlockTypes.BlockSize / 2))
++
++	-- The server creates the folder, so it may not have replicated yet.
++	self._BlocksFolder = self._BlocksFolder or workspace:FindFirstChild("PlacedBlocks")
++	local canPlace = if self._BlocksFolder
++		then PlacementRules.check(cell, character, self._BlocksFolder)
++		else false
++
++	local color = BlockTypes.Styles[self._BlockType].Color
++	self._Part.Color = if canPlace then color else color:Lerp(BLOCKED_COLOR, BLOCKED_TINT)
++	self._Part.Transparency = self._Transparency
++	self._Part.CFrame = CFrame.new(cell)
++	self._Cell = cell
++	self._CanPlace = canPlace
++end
++
++return GhostPreview

@@ -1,0 +1,126 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts fix the main freeze the same way: one instance per block, properties set before parenting, and a shared Heartbeat budget of 3 ms and 200 blocks per frame. B follows the load-reservation rule exactly, but its unload frees all cells and the slot at once and loops over all 20k parts in the leave frame. For about 1.7 s, anyone can place blocks that overlap the old parts. A spreads reservation over about 4 frames, but it never creates overlapping parts. It unloads incrementally, frees each cell only when its block is gone, and holds the slot until the plot is empty. That makes A the more robust fix, despite its extra complexity and a possible `next()` slowdown during unload.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Fewer instances per block",
+          "score": 5,
+          "note": "`blockInfo[part] = { plot, ownerId, placedAt, cell }` replaces both value objects; placedAt is kept for saved blocks (`queuedPlacedAt`) and placed ones (`os.time()`)."
+        },
+        {
+          "criterion": "Properties before parenting",
+          "score": 5,
+          "note": "Each block is cloned from a fully set-up, unparented template, then `part.CFrame` is set before `part.Parent = plot.folder`."
+        },
+        {
+          "criterion": "Loading/unloading spread across frames",
+          "score": 5,
+          "note": "`onHeartbeat` caps work at FRAME_BUDGET 3 ms, MAX_CREATES_PER_FRAME 200 and MAX_DESTROYS_PER_FRAME 1000, and unloading is fully spread out. `next(plot.blocks)` after each delete may slow down as the table empties, but the time budget limits it."
+        },
+        {
+          "criterion": "No overlaps/half states during load",
+          "score": 4,
+          "note": "Reservation runs over about 4 frames (`reserveSome`, up to 5000 per frame), so cells aren't all reserved before the first yield. Overlaps can't happen, because `createSome` waits until `plot.saved` is nil. Leaving mid-load releases queued cells and destroys built blocks, and the slot is held until unload finishes."
+        },
+        {
+          "criterion": "Removal/placement rules preserved",
+          "score": 5,
+          "note": "`info.ownerId ~= player.UserId` replaces the owner check and also rejects anything outside the plots; reach uses `info.cell`, the same position as before; placement validation is unchanged."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 5,
+          "note": "Says builds appear over about 1.7 s at 200 per frame and unload in about 1/3 s, describes the short reservation window and the wait for a slot, and has a 'Not verified' section."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "All checks pass and the code is typed and in scope, but it is fairly complex (waiting-player queue, two-phase load)."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Fewer instances per block",
+          "score": 5,
+          "note": "`blockOwnerIds[part]` and `blockPlacedAt[part]` tables replace the value objects, and placed time is kept for both saved and new blocks."
+        },
+        {
+          "criterion": "Properties before parenting",
+          "score": 5,
+          "note": "`Instance.new(\"Part\")`, then all properties, then `part.Parent = parent` last."
+        },
+        {
+          "criterion": "Loading/unloading spread across frames",
+          "score": 4,
+          "note": "`runJobs` builds and destroys within 3 ms and 200 blocks per frame, but `onPlayerRemoving` still calls `GetChildren()` and reads `Position` on all 20k parts synchronously."
+        },
+        {
+          "criterion": "No overlaps/half states during load",
+          "score": 3,
+          "note": "All cells are reserved in the join frame before the job is queued, and mid-load leaves are handled. But the leave path frees `occupied` and the slot immediately while old parts stay for about 1.7 s, so new placements can overlap blocks that are still being removed."
+        },
+        {
+          "criterion": "Removal/placement rules preserved",
+          "score": 5,
+          "note": "`IsDescendantOf(plotsFolder)` is kept, the owner check is `blockOwnerIds[block] ~= player.UserId`, and the reach check and placement checks are unchanged."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 4,
+          "note": "Gives the about-1.7 s fill time, marks frame time as not measured, and lists what players will notice, but states an unmeasured memory saving (about 190 MB) as a figure."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "Small, readable, typed diff that stays in scope; all checks pass, and it adds a profiler label."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Unloading is fully spread over frames, and each cell is freed only when its block is destroyed",
+        "Holds the plot slot until unload finishes, so builds never load on top of each other",
+        "Template cloning with properties set before parenting",
+        "Honest, detailed write-up with tuning guidance"
+      ],
+      "weaknesses": [
+        "Cells aren't all reserved before the first yield (about a 4-frame window)",
+        "`next()` over a table being emptied may degrade during unload",
+        "More complex code to review"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Reserves every cell before the first yield, exactly as the rubric asks",
+        "Simple job-queue design that is easy to merge",
+        "MicroProfiler label `Builds:RunJobs`"
+      ],
+      "weaknesses": [
+        "Leave frame still loops over all 20k parts synchronously",
+        "Frees cells and the slot before parts are destroyed, so blocks can overlap during unload",
+        "Unmeasured memory figures in the write-up"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8,
+    "with_skill": 7
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

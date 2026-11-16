@@ -1,0 +1,7 @@
+I fixed all five luau-lsp findings in `GhostPreview.luau`, but I couldn't rerun the analyzer. Running commands needs approval, which this session can't give. The stop hook should rerun it when this turn ends.
+
+- **Unknown require (2 errors) and unknown `BlockTypes.BlockType`:** this project's luau-lsp setup doesn't resolve the `@game/...` alias. A relative path wouldn't work either, because at runtime Roblox copies StarterPlayerScripts into each player's PlayerScripts and the path would point somewhere else. The requires now go through `ReplicatedStorage.Shared.BlockTypes` and `.PlacementRules`, the form the README uses. That breaks the style guide's require-by-string rule, but here it's the only form that works both at runtime and in the analyzer. The type error came from the failed require and should clear with it.
+- **`number?` passed where `number` was expected:** the defaults are now set first, and only overwritten when `options` provides a value. Both values are plain numbers from the start.
+- **`ghost` didn't match `GhostPreview`:** the instance fields are now one named `Fields` type. The instance table is annotated with it, so the object `new` builds and the exported `GhostPreview` type use the same fields.
+
+The behavior and the API (`new`, `SetBlockType`, `GetPlacement`, `Destroy`) are the same as before.

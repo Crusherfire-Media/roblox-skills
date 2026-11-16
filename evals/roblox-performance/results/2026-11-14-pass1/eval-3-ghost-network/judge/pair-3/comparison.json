@@ -1,0 +1,129 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both remove the replicated server parts, send only on change at about 20/s, and draw ghosts on each client. A puts ghost updates on UnreliableRemoteEvents, uses sequence numbers to discard stale updates, sends a full resend every second to repair dropped ones, and interpolates against server timestamps. B keeps ghost traffic on reliable RemoteEvents, which the rubric specifically flags, and does not justify that choice. A's write-up is also more thorough. B's one advantage, silence when idle, does not outweigh this.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Change-only, capped client sends",
+          "score": 4,
+          "note": "reportOwnGhost sends only when GhostCodec.isSame says the state changed, at most every SEND_INTERVAL (40 ms, so 25/s) whatever the frame rate; an unchanged state is still resent every RESEND_INTERVAL (1/s), so an idle builder is not fully silent."
+        },
+        {
+          "criterion": "Ghosts built on each client; server only relays",
+          "score": 5,
+          "note": "The server keeps no parts and only sends GhostBatch buffers; clients create parts in a local GhostPreviews folder and draw them a short delay behind, gliding between timestamped samples."
+        },
+        {
+          "criterion": "Own ghost drawn locally every frame",
+          "score": 5,
+          "note": "onRenderStepped calls drawOwnGhost(getCursorState()) every frame with no server round trip."
+        },
+        {
+          "criterion": "Unreliable ghost transport; PlaceBlock unchanged",
+          "score": 5,
+          "note": "MoveGhost and GhostBatch are both UnreliableRemoteEvents, with sequence checks (isNewerSequence), a full resend every second, and the 1,000-byte cap handled via MaxEntriesPerBatch; placement files are untouched."
+        },
+        {
+          "criterion": "Server validation, rate limits, cleanup",
+          "score": 4,
+          "note": "decodeMove checks the type and exact buffer length and rejects unknown block indices, and i16 coordinates rule out NaN; there is no explicit per-player rate limit (the relay is capped at one entry per batch), FireAllClients echoes to the builder but the client drops its own slot, and ghosts are destroyed on PlayerRemoving and hidden when the block index is 0."
+        },
+        {
+          "criterion": "Write-up estimates and player-visible changes",
+          "score": 4,
+          "note": "Thorough per-message math, before/after table, scaling with player count and a verification plan, plus a good list of what players will notice; one line says byte costs come from a Studio measurement while the doc also says nothing has been run."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 5,
+          "note": "All checks pass; changes are limited to the two scripts, the doc and a shared GhostCodec module, and the code is well typed."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Change-only, capped client sends",
+          "score": 5,
+          "note": "updateOwnGhost returns early when GhostCodec.equals reports no change and throttles to SendInterval (20/s), so an idle client sends nothing."
+        },
+        {
+          "criterion": "Ghosts built on each client; server only relays",
+          "score": 5,
+          "note": "The server only batches the dirty slots into GhostUpdates; clients create LocalGhosts parts and ease them toward each new target with exponential smoothing."
+        },
+        {
+          "criterion": "Own ghost drawn locally every frame",
+          "score": 5,
+          "note": "updateOwnGhost runs every RenderStepped and moves ownGhost straight from the cursor cell."
+        },
+        {
+          "criterion": "Unreliable ghost transport; PlaceBlock unchanged",
+          "score": 2,
+          "note": "GhostState and GhostUpdates are reliable RemoteEvents, so ghost traffic still shares the ordered reliable stream, and the write-up never explains the choice; PlaceBlock is untouched."
+        },
+        {
+          "criterion": "Server validation, rate limits, cleanup",
+          "score": 4,
+          "note": "decodeState checks the type, length and block index; there is no explicit rate limit (relay coalesced via the dirty table), the builder's own updates are echoed and filtered on the client, and the ghost is hidden via dirty on leave but the client part is never destroyed."
+        },
+        {
+          "criterion": "Write-up estimates and player-visible changes",
+          "score": 4,
+          "note": "Clear assumptions marked as estimates, before/after math and a summary table, a good list of what players will notice, and tuning notes."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 4,
+          "note": "All checks pass and the scope is tight; the own ghost's block type is reapplied every frame and the late-join snapshot depends on the client's first send."
+        }
+      ],
+      "overall_score": 6.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Unreliable transport with sequence ordering and a periodic full resend",
+        "Interpolation against server timestamps, with handling for pauses",
+        "Thorough, honest write-up with a verification plan",
+        "Handles the unreliable payload size limit"
+      ],
+      "weaknesses": [
+        "Idle builders resend once per second",
+        "No explicit per-player rate limit on incoming messages",
+        "Updates are echoed to the builder and filtered on the client",
+        "Write-up wording about the byte costs being 'measured' is slightly ambiguous"
+      ]
+    },
+    "B": {
+      "score": 6.5,
+      "strengths": [
+        "Truly silent when idle",
+        "Simple, readable smoothing and batching",
+        "Late joiners get a snapshot",
+        "Honest estimates with tuning guidance"
+      ],
+      "weaknesses": [
+        "Ghost traffic stays on reliable RemoteEvents, against the core goal",
+        "No explicit per-player rate limit",
+        "Remote ghost parts are hidden rather than destroyed when the player leaves",
+        "Easing toward the latest cell is less steady than timestamped interpolation"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 6.5
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

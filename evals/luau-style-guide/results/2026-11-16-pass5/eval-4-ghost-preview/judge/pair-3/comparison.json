@@ -1,0 +1,115 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "Both are well-structured, typed, and tear down properly. B has a real correctness bug: _Hide clears _IsPlaceable without restyling, so after hiding over a valid spot the ghost can reappear over a blocked spot without the red tint. A reapplies the style every frame, so it never shows the wrong colour, and its destroy is guarded. B's query shape is slightly nicer, but A works correctly.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "_update raycasts every render step, filters { character, self._part }, snaps result.Position + Normal*BlockSize/2, unparents on miss, checks against PlacedBlocks, and _applyStyle is reapplied each frame and on setBlockType, so the tint is always current."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "destroy unbinds the render step, destroys the part, and is guarded by _destroyed, so a frame can't run on a destroyed ghost; there are no other connections."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 5,
+          "note": "A Fields type is cast in setmetatable({...} :: Fields), all fields are set in the constructor, methods are called with a colon, and the part has CanCollide/CanQuery false and is also in the filter."
+        },
+        {
+          "criterion": "Typing",
+          "score": 4,
+          "note": "Everything is typed with BlockTypes.BlockType; getPlacement returns (Vector3?, boolean) with the centre non-nil even when blocked, which is consistent and documented but a bit less tidy."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "A named Options {transparency, maxDistance} table with DEFAULT_TRANSPARENCY/DEFAULT_MAX_DISTANCE constants and validation."
+        },
+        {
+          "criterion": "Scope / merge-ready",
+          "score": 5,
+          "note": "A single class file, shared modules untouched, and all tools pass; the 'disconnect' check miss is a false negative because the render step is unbound."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 3,
+          "note": "Raycast, half-block offset, snap, and check are correct, but _Hide sets _IsPlaceable=false without _ApplyStyle, so after hiding over a valid spot the ghost reappears over a blocked spot in its normal colour instead of red."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 4,
+          "note": "Destroy unbinds the render step, disconnects _CharacterAddedConnection, and destroys the part; there is no destroyed guard, but a repeat call is harmless."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 4,
+          "note": "The typeof(setmetatable({} :: {...})) type lists all fields set in the constructor, and the part has CanQuery=false; the hidden part stays parented in workspace at transparency 1."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "Typed constructor and methods using BlockType; GetPlacement returns (boolean, Vector3?) with nil whenever it isn't placeable."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "A named Options {Transparency, RayLength} table with DEFAULT_ constants and asserts."
+        },
+        {
+          "criterion": "Scope / merge-ready",
+          "score": 5,
+          "note": "A single class, shared modules unchanged, and all tools pass."
+        }
+      ],
+      "overall_score": 6.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Correct per-frame tint and visibility logic",
+        "Idempotent destroy with a destroyed guard",
+        "Filter rebuilt each frame handles respawns without extra connections",
+        "Clear typed Fields and options"
+      ],
+      "weaknesses": [
+        "getPlacement returns a position even when it isn't placeable, so callers must check the boolean",
+        "Re-styles every frame (minor cost)"
+      ]
+    },
+    "B": {
+      "score": 6.5,
+      "strengths": [
+        "Clean (boolean, Vector3?) placement query",
+        "CharacterAdded keeps the filter current and is disconnected on Destroy",
+        "Only updates CFrame and style on change"
+      ],
+      "weaknesses": [
+        "Stale tint bug: after a hide, a blocked spot can show in the normal colour",
+        "The ghost itself isn't in the raycast filter (relies on CanQuery only)",
+        "Destroy isn't guarded"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 9,
+    "with_skill": 6.5
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

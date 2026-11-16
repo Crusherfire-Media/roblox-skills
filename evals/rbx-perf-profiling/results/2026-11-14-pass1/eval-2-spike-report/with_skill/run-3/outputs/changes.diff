@@ -1,0 +1,356 @@
+diff --git a/src/ReplicatedStorage/Shared/Dev/SpikeReport.luau b/src/ReplicatedStorage/Shared/Dev/SpikeReport.luau
+new file mode 100644
+index 0000000..1817c95
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/Dev/SpikeReport.luau
+@@ -0,0 +1,350 @@
++--!strict
++--[[
++	Dev-only report on a MicroProfiler snapshot saved to a slot, such as the one
++	HitchSnapshot saves to slot 2. Run it from the Studio command bar in Edit
++	mode after the playtest:
++
++		require(game.ReplicatedStorage.Shared.Dev.SpikeReport).run(2)
++
++	Scope times are self times: a scope's time minus the time spent in scopes
++	nested inside it, summed over every CPU thread, so they measure work volume
++	rather than wall time when threads run in parallel.
++]]
++
++const LibMP = require("./LibMPLoader")
++
++const SLOW_FRAME_FACTOR = 2
++const TOP_SCOPE_COUNT = 5
++const PERCENTILE = 0.9
++const MS_DECIMALS = 1000
++
++export type ScopeTime = {
++	Name: string,
++	Group: string,
++	SelfMs: number,
++	NormalAverageMs: number,
++}
++
++export type SlowFrame = {
++	Name: string,
++	FrameId: number,
++	FrameAbsoluteId: number,
++	FrameMs: number,
++	TopScopes: { ScopeTime },
++}
++
++export type Report = {
++	Slot: number,
++	FrameCount: number,
++	NormalFrameCount: number,
++	MedianFrameMs: number,
++	P90FrameMs: number,
++	SlowFrameThresholdMs: number,
++	SlowFrames: { SlowFrame },
++}
++
++type FrameInfo = {
++	Id: number,
++	AbsoluteId: number,
++	Ms: number,
++}
++
++type TimerInfo = {
++	Name: string,
++	Group: string,
++}
++
++local Module = {}
++
++local function roundMs(ms: number): number
++	return math.round(ms * MS_DECIMALS) / MS_DECIMALS
++end
++
++local function getMedian(sorted: { number }): number
++	const count = #sorted
++	const middle = count // 2
++	if count % 2 == 0 then
++		return (sorted[middle] + sorted[middle + 1]) / 2
++	else
++		return sorted[middle + 1]
++	end
++end
++
++local function getPercentile(sorted: { number }, fraction: number): number
++	return sorted[math.max(1, math.ceil(fraction * #sorted))]
++end
++
++local function collectFrames(
++	session: any,
++	firstFrameId: number,
++	lastFrameId: number,
++	tickToMs: number
++): { FrameInfo }
++	const frames = {}
++	for frameId = firstFrameId, lastFrameId do
++		const frameDesc = session:FetchFrameDesc(frameId)
++		if frameDesc.IsIncomplete or frameDesc.IsPaused then
++			continue
++		end
++		const frameMs = (frameDesc.TickEndCpu - frameDesc.TickStartCpu) * tickToMs
++		if frameMs <= 0 then
++			continue
++		end
++		table.insert(frames, {
++			Id = frameId,
++			AbsoluteId = frameDesc.FrameAbsoluteId,
++			Ms = frameMs,
++		})
++	end
++	return frames
++end
++
++--[[
++	Returns self ticks by frame ID, then by timer ID, for the CPU threads.
++
++	Each stretch of time between two log entries on a thread belongs to the
++	scope on top of that thread's stack, which yields self time directly and
++	splits scopes that cross frame boundaries at those boundaries.
++]]
++local function measureSelfTicks(
++	session: any,
++	firstFrameId: number,
++	lastFrameId: number
++): { [number]: { [number]: number }? }
++	-- The frame before the range only warms up the scope stacks
++	const warmUpFrameId = math.max(session:GetFrameIdMin(), firstFrameId - 1)
++
++	const iterator = session:CreateLogIterator()
++	iterator:Configure({
++		SkipGpuThreads = true,
++		SkipEvents = true,
++		EmitThreadFrameEnd = true,
++		StartFrameId = warmUpFrameId,
++		EndFrameId = lastFrameId,
++	})
++	const state = iterator:GetState()
++
++	const selfTicksByFrame: { [number]: { [number]: number }? } = {}
++
++	-- Expected errors: LibMP failing to read a corrupt or truncated snapshot
++	const success, errorMessage = pcall(function()
++		iterator:RewindTo(warmUpFrameId, lastFrameId)
++
++		local frameStartTick = 0
++		local currentFrameId = -1
++		local currentThreadId = -1
++		local previousTick = 0
++		local frameTicks: { [number]: number }? = nil
++		-- Time with nothing known on the stack, owed to a scope that entered
++		-- before the iterated range and has not exited yet
++		local unclaimedTicks = 0
++
++		while iterator:Step() do
++			if state:IsFrameBoundary() then
++				frameStartTick = state:Timestamp()
++				continue
++			end
++			const isEnter = state:IsEnter()
++			const isExit = state:IsExit()
++			if not (isEnter or isExit or state:IsThreadFrameEnd()) then
++				continue
++			end
++
++			const frameId = state:FrameId()
++			const threadId = state:ThreadId()
++			if frameId ~= currentFrameId or threadId ~= currentThreadId then
++				currentFrameId = frameId
++				currentThreadId = threadId
++				previousTick = frameStartTick
++				unclaimedTicks = 0
++				if frameId >= firstFrameId then
++					frameTicks = selfTicksByFrame[frameId]
++					if not frameTicks then
++						frameTicks = {}
++						selfTicksByFrame[frameId] = frameTicks
++					end
++				else
++					frameTicks = nil
++				end
++			end
++
++			const tick = state:Timestamp()
++			local elapsedTicks = math.max(0, tick - previousTick)
++			previousTick = math.max(previousTick, tick)
++
++			const depth = state:ThreadStackDepth()
++			local runningTimerId = 0
++			local depthBefore = depth
++			if isExit then
++				runningTimerId = state:TimerId()
++				if state:ThreadStackIsUnderflowed() then
++					elapsedTicks += unclaimedTicks
++					unclaimedTicks = 0
++				end
++			elseif isEnter then
++				depthBefore = depth - 1
++				if depthBefore > 0 then
++					const element = iterator:GetCurrentThreadStackElement(depthBefore - 1)
++					if element then
++						runningTimerId = element:EnterTimerId()
++					end
++				end
++			elseif depth > 0 then
++				const element = iterator:GetCurrentThreadStackElement(depth - 1)
++				if element then
++					runningTimerId = element:EnterTimerId()
++				end
++			end
++
++			if runningTimerId ~= 0 then
++				if frameTicks then
++					frameTicks[runningTimerId] = (frameTicks[runningTimerId] or 0) + elapsedTicks
++				end
++			elseif depthBefore <= 0 then
++				unclaimedTicks += elapsedTicks
++			end
++		end
++	end)
++
++	iterator:Dispose()
++	if not success then
++		error(errorMessage, 0)
++	end
++	return selfTicksByFrame
++end
++
++local function describeTimer(session: any, cache: { [number]: TimerInfo? }, timerId: number)
++	const cached = cache[timerId]
++	if cached then
++		return cached
++	end
++	const timerDesc = session:FetchTimerDesc(timerId)
++	const groupId = timerDesc.GroupId
++	const info = {
++		Name = timerDesc.TimerName,
++		Group = if groupId ~= 0 then session:FetchGroupDesc(groupId).GroupName else "",
++	}
++	cache[timerId] = info
++	return info
++end
++
++local function buildReport(session: any, slot: number): Report
++	if not session:IsValid() then
++		error(`Slot {slot} holds an unreadable MicroProfiler snapshot`)
++	end
++
++	const frameIdMin = session:GetFrameIdMin()
++	const frameIdMax = session:GetFrameIdMax()
++	if frameIdMin == 0 and frameIdMax == 0 then
++		error(`Slot {slot} holds no frames`)
++	end
++
++	-- The first frame only warms up the scope stacks, so its scope times
++	-- would be incomplete
++	const firstFrameId = if frameIdMax > frameIdMin then frameIdMin + 1 else frameIdMin
++	const tickToMs = session:FetchGlobalDesc().TickToMsCpu
++
++	const frames = collectFrames(session, firstFrameId, frameIdMax, tickToMs)
++	if #frames == 0 then
++		error(`Slot {slot} holds no complete frames`)
++	end
++
++	const sortedMs = {}
++	for _, frame in frames do
++		table.insert(sortedMs, frame.Ms)
++	end
++	table.sort(sortedMs)
++	const medianMs = getMedian(sortedMs)
++	const thresholdMs = SLOW_FRAME_FACTOR * medianMs
++
++	const selfTicksByFrame = measureSelfTicks(session, firstFrameId, frameIdMax)
++	local function getFrameTicks(frameId: number): { [number]: number }
++		return selfTicksByFrame[frameId] or {}
++	end
++
++	const slowFrames = {}
++	const normalTicksByTimer: { [number]: number? } = {}
++	local normalFrameCount = 0
++	for _, frame in frames do
++		if frame.Ms > thresholdMs then
++			table.insert(slowFrames, frame)
++		else
++			normalFrameCount += 1
++			for timerId, ticks in getFrameTicks(frame.Id) do
++				normalTicksByTimer[timerId] = (normalTicksByTimer[timerId] or 0) + ticks
++			end
++		end
++	end
++
++	const timerCache: { [number]: TimerInfo? } = {}
++	const slowFrameReports = {}
++	for _, frame in slowFrames do
++		const ranked = {}
++		for timerId, ticks in getFrameTicks(frame.Id) do
++			table.insert(ranked, { TimerId = timerId, Ticks = ticks })
++		end
++		table.sort(ranked, function(a, b)
++			return a.Ticks > b.Ticks
++		end)
++
++		const topScopes = {}
++		for index = 1, math.min(TOP_SCOPE_COUNT, #ranked) do
++			const entry = ranked[index]
++			const timer = describeTimer(session, timerCache, entry.TimerId)
++			const normalTicks = normalTicksByTimer[entry.TimerId] or 0
++			const normalAverageMs = if normalFrameCount > 0
++				then normalTicks / normalFrameCount * tickToMs
++				else 0
++			table.insert(topScopes, {
++				Name = timer.Name,
++				Group = timer.Group,
++				SelfMs = roundMs(entry.Ticks * tickToMs),
++				NormalAverageMs = roundMs(normalAverageMs),
++			})
++		end
++
++		table.insert(slowFrameReports, {
++			Name = `Frame {frame.Id} (absolute {frame.AbsoluteId})`,
++			FrameId = frame.Id,
++			FrameAbsoluteId = frame.AbsoluteId,
++			FrameMs = roundMs(frame.Ms),
++			TopScopes = topScopes,
++		})
++	end
++
++	return {
++		Slot = slot,
++		FrameCount = #frames,
++		NormalFrameCount = normalFrameCount,
++		MedianFrameMs = roundMs(medianMs),
++		P90FrameMs = roundMs(getPercentile(sortedMs, PERCENTILE)),
++		SlowFrameThresholdMs = roundMs(thresholdMs),
++		SlowFrames = slowFrameReports,
++	}
++end
++
++--[[
++	Reports frame times and the slowest scopes of each slow frame in the
++	MicroProfiler snapshot saved to `slot` (1 to 4). Leaves the slot and the
++	profiler settings untouched. Errors when the slot holds no usable frames.
++]]
++function Module.run(slot: number): Report
++	if slot ~= slot // 1 or slot < 1 or slot > 4 then
++		error("Slot must be a whole number from 1 to 4")
++	end
++
++	const session = LibMP.Session.OpenFromSlot(slot)
++	if not session then
++		error(`Slot {slot} holds no MicroProfiler snapshot`)
++	end
++
++	-- Expected errors: the slot's snapshot is empty or unreadable
++	const success, result = pcall(buildReport, session, slot)
++	session:Dispose()
++	if not success then
++		error(result, 0)
++	end
++	return result
++end
++
++return Module

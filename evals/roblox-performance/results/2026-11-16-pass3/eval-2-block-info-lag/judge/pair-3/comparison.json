@@ -1,0 +1,123 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both remove the per-frame O(N) scans, use event-driven counts and update only on change. B's hover lookup is a grid-cell spatial hash, exactly what criterion 2 names, and it keeps the original nearest-center rule exactly. A uses a GetPartBoundsInRadius query that allocates every frame and depends on CanQuery. Both reports are honest; A's has a stale note about lint tools, and B's slightly overpromises the phone result. Overall B edges out A.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Event-driven counts",
+          "score": 5,
+          "note": "onChildAdded/onChildRemoved with a startup GetChildren pass; RenderStepped no longer touches the folder."
+        },
+        {
+          "criterion": "Hover lookup doesn't scale with N",
+          "score": 4,
+          "note": "Workspace:GetPartBoundsInRadius filtered to blocksFolder is O(local) but is neither the raycast instance nor a grid-cell lookup, and it allocates a result table every frame."
+        },
+        {
+          "criterion": "Work only on input change",
+          "score": 5,
+          "note": "Early return when hovered == shownHovered and not isTextDirty; Adornee and Text are written only on change."
+        },
+        {
+          "criterion": "Same behavior",
+          "score": 4,
+          "note": "Counts, total and hover rule are preserved; the CanQuery and tie-breaking differences are minor and documented."
+        },
+        {
+          "criterion": "Removes cost, no throttling or micro-tuning",
+          "score": 5,
+          "note": "No throttling, pooling or parallel code; the per-frame O(N) work is gone."
+        },
+        {
+          "criterion": "Honest report",
+          "score": 5,
+          "note": "The After column says 'not measured yet', the report explains the GetChildren garbage behind the GC label, and it asks for the same MicroProfiler label, a 12k-block scaling test and phone FPS."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 4,
+          "note": "All checks pass and the changes stay in scope, but the report wrongly says StyLua and selene couldn't be run."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Event-driven counts",
+          "score": 5,
+          "note": "onBlockAdded/onBlockRemoved maintain counts and totalCount, with one startup pass over GetChildren."
+        },
+        {
+          "criterion": "Hover lookup doesn't scale with N",
+          "score": 5,
+          "note": "A spatial hash of cells keyed by Vector3 grid cell; the hover check covers 27 neighbouring buckets."
+        },
+        {
+          "criterion": "Work only on input change",
+          "score": 5,
+          "note": "Adornee is written only when hovered ~= lastHovered, and the text is rebuilt only when countsDirty is set."
+        },
+        {
+          "criterion": "Same behavior",
+          "score": 5,
+          "note": "Keeps the exact nearest-center-within-HOVER_RADIUS rule; the 27-cell search is provably enough because HOVER_RADIUS <= BLOCK_SIZE."
+        },
+        {
+          "criterion": "Removes cost, no throttling or micro-tuning",
+          "score": 5,
+          "note": "No throttling or pooling; the reused lines buffer is trivial."
+        },
+        {
+          "criterion": "Honest report",
+          "score": 4,
+          "note": "Explains O(N) per-frame cost and garbage and gives Studio checks, but says the phone 'should be back to' its empty-baseplate FPS, which slightly overpromises."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 5,
+          "note": "All checks pass, the code is typed and well sectioned, and the documented assumptions match the server code."
+        }
+      ],
+      "overall_score": 9
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Clean event-driven counts with a guard against double counting",
+        "Engine spatial query is correct and stays valid if blocks ever move",
+        "Very honest report with a clear 'not measured' After column"
+      ],
+      "weaknesses": [
+        "The overlap query allocates a table every frame and depends on CanQuery",
+        "Stale note about not running StyLua or selene"
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "Grid-cell spatial hash matches the rubric's preferred approach exactly",
+        "Separate dirty handling for Adornee and text",
+        "Report documents assumptions such as no moving, no renaming and the radius limit"
+      ],
+      "weaknesses": [
+        "The spatial hash assumes blocks never move",
+        "Small overpromise about phone FPS in the report"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8,
+    "without_skill": 9
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts get the ready-handshake ordering right, use per-player keys, and call `removeClient`. A uses the APIs the library facts verify (`Charm.signal` getter/setter, `VideCharm.useSignalState`), keeps the 50 limit and the state shape in one shared module, and is strictly typed. B relies on `Charm.atom` and `VideCharm.useAtom`, which the 0.11/0.4.1 facts do not confirm and which may not exist; it also bypasses typing with `any` casts and keeps two field lists that must stay in step. A is the safer merge.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Server state in Charm",
+          "score": 5,
+          "note": "`ServerScriptService/PlayerState.luau` keeps one `Charm.signal` keyed by Player and updates it by copying with `table.clone`; `onPlaceBlock` checks `PlayerState:Get(player).BlocksLeft <= 0`, and `PlayerRemoving` clears the entry."
+        },
+        {
+          "criterion": "Server sync wiring",
+          "score": 5,
+          "note": "`CharmSync.server.connect` is called once and fires `remote:FireClient(player, payloads)`; on the ready remote, `addSignalsToClient` subscribes the player under the per-player key `PlayerState-{userId}`, and `removeClient` runs on leave."
+        },
+        {
+          "criterion": "Client sync wiring",
+          "score": 5,
+          "note": "`StartAsync` calls `addSignals` with `setState` under the same key, connects `OnClientEvent` to `client.patch`, and only then calls `FireServer`, so the first full payload cannot be missed."
+        },
+        {
+          "criterion": "UI bridge, shared limit, initial display",
+          "score": 5,
+          "note": "`VideCharm.useSignalState` runs inside the mounted `app` scope; the limit is `BlockTypes.MaxBlocksPerPlayer`, shared by both sides, and the label shows 50 until the first payload."
+        },
+        {
+          "criterion": "UI never writes the synced signal",
+          "score": 5,
+          "note": "Client `PlayerState` exports only `getState`; `setState` is handed only to CharmSync."
+        },
+        {
+          "criterion": "Extensibility",
+          "score": 5,
+          "note": "Adding the next value means one new field in the shared `PlayerState` type and `DEFAULT_STATE`, which syncs under the same per-player key."
+        },
+        {
+          "criterion": "Correct, typed, in scope",
+          "score": 5,
+          "note": "Files are `--!strict`, all checks pass, and the hotbar is moved into a `Hotbar` stack container with its layout preserved. The per-player `Charm.computed` from `GetSignal` is never disposed, a small leak."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Server state in Charm",
+          "score": 4,
+          "note": "Each player gets their own atom from `PlayerState.get`, dropped on `PlayerRemoving`. But `get` lazily creates state again if called after the player leaves, and `Charm.atom` is not the verified 0.11 `signal` API."
+        },
+        {
+          "criterion": "Server sync wiring",
+          "score": 4,
+          "note": "`server.connect` is called once and fires the remote to the player; `addSignalsToClient` uses per-player `field:userId` keys built by `keyAtoms`, and `removeClient` runs on leave. The `:: any` cast hides typing."
+        },
+        {
+          "criterion": "Client sync wiring",
+          "score": 4,
+          "note": "`addSignals` is called before `OnClientEvent` is connected and before `FireServer`, so the handshake ordering is right; registration passes the atoms through `PlayerState :: any`."
+        },
+        {
+          "criterion": "UI bridge, shared limit, initial display",
+          "score": 4,
+          "note": "The server syncs the remaining count, and the label stays hidden while the count is nil, which is sensible. The bridge is `VideCharm.useAtom`, which the vide-charm 0.4.1 facts do not confirm (only `useSignalState`)."
+        },
+        {
+          "criterion": "UI never writes the synced signal",
+          "score": 5,
+          "note": "The client only reads the atom; the module is documented as read only."
+        },
+        {
+          "criterion": "Extensibility",
+          "score": 4,
+          "note": "Adding a value means a matching atom in both `PlayerState` modules, kept in sync by name only, with no shared type."
+        },
+        {
+          "criterion": "Correct, typed, in scope",
+          "score": 3,
+          "note": "Checks pass, but the files are non-strict with `:: any` casts, and relying on `Charm.atom` and `useAtom` risks runtime errors in Charm 0.11.1 and vide-charm 0.4.1."
+        }
+      ],
+      "overall_score": 6.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Uses the Charm `signal` getter/setter API and vide-charm `useSignalState`, both verified in the library facts",
+        "One shared definition of the state shape, the defaults, and the 50 limit",
+        "Ready handshake ordered correctly on the client",
+        "Strict typing throughout"
+      ],
+      "weaknesses": [
+        "The per-player computed made in `GetSignal` is never disposed",
+        "Syncing the whole state table as one key means each patch diffs the full table (minor)"
+      ]
+    },
+    "B": {
+      "score": 6.5,
+      "strengths": [
+        "Per-player atoms and `keyAtoms` give a tidy per-field, per-player key scheme",
+        "Label is hidden until the server's first payload",
+        "Correct handshake ordering"
+      ],
+      "weaknesses": [
+        "Uses `Charm.atom` and `VideCharm.useAtom`, which do not match the verified Charm 0.11 `signal` and vide-charm `useSignalState` APIs",
+        "`any` casts and non-strict files",
+        "Client and server field lists can drift apart because there is no shared type",
+        "Lazy `get` can re-create state for a player who has already left"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 6.5
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are correct and nearly the same in design. Each keeps one Charm signal per player, uses a key per player, fires a ready remote only after the client is listening, bridges to the UI with useSignalState inside the mounted scope, and syncs the remaining count. B is slightly cleaner. Its starting data (50) is set in the same module that owns the signal, while A starts at 0 and has BlockPlacement override it on PlayerAdded. B also keeps sync wiring in its own script and guards against repeat subscribe requests. A's update helper, which copies the table for the caller, is a small point in its favour, but it doesn't outweigh B's clearer structure.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Server Charm state",
+          "score": 4,
+          "note": "One Charm signal per player in PlayerStateServer `entries`, updated by copying in `update` (table.clone). The limit check reads `PlayerStateServer.get(player).blocksLeft <= 0`, and the entry is cleared on PlayerRemoving. The starting value of 50 comes from a separate PlayerAdded handler in BlockPlacement, overriding a Default of 0."
+        },
+        {
+          "criterion": "2. Server sync wiring",
+          "score": 5,
+          "note": "`connect` is called once and fires `syncRemote:FireClient(player, payloads)`. Players are subscribed with `addSignalsToClient` under `playerState-{userId}` when the client asks, and `removeClient` runs on PlayerRemoving."
+        },
+        {
+          "criterion": "3. Client sync wiring",
+          "score": 5,
+          "note": "`addSignals` is registered before OnClientEvent is connected, and `remote:FireServer()` is sent only after the client is listening, so the first full payload can't be missed."
+        },
+        {
+          "criterion": "4. Vide bridge, limit, initial display",
+          "score": 5,
+          "note": "`useSignalState(PlayerStateClient.get)` runs inside `app`. The server syncs `blocksLeft` itself, and the label is hidden while the value is nil."
+        },
+        {
+          "criterion": "5. UI never writes synced signal",
+          "score": 5,
+          "note": "`setState` is used only by `addSignals`, and the UI only reads `get`."
+        },
+        {
+          "criterion": "6. Extensibility",
+          "score": 4,
+          "note": "The shared PlayerState type and Default list the synced fields, and both sides use one key per player. However, the real starting value is set from BlockPlacement's PlayerAdded handler, so a new field's initial value can end up split across scripts."
+        },
+        {
+          "criterion": "7. Correct and in scope",
+          "score": 5,
+          "note": "Checks pass, placement keeps working, and pulling hotbar sizes into HotbarLayout is a tidy refactor."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Server Charm state",
+          "score": 5,
+          "note": "PlayerData creates one signal per player on PlayerAdded with `BlocksLeft = MAX_BLOCKS_PER_PLAYER` and clears it on PlayerRemoving. The limit check reads `data.BlocksLeft <= 0`, and updates use `table.clone`."
+        },
+        {
+          "criterion": "2. Server sync wiring",
+          "score": 5,
+          "note": "PlayerDataSync calls `connect` once with FireClient. It subscribes with `addSignalsToClient` under `PlayerData-{userId}`, guards against repeat requests with `syncedPlayers`, and calls `removeClient` on leave."
+        },
+        {
+          "criterion": "3. Client sync wiring",
+          "score": 5,
+          "note": "`addSignals` comes before connecting OnClientEvent to `CharmSync.client.patch`, then `FireServer` is sent as the ready signal."
+        },
+        {
+          "criterion": "4. Vide bridge, limit, initial display",
+          "score": 5,
+          "note": "`VideCharm.useSignalState` runs inside `app` with a getter that picks out the count. The server syncs the remaining count, and the label is hidden until the first payload."
+        },
+        {
+          "criterion": "5. UI never writes synced signal",
+          "score": 5,
+          "note": "`setData` is only passed to `addSignals`, and the doc comment says the UI never sets it."
+        },
+        {
+          "criterion": "6. Extensibility",
+          "score": 5,
+          "note": "The SyncedPlayerData type and PlayerData's `initialData` are the one place per side for fields, and sync wiring lives in its own script."
+        },
+        {
+          "criterion": "7. Correct and in scope",
+          "score": 5,
+          "note": "Checks pass, and placement and the hotbar keep working. The label turns red at zero, and the story file doesn't affect the score."
+        }
+      ],
+      "overall_score": 9
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Ready-handshake means the first payload can't be missed",
+        "`update` takes care of copying, so callers can't forget to clone",
+        "Handles placement events that arrive after a player has left by using a throwaway entry"
+      ],
+      "weaknesses": [
+        "Default `blocksLeft = 0`, overridden by a PlayerAdded handler in another script, so initialization is split",
+        "Repeated ready events aren't guarded (this is harmless here)"
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "Clean split: data ownership in PlayerData, sync in PlayerDataSync, shared key and type in SyncedPlayerData",
+        "Starting value set in one place at join",
+        "Guards against repeat ready events",
+        "More polished label: pill background, red when empty"
+      ],
+      "weaknesses": [
+        "Callers of `update` must clone the table themselves, which is easy to get wrong (it's documented)",
+        "MAX_BLOCKS_PER_PLAYER moved out of BlockPlacement into PlayerData"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8.5,
+    "with_skill": 9
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}
