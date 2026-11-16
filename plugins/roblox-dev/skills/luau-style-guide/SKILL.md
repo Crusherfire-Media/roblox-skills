@@ -25,10 +25,11 @@ skill. Load it alongside this one.
 
 ## Precedence
 
-**Existing files.** In a file that already exists, match its conventions: its
-require style, `local` or `const` bindings, and strict mode. Change the lines
-the task needs and leave the rest as they are. The rules below apply in full
-to new files, and to code you write where the file has no established pattern.
+**Fit the project.** Code you write takes the project's conventions: its
+require style, `local` or `const` bindings, and strict mode. An edited file
+sets them for itself, and a new file takes them from its sibling files. Change
+the lines the task needs and leave the rest as they are. The rules below apply
+in full where the project has no established pattern.
 
 The project's own `CLAUDE.md` wins wherever it overrides or tightens a rule
 below. When a rule here seems to contradict the Roblox guide or habits from
