@@ -1,0 +1,155 @@
+diff --git a/docs/perf/block-catalog.md b/docs/perf/block-catalog.md
+new file mode 100644
+index 0000000..94efc2b
+--- /dev/null
++++ b/docs/perf/block-catalog.md
+@@ -0,0 +1,48 @@
++# Block catalog: CanvasGroups
++
++## Problem
++
++At low graphics quality on phones the catalog flickered and some cards drew blank. With the
++catalog open, PlayerGui held 41 CanvasGroups: the panel plus one per card (5 block types x 8
++shapes). Every CanvasGroup renders to its own texture, and they share a texture budget that shrinks
++at low quality. Past it, groups flicker or draw blank. 40 of the 41 existed only to clip the hover
++shine to the card's rounded corners, so they were idle unless that card was hovered.
++
++## Change
++
++In `src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau`:
++
++- Each card is now a plain `Frame` with the same `UICorner` and background.
++- The shine lives in a transparent `ShineHost` frame. Inside it, `show` builds a `ShineClip`
++  CanvasGroup (with the card's `UICorner`, so the clip is still rounded) only while the card is
++  hovered or its shine is still fading out (strength above 0.01).
++- The shine strength now drives the group's `GroupTransparency` (`1 - shine`), and the stripe holds
++  a fixed transparency of 0.5. The stripe's opacity is still `0.5 * shine`, as before, and the group
++  is nearly clear when it is made and removed, so it does not flash white.
++- The panel keeps its CanvasGroup. It is drawn the whole time the catalog is open, it is made at
++  `GroupTransparency` 1 when the fade-in starts, and it is removed near 1 when the fade-out ends.
++
++With the catalog open and nothing hovered there is now 1 CanvasGroup. While hovering, there is 1
++more for each card whose shine is still showing, usually 2 or 3 in total.
++
++## How to check it
++
++1. Play in Studio (or on a phone), open the catalog with C or the Catalog button.
++2. Count CanvasGroups in the command bar on the client:
++
++   ```lua
++   local n = 0
++   for _, d in game.Players.LocalPlayer.PlayerGui:GetDescendants() do
++   	if d:IsA("CanvasGroup") then n += 1 end
++   end
++   print(n)
++   ```
++
++   Expect 1 with the pointer off the cards (it was 41). Hover one card and run it again: 2. About
++   half a second after leaving the card it drops back to 1.
++3. Look: the panel still fades in and out, and hovering a card sweeps the shine across it, clipped
++   to the rounded corners, then sweeps it back on leave. Watch for a white flash on a card as you
++   enter or leave it; there should be none.
++4. On a phone (or Studio with graphics quality set to 1 under Settings > Rendering, and the device
++   emulator set to a phone), open the catalog, scroll, and tap cards. The flicker and blank cards
++   should be gone.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau b/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
+index f07bd2d..187f502 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
+@@ -10,6 +10,8 @@ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
++local derive = Vide.derive
++local show = Vide.show
+ local source = Vide.source
+ local spring = Vide.spring
+ 
+@@ -28,6 +30,9 @@ local SHINE_WIDTH = 28
+ local FADE_SECONDS = 0.25
+ -- How long the shine takes to sweep across a card, in seconds.
+ local SWEEP_SECONDS = 0.45
++-- The shine stripe's transparency at full strength.
++local SHINE_TRANSPARENCY = 0.5
++local SHINE_GONE_BELOW = 0.01
+ local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+ local CARD_COLOR = Color3.fromRGB(44, 44, 52)
+ local SHINE_COLOR = Color3.fromRGB(255, 255, 255)
+@@ -56,7 +61,14 @@ local function card(
+ 		return if isHovered() then 1 else -1
+ 	end, SWEEP_SECONDS)
+ 
+-	return create("CanvasGroup")({
++	-- Each CanvasGroup takes a texture from a budget that is small at low graphics quality, so
++	-- the shine's clip exists only while the shine shows. Its transparency follows the shine, so
++	-- it is nearly clear when made and removed, which keeps it from flashing white.
++	local isShining = derive(function(): boolean
++		return isHovered() or shine() > SHINE_GONE_BELOW
++	end)
++
++	return create("Frame")({
+ 		Name = `{blockType.Name}{shapeName}`,
+ 		LayoutOrder = layoutOrder,
+ 		BackgroundColor3 = CARD_COLOR,
+@@ -112,26 +124,43 @@ local function card(
+ 			end,
+ 		}),
+ 		create("Frame")({
+-			Name = "Shine",
+-			AnchorPoint = Vector2.new(0.5, 0.5),
+-			Position = function()
+-				return UDim2.fromScale(0.5 + sweep() * 0.75, 0.5)
+-			end,
+-			Size = UDim2.new(0, SHINE_WIDTH, 2, 0),
+-			Rotation = 20,
+-			BackgroundColor3 = SHINE_COLOR,
+-			BackgroundTransparency = function()
+-				return 1 - shine() * 0.5
+-			end,
++			Name = "ShineHost",
++			Size = UDim2.fromScale(1, 1),
++			BackgroundTransparency = 1,
+ 			ZIndex = 2,
+ 
+-			create("UIGradient")({
+-				Transparency = NumberSequence.new({
+-					NumberSequenceKeypoint.new(0, 1),
+-					NumberSequenceKeypoint.new(0.5, 0),
+-					NumberSequenceKeypoint.new(1, 1),
+-				}),
+-			}),
++			show(isShining, function(): CanvasGroup
++				return create("CanvasGroup")({
++					Name = "ShineClip",
++					Size = UDim2.fromScale(1, 1),
++					BackgroundTransparency = 1,
++					GroupTransparency = function(): number
++						return 1 - shine()
++					end,
++					ZIndex = 2,
++
++					create("UICorner")({ CornerRadius = UDim.new(0, CARD_RADIUS) }),
++					create("Frame")({
++						Name = "Shine",
++						AnchorPoint = Vector2.new(0.5, 0.5),
++						Position = function(): UDim2
++							return UDim2.fromScale(0.5 + sweep() * 0.75, 0.5)
++						end,
++						Size = UDim2.new(0, SHINE_WIDTH, 2, 0),
++						Rotation = 20,
++						BackgroundColor3 = SHINE_COLOR,
++						BackgroundTransparency = SHINE_TRANSPARENCY,
++
++						create("UIGradient")({
++							Transparency = NumberSequence.new({
++								NumberSequenceKeypoint.new(0, 1),
++								NumberSequenceKeypoint.new(0.5, 0),
++								NumberSequenceKeypoint.new(1, 1),
++							}),
++						}),
++					}),
++				})
++			end),
+ 		}),
+ 	})
+ end

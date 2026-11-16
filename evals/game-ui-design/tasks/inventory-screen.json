@@ -1,0 +1,75 @@
+{
+	"id": 1,
+	"name": "inventory-screen",
+	"skill": "game-ui-design",
+	"prompt": "Players collect blocks now. BlockInventory (a module in StarterPlayerScripts) tracks how many of each of the ten block types the player has and which ones are still locked until a higher player level, and fires Changed when anything changes. BlockPlacer.setBlockType picks the block to build with.\n\nDesign and build the inventory screen with Vide. The player should be able to open it, see every block type with how many they have, see which ones are locked and what level unlocks them, and pick the block to build with. Most of our players are kids on phones, but the game also runs on PC and Xbox, so it has to work with touch, mouse and keyboard, and a controller.\n\nPut the UI under src/StarterPlayer/StarterPlayerScripts/UI/ and start it from Main.client.luau. Also write a short design note at docs/inventory-screen.md covering how the screen opens and closes and how each action works on touch, mouse and keyboard, and controller.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacement.server.luau",
+			"to": "src/ServerScriptService/BlockPlacement.server.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacer.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+		},
+		{
+			"from": "fixtures/inventory-screen/BlockInventory.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/BlockInventory.luau"
+		},
+		{
+			"from": "fixtures/inventory-screen/Main.client.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "file_exists",
+			"path": "docs/inventory-screen.md",
+			"text": "The design note exists at docs/inventory-screen.md"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "require\\([^)]*Packages[^)]*Vide",
+			"text": "A Luau file under src requires Vide"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "\\bActivated\\b",
+			"text": "Buttons use GuiButton.Activated"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "SelectedObject|GuiService:Select\\(",
+			"text": "The screen sets gamepad selection (GuiService.SelectedObject or GuiService:Select)"
+		}
+	],
+	"rubric": [
+		"Every action works with every input: buttons and slots fire on `Activated` (covers mouse, touch, and gamepad A) rather than MouseButton1Click alone; the screen opens and closes from an on-screen button as well as a key and a gamepad button; docs/inventory-screen.md states the path for each action on touch, mouse and keyboard, and controller, and the code matches it.",
+		"Controller navigation: opening the screen gives a slot (for example the selected block) gamepad selection through GuiService.SelectedObject or GuiService:Select, focus can't wander to UI behind the open screen (for example a SelectionGroup or selection rules on the panel), and B (ButtonB) closes the screen, as does the close button.",
+		"Touch targets and placement: slots, the open button, and the close button are about 44 px or larger at the 1080p reference size (roughly 10 mm on a phone); the open button sits clear of the bottom-left thumbstick and bottom-right jump corners and of Roblox's top bar; interactive UI is not opted out of the safe area (no IgnoreGuiInset = true or ScreenInsets = None).",
+		"Locked and empty states have a cue besides color or graying: a locked slot shows a lock icon or words with its unlock level (Ice level 4, Lamp level 6, Gold level 10; the player is level 3), a count of 0 shows as a number, and pressing a locked slot still responds (for example a message saying which level unlocks it) instead of doing nothing.",
+		"Nothing needs hover: each block's name, count, and lock state are visible on the slot or appear on tap or gamepad selection, and any hover effect only previews what selection or a tap also shows. Slots show a visible pressed or selected state.",
+		"Readable text: labels use a fixed TextSize per role instead of TextScaled, body text is about 18 px or larger at the 1080p reference, and text sits on a panel or backplate with strong contrast (about 4.5:1 or better).",
+		"Live data and valid Vide: counts and lock states update when BlockInventory.Changed fires, the selected-block highlight follows BlockPlacer.BlockTypeChanged (so number keys update it), connections to outside signals are cleaned up with the Vide scope, and everything that changes is bound rather than read once.",
+		"Correct and in scope: the screen works as described, BlockPlacer and the server keep working, and luau-lsp, selene, and StyLua pass on the attempt's own files. Supporting files such as a preview story or specs count neither for nor against."
+	],
+	"judge_facts": [
+		"Roblox engine API in this sandbox's type definitions (globalTypes.d.luau), all real and current: UserInputService.PreferredInput (Enum.PreferredInput: KeyboardAndMouse, Gamepad, Touch, MicroGamepad); GuiService.ViewportDisplaySize (Enum.DisplaySize: Small, Medium, Large); GuiService.TopbarInset (Rect); GuiService.PreferredTextSize; GuiService.PreferredTransparency (number); GuiService.ReducedMotionEnabled (boolean); ScreenGui.ScreenInsets (Enum.ScreenInsets: CoreUISafeInsets, DeviceSafeInsets, TopbarSafeInsets, None)."
+	],
+	"timeout_minutes": 25
+}

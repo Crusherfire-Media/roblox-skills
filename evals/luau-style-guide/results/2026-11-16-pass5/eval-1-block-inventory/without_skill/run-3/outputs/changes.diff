@@ -1,0 +1,237 @@
+diff --git a/src/ServerScriptService/BlockInventory.luau b/src/ServerScriptService/BlockInventory.luau
+new file mode 100644
+index 0000000..f133985
+--- /dev/null
++++ b/src/ServerScriptService/BlockInventory.luau
+@@ -0,0 +1,231 @@
++--!strict
++-- Tracks how many of each block type every player has.
++--
++-- Counts load from the "BlockInventory" DataStore when a player joins and are
++-- dropped when they leave. Until a player's counts have loaded, every call for
++-- that player fails with "NotLoaded" (or returns nil for getCount), so callers
++-- driven by remotes can treat early and late requests the same as any other
++-- failure.
++
++local DataStoreService = game:GetService("DataStoreService")
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++type BlockType = BlockTypes.BlockType
++
++-- Why an inventory change was refused.
++-- NotLoaded: the player's counts haven't loaded yet, or the player has left.
++-- UnknownBlockType: the block type isn't one of BlockTypes.Order.
++-- OutOfBlocks: the player has none of that type left to take.
++-- AtLimit: giving a block back would put them over the carry limit.
++-- InvalidAmount: a grant amount that isn't a positive whole number.
++export type FailureReason =
++	"NotLoaded"
++	| "UnknownBlockType"
++	| "OutOfBlocks"
++	| "AtLimit"
++	| "InvalidAmount"
++
++type Counts = { [BlockType]: number }
++
++local DATA_STORE_NAME = "BlockInventory"
++local STARTING_COUNT = 20
++-- Placement refunds stop at this many. Grants (daily reward, admin) may exceed it.
++local MAX_COUNT = 99
++local LOAD_ATTEMPTS = 3
++local LOAD_RETRY_DELAY = 1
++
++local BlockInventory = {}
++
++BlockInventory.StartingCount = STARTING_COUNT
++BlockInventory.MaxCount = MAX_COUNT
++
++-- Keyed by Player instance rather than UserId, so a load that finishes after
++-- the player left can't land in the counts of a new session for the same user.
++local countsByPlayer: { [Player]: Counts } = {}
++
++-- Whether each loaded player's counts came from the DataStore (true) or from
++-- defaults after a failed load (false). Saving should skip players whose load
++-- failed so it doesn't overwrite their real counts with the defaults.
++local loadedFromStoreByPlayer: { [Player]: boolean } = {}
++
++local dataStore: DataStore? = nil
++do
++	local ok, result = pcall(DataStoreService.GetDataStore, DataStoreService, DATA_STORE_NAME)
++	if ok then
++		dataStore = result
++	else
++		warn(`BlockInventory: couldn't open DataStore "{DATA_STORE_NAME}": {result}`)
++	end
++end
++
++local function getDataStoreKey(player: Player): string
++	return `player_{player.UserId}`
++end
++
++local function makeDefaultCounts(): Counts
++	local counts = {}
++	for _, blockType in BlockTypes.Order do
++		counts[blockType] = STARTING_COUNT
++	end
++	return counts
++end
++
++-- Builds counts from whatever was saved. Missing or malformed entries (for
++-- example a block type added after the player last played) get the starting
++-- count; unknown keys in the saved table are ignored.
++local function countsFromSaved(saved: unknown): Counts
++	local counts = makeDefaultCounts()
++	if type(saved) ~= "table" then
++		return counts
++	end
++	local savedTable = saved :: { [unknown]: unknown }
++	for _, blockType in BlockTypes.Order do
++		local value = savedTable[blockType]
++		-- value == value rejects NaN.
++		if type(value) == "number" and value == value and value >= 0 and value < math.huge then
++			counts[blockType] = math.floor(value)
++		end
++	end
++	return counts
++end
++
++-- Returns the saved table (nil for a new player) and whether the read succeeded.
++local function readSaved(player: Player): (boolean, unknown)
++	local store = dataStore
++	if store == nil then
++		return false, nil
++	end
++	local key = getDataStoreKey(player)
++	for attempt = 1, LOAD_ATTEMPTS do
++		local ok, result = pcall(store.GetAsync, store, key)
++		if ok then
++			return true, result
++		end
++		warn(
++			`BlockInventory: load attempt {attempt}/{LOAD_ATTEMPTS} failed for {player.UserId}: {result}`
++		)
++		if attempt < LOAD_ATTEMPTS then
++			task.wait(LOAD_RETRY_DELAY)
++		end
++		if player.Parent ~= Players then
++			break
++		end
++	end
++	return false, nil
++end
++
++local function loadPlayer(player: Player)
++	local ok, saved = readSaved(player)
++	-- The player may have left while the DataStore call yielded.
++	if player.Parent ~= Players then
++		return
++	end
++	countsByPlayer[player] = if ok then countsFromSaved(saved) else makeDefaultCounts()
++	loadedFromStoreByPlayer[player] = ok
++end
++
++local function unloadPlayer(player: Player)
++	countsByPlayer[player] = nil
++	loadedFromStoreByPlayer[player] = nil
++end
++
++-- Shared validation for every call that touches a player's counts. Block types
++-- arrive from remotes, so they're checked at runtime, not just by type.
++local function getCountsFor(player: Player, blockType: unknown): (Counts?, FailureReason?)
++	local counts = countsByPlayer[player]
++	if counts == nil then
++		return nil, "NotLoaded"
++	end
++	if not BlockTypes.isBlockType(blockType) then
++		return nil, "UnknownBlockType"
++	end
++	return counts, nil
++end
++
++-- True once the player's counts have loaded and until they leave.
++function BlockInventory.isLoaded(player: Player): boolean
++	return countsByPlayer[player] ~= nil
++end
++
++-- How many of a block type the player has, or nil if their counts aren't
++-- loaded or the block type is unknown.
++function BlockInventory.getCount(player: Player, blockType: BlockType): number?
++	local counts = getCountsFor(player, blockType)
++	if counts == nil then
++		return nil
++	end
++	return counts[blockType]
++end
++
++-- Takes one block for placement. Returns true on success, or false and the
++-- reason ("NotLoaded", "UnknownBlockType", "OutOfBlocks") so placement can
++-- tell the player.
++function BlockInventory.take(player: Player, blockType: BlockType): (boolean, FailureReason?)
++	local counts, failure = getCountsFor(player, blockType)
++	if counts == nil then
++		return false, failure
++	end
++	local count = counts[blockType]
++	if count <= 0 then
++		return false, "OutOfBlocks"
++	end
++	counts[blockType] = count - 1
++	return true, nil
++end
++
++-- Gives one block back when the player removes a placed block. Refuses with
++-- "AtLimit" if they already hold MaxCount or more, in addition to "NotLoaded"
++-- and "UnknownBlockType".
++function BlockInventory.giveBack(player: Player, blockType: BlockType): (boolean, FailureReason?)
++	local counts, failure = getCountsFor(player, blockType)
++	if counts == nil then
++		return false, failure
++	end
++	local count = counts[blockType]
++	if count >= MAX_COUNT then
++		return false, "AtLimit"
++	end
++	counts[blockType] = count + 1
++	return true, nil
++end
++
++-- Adds blocks from the daily reward or admin commands. Not capped at
++-- MaxCount. The amount must be a positive whole number.
++function BlockInventory.grant(
++	player: Player,
++	blockType: BlockType,
++	amount: number
++): (boolean, FailureReason?)
++	local counts, failure = getCountsFor(player, blockType)
++	if counts == nil then
++		return false, failure
++	end
++	if
++		type(amount) ~= "number"
++		or amount < 1
++		or amount ~= math.floor(amount)
++		or amount == math.huge
++	then
++		return false, "InvalidAmount"
++	end
++	counts[blockType] += amount
++	return true, nil
++end
++
++-- Whether the player's counts came from the DataStore rather than from
++-- defaults after a failed load. For the save step: don't save when false.
++function BlockInventory.wasLoadedFromStore(player: Player): boolean
++	return loadedFromStoreByPlayer[player] == true
++end
++
++Players.PlayerAdded:Connect(loadPlayer)
++Players.PlayerRemoving:Connect(unloadPlayer)
++-- Players who joined before this module was first required.
++for _, player in Players:GetPlayers() do
++	task.spawn(loadPlayer, player)
++end
++
++return BlockInventory

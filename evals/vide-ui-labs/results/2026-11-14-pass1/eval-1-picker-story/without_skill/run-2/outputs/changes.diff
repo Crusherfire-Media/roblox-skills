@@ -1,0 +1,76 @@
+diff --git a/src/ServerScriptService/Stories/BlockPicker.story.luau b/src/ServerScriptService/Stories/BlockPicker.story.luau
+new file mode 100644
+index 0000000..ac6e70b
+--- /dev/null
++++ b/src/ServerScriptService/Stories/BlockPicker.story.luau
+@@ -0,0 +1,46 @@
++--[[
++	UI Labs story for the block picker.
++
++	Controls:
++		Title    - the picker's title text (type a long one to check truncation).
++		Selected - which block type is selected.
++
++	Clicking a tile in the preview selects it, like in game. Changing the Selected control
++	afterwards overrides the click.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local StarterPlayer = game:GetService("StarterPlayer")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local UILabs = require(ReplicatedStorage.Packages.UILabs)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local BlockPicker = require(StarterPlayer.StarterPlayerScripts.BlockPicker)
++
++local blockNames = {}
++for index, blockType in BlockTypes.List do
++	blockNames[index] = blockType.Name
++end
++
++local controls = {
++	Title = UILabs.String("Blocks"),
++	Selected = UILabs.Choose(blockNames, 1),
++}
++
++return UILabs.CreateVideStory({
++	vide = Vide,
++	controls = controls,
++}, function(props)
++	-- Local selection so tile clicks work; follows the Selected control whenever it changes.
++	local selected = Vide.source(props.controls.Selected())
++	Vide.effect(function()
++		selected(props.controls.Selected())
++	end)
++
++	return BlockPicker({
++		Title = props.controls.Title,
++		Selected = selected,
++		Select = selected,
++	})
++end)
+diff --git a/src/ServerScriptService/Stories/Stories.storybook.luau b/src/ServerScriptService/Stories/Stories.storybook.luau
+new file mode 100644
+index 0000000..b8ac89f
+--- /dev/null
++++ b/src/ServerScriptService/Stories/Stories.storybook.luau
+@@ -0,0 +1,4 @@
++return {
++	name = "Block Game",
++	storyRoots = { script.Parent },
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index c12314d..e9471a9 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -75,7 +75,8 @@ local function tile(props: TileProps): TextButton
+ end
+ 
+ export type BlockPickerProps = {
+-	Title: string,
++	-- A plain string, or a source/derived function so the title can change while mounted.
++	Title: string | () -> string,
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
+ }

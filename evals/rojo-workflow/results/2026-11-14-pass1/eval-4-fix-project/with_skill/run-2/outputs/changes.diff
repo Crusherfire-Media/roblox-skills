@@ -1,0 +1,126 @@
+diff --git a/default.project.json b/default.project.json
+index 71017cf..4d0f5dc 100644
+--- a/default.project.json
++++ b/default.project.json
+@@ -1,6 +1,9 @@
+ ﻿{
+   "name": "eval-sandbox",
+   "servePort": 34872,
++  "globIgnorePaths": [
++    "src/ServerScriptService/Tests"
++  ],
+   "tree": {
+     "$className": "DataModel",
+     "ReplicatedStorage": {
+@@ -10,16 +13,16 @@
+       },
+       "Packages": {
+         "$path": "roblox_packages"
+-      },
+-      "TestPackages": {
+-        "$path": "test_packages/roblox_packages"
+       }
+     },
+     "ServerScriptService": {
+       "$className": "ServerScriptService",
+       "$path": "src/ServerScriptService",
+       "Tests": {
+-        "$path": "src/ServerScriptService/Tests"
++        "$path": "src/ServerScriptService/Tests",
++        "Packages": {
++          "$path": "test_packages/roblox_packages"
++        }
+       }
+     },
+     "StarterGui": {
+@@ -30,7 +33,7 @@
+       "$className": "StarterPlayer",
+       "StarterPlayerScripts": {
+         "$className": "StarterPlayerScripts",
+-        "$path": "src/StarterPlayer/StarterPlayerScript"
++        "$path": "src/StarterPlayer/StarterPlayerScripts"
+       }
+     },
+     "Players": {
+diff --git a/docs/rojo-workflow.md b/docs/rojo-workflow.md
+new file mode 100644
+index 0000000..df731d4
+--- /dev/null
++++ b/docs/rojo-workflow.md
+@@ -0,0 +1,76 @@
++# Working with Rojo
++
++Git is the source of truth for this game. Code lives in files under `src/`, and `rojo serve`
++syncs those files into your own dev place in Studio. Studio is where you run, test, and playtest.
++You don't author code there. The README's Layout table shows where each folder lands in the place.
++
++## Setup
++
++1. Install the tools with `rokit install`. It reads `rokit.toml`, which pins `rojo`, `pesde`,
++   `luau-lsp`, `selene`, and `stylua`. Run `rojo --version` and make sure it is the pinned
++   version. A second `rojo` on your PATH leads to protocol-version errors in the plugin.
++2. Install packages: `pesde install` in the repo root, then the same in `test_packages/`. This
++   fills `roblox_packages/` (game packages) and `test_packages/roblox_packages/` (Jest).
++3. Create your own dev place, published under your account or group, and add its place id to
++   `servePlaceIds` in `default.project.json`. Rojo then refuses to live-sync into any other place,
++   so a stray Connect can't overwrite a shared place.
++4. Run `rojo serve`. It listens on port 34872 (`servePort`). In Studio, open your dev place and
++   click **Connect** in the Rojo plugin.
++
++## Where to make changes
++
++- **Every change goes in a file.** Edit scripts in your editor, not in Studio. The next sync
++  overwrites a script edited in Studio, and Git never sees that edit.
++- Script types come from file names: `Foo.server.luau` is a Script, `Foo.client.luau` is a
++  LocalScript, and any other `.luau` file is a ModuleScript. Put attributes and tags in a
++  `Foo.meta.json` beside the file.
++- Specs go in `src/ServerScriptService/Tests/Specs` as `Name.spec.luau`.
++- Treat installed packages (`roblox_packages/`, `test_packages/roblox_packages/`) as read-only.
++  The next install replaces them, and the files are hardlinked to a store other projects share.
++  To add or bump a package, edit `pesde.toml`, stop `rojo serve`, run `pesde install`, and
++  commit `pesde.toml` with `pesde.lock`. Require packages through their link
++  (`ReplicatedStorage.Packages.Vide`), never through a `.pesde/...` path.
++- If you build something in Studio that has to be kept (a model, a GUI, a property), export it
++  to its `.rbxm` file or write it into the project file, or the next sync throws it away.
++
++## What to check while serving
++
++- **Is `rojo serve` still running?** Rojo 7.7.x can crash when a file or folder is deleted,
++  moved, or renamed. Studio then quietly stops receiving changes. After any delete, move, or
++  rename, look for `Rojo crashed!` in the terminal. If it crashed, restart `rojo serve` and
++  click Connect again.
++- **Did your edit arrive?** Before you trust a test or playtest, open the script in Studio and
++  check that it has your new code. If an error's line number didn't move with your edit, you're
++  running the old code.
++- **Which checkout is it serving?** The place runs whatever is in the folder `rojo serve`
++  started in, on the branch checked out there. A merged PR changes nothing in that folder until
++  you pull.
++- Stop `rojo serve` before anything that rewrites many files at once: `git checkout`, `switch`,
++  `pull`, `rebase`, `reset`, `stash`, `pesde install`. Restart it afterward.
++- Before pushing, run the checks from the README's Checks section (`rojo sourcemap`,
++  `luau-lsp analyze`, `selene src`, `stylua --check src`) and run the specs in your dev place.
++
++## Keeping `default.project.json` healthy
++
++This file decides where every folder lands in the place. A bad merge here once broke the
++sourcemap and hid the Jest packages from the specs. To keep that from happening again:
++
++- **The README's Layout table is the contract.** If you change a mount, update the table in the
++  same PR. If you resolve a conflict, make the result match the table.
++- **Resolve conflicts by reading both sides, not by taking one.** Keep every mount from both
++  branches, each in its intended place. In particular:
++  - `test_packages/roblox_packages` mounts at `ServerScriptService.Tests.Packages`, never under
++    `ReplicatedStorage`. Jest requires it from there.
++  - `globIgnorePaths` must keep `src/ServerScriptService/Tests`. Without it, the `Tests` folder
++    gets mounted twice.
++  - Check each `$path` against the real folder name (`StarterPlayerScripts`, with the final
++    `s`). Rojo doesn't warn about a path that doesn't exist.
++- **Save it as UTF-8 without a byte order mark.** Rojo reports "Failed to parse JSONC" for a
++  project file that starts with a BOM. Windows PowerShell 5.1's `Set-Content` and `Out-File`
++  add one, and some editors and merge tools do too. Set your editor to plain "UTF-8", not
++  "UTF-8 with BOM".
++- **Verify after any edit or merge:** run
++  `rojo sourcemap default.project.json -o sourcemap.json --include-non-scripts`. It has to
++  succeed, and `ServerScriptService.Tests.Packages.Jest` and
++  `StarterPlayer.StarterPlayerScripts` have to show up in `sourcemap.json`. Then reconnect
++  `rojo serve` and check that the place looks right in Studio's Explorer.

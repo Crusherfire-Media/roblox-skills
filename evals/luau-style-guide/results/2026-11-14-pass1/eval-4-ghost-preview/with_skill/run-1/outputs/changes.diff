@@ -1,0 +1,192 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+new file mode 100644
+index 0000000..d3f05cb
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+@@ -0,0 +1,186 @@
++--!strict
++-- A see-through copy of the selected block that follows the mouse in build
++-- mode, snapped to the placement grid, so players see where a click would put
++-- a block. It turns red where PlacementRules says the block can't go.
++
++const Players = game:GetService("Players")
++const RunService = game:GetService("RunService")
++const UserInputService = game:GetService("UserInputService")
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const PlacementRules = require("@game/ReplicatedStorage/Shared/PlacementRules")
++
++const BLOCKED_COLOR = Color3.fromRGB(255, 70, 70)
++const DEFAULT_RAYCAST_DISTANCE = 500
++const DEFAULT_TRANSPARENCY = 0.6
++const PLACED_BLOCKS_NAME = "PlacedBlocks"
++
++type BlockType = BlockTypes.BlockType
++
++export type Options = {
++	Transparency: number?,
++	RaycastDistance: number?,
++}
++
++local Module = {}
++Module.__index = Module
++
++export type GhostPreview = typeof(setmetatable(
++	{} :: {
++		_BlockType: BlockType,
++		_Transparency: number,
++		_RaycastDistance: number,
++		_Part: Part,
++		_RaycastParams: RaycastParams,
++		_FilteredCharacter: Model?,
++		_Cell: Vector3?,
++		_IsPlaceable: boolean,
++		_Connection: RBXScriptConnection?,
++	},
++	Module
++))
++
++local function createGhostPart(): Part
++	local part = Instance.new("Part")
++	part.Name = "GhostPreview"
++	part.Size = Vector3.one * BlockTypes.BlockSize
++	part.Anchored = true
++	part.CanCollide = false
++	part.CanTouch = false
++	part.CanQuery = false
++	part.CastShadow = false
++	part.TopSurface = Enum.SurfaceType.Smooth
++	part.BottomSurface = Enum.SurfaceType.Smooth
++	return part
++end
++
++--[[
++	Creates a ghost of blockType and starts moving it with the mouse every
++	frame. The ghost stays hidden until the mouse points at a surface. Call
++	Destroy when build mode ends.
++]]
++function Module.new(blockType: BlockType, options: Options?): GhostPreview
++	local settings: Options = options or {}
++	local transparency = settings.Transparency or DEFAULT_TRANSPARENCY
++	local raycastDistance = settings.RaycastDistance or DEFAULT_RAYCAST_DISTANCE
++	assert(transparency >= 0 and transparency <= 1, "Transparency must be between 0 and 1")
++	assert(
++		raycastDistance > 0 and raycastDistance < math.huge,
++		"RaycastDistance must be a positive, finite number"
++	)
++
++	local part = createGhostPart()
++	local raycastParams = RaycastParams.new()
++	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
++	raycastParams.FilterDescendantsInstances = { part }
++
++	local self = setmetatable({
++		_BlockType = blockType,
++		_Transparency = transparency,
++		_RaycastDistance = raycastDistance,
++		_Part = part,
++		_RaycastParams = raycastParams,
++		_FilteredCharacter = nil :: Model?,
++		_Cell = nil :: Vector3?,
++		_IsPlaceable = false,
++		_Connection = nil :: RBXScriptConnection?,
++	}, Module)
++
++	self:_ApplyStyle()
++	self._Connection = RunService.PreRender:Connect(function()
++		self:_Update()
++	end)
++
++	return self
++end
++
++--[[
++	Switches the ghost to another block type. Its position and red tint carry
++	over.
++]]
++function Module.SetBlockType(self: GhostPreview, blockType: BlockType): ()
++	self._BlockType = blockType
++	self:_ApplyStyle()
++end
++
++--[[
++	Returns whether a block can go where the ghost is now, and the center of
++	that grid cell. The center is nil while the mouse points at the sky; it is
++	set but not placeable while the ghost shows red.
++]]
++function Module.GetPlacement(self: GhostPreview): (boolean, Vector3?)
++	return self._IsPlaceable, self._Cell
++end
++
++--[[
++	Stops following the mouse and removes the ghost. Safe to call more than
++	once.
++]]
++function Module.Destroy(self: GhostPreview): ()
++	if self._Connection then
++		self._Connection:Disconnect()
++		self._Connection = nil
++	end
++	self._Part:Destroy()
++	self._Cell = nil
++	self._IsPlaceable = false
++end
++
++function Module._ApplyStyle(self: GhostPreview)
++	local style = BlockTypes.Styles[self._BlockType]
++	self._Part.Color = if self._IsPlaceable then style.Color else BLOCKED_COLOR
++	self._Part.Material = style.Material
++	self._Part.Transparency = self._Transparency
++end
++
++function Module._RaycastFromMouse(self: GhostPreview): RaycastResult?
++	local camera = workspace.CurrentCamera
++	if not camera then
++		return nil
++	end
++
++	-- The character is replaced on respawn, so the filter follows it.
++	local character = Players.LocalPlayer.Character
++	if character ~= self._FilteredCharacter then
++		self._FilteredCharacter = character
++		self._RaycastParams.FilterDescendantsInstances = if character
++			then { character, self._Part }
++			else { self._Part }
++	end
++
++	local mouseLocation = UserInputService:GetMouseLocation()
++	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
++	return workspace:Raycast(ray.Origin, ray.Direction * self._RaycastDistance, self._RaycastParams)
++end
++
++function Module._Update(self: GhostPreview)
++	local result = self:_RaycastFromMouse()
++	if not result then
++		self._Cell = nil
++		self._IsPlaceable = false
++		self._Part.Parent = nil
++		return
++	end
++
++	-- Step half a block off the surface so the snap picks the cell in front of
++	-- the hit face rather than the block that was hit.
++	local cell = PlacementRules.snap(result.Position + result.Normal * (BlockTypes.BlockSize / 2))
++
++	local isPlaceable = false
++	local placedBlocks = workspace:FindFirstChild(PLACED_BLOCKS_NAME)
++	if placedBlocks then
++		isPlaceable = PlacementRules.check(cell, Players.LocalPlayer.Character, placedBlocks)
++	end
++
++	self._Cell = cell
++	if isPlaceable ~= self._IsPlaceable then
++		self._IsPlaceable = isPlaceable
++		self:_ApplyStyle()
++	end
++	self._Part.CFrame = CFrame.new(cell)
++	if not self._Part.Parent then
++		self._Part.Parent = workspace
++	end
++end
++
++return Module

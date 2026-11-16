@@ -1,0 +1,5 @@
+I didn't change any code for these four errors. They came from a stale `sourcemap.json`, not from the edits. That file maps scripts to their place in the game tree. Before I regenerated it, it showed `ReplicatedStorage.Shared` as an empty folder and listed none of the modules in StarterPlayerScripts. So the checker couldn't resolve `BlockTypes`, `BlockPicker` or `BlockPlacer`, which the scripts were already requiring this way before my changes.
+
+**Fix:** I regenerated it with `rojo sourcemap default.project.json -o sourcemap.json`. It now lists `BlockTypes`, `BlockPicker` and `BlockPlacer`. `sourcemap.json` will show up as changed in git; it's a generated file.
+
+**Not fully confirmed:** I can't show those four errors are gone. I ran `luau-lsp analyze` again with the new sourcemap, but it had no Roblox type definitions. The output was flooded with "Unknown type 'Instance'/'UDim2'/'Color3'" errors from inside the Vide package and got cut off. The commands I tried to filter it down to the edited files were blocked for approval. The next run of your Luau check, which has the definitions, will show whether they're cleared.

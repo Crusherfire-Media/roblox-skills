@@ -1,0 +1,204 @@
+diff --git a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+new file mode 100644
+index 0000000..dc4d67a
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+@@ -0,0 +1,198 @@
++--!strict
++const JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
++const describe = JestGlobals.describe
++const expect = JestGlobals.expect
++const it = JestGlobals.it
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const PlacementRules = require("@game/ReplicatedStorage/Shared/PlacementRules")
++
++-- Positions are written in cells so the expectations follow BlockTypes.BlockSize.
++const SIZE = BlockTypes.BlockSize
++const VALID_BLOCK = BlockTypes.List[1].Name
++-- The cell resting on the Baseplate at the origin, and a position inside it.
++const ORIGIN_CELL = Vector3.new(SIZE / 2, SIZE / 2, SIZE / 2)
++const INSIDE_ORIGIN_CELL = Vector3.new(SIZE / 4, SIZE / 4, SIZE / 4)
++
++local function cells(x: number, y: number, z: number): Vector3
++	return Vector3.new(x * SIZE, y * SIZE, z * SIZE)
++end
++
++--[[
++	Counts cells up from the one resting on the Baseplate instead of reusing
++	snap's formula, so the height rows don't restate the code under test.
++]]
++local function getTopCellCenterY(): number
++	local centerY = SIZE / 2
++	while centerY + SIZE <= PlacementRules.MaxHeight do
++		centerY += SIZE
++	end
++	return centerY
++end
++
++describe("PlacementRules", function()
++	describe("snap", function()
++		it.each({
++			{
++				Case = "inside a cell",
++				Position = cells(0.25, 0.25, 0.25),
++				Center = cells(0.5, 0.5, 0.5),
++			},
++			{ Case = "on the origin", Position = cells(0, 0, 0), Center = cells(0.5, 0.5, 0.5) },
++			{
++				Case = "just below a cell's upper edge",
++				Position = cells(0.99, 0.99, 0.99),
++				Center = cells(0.5, 0.5, 0.5),
++			},
++			{ Case = "on a cell edge", Position = cells(1, 1, 1), Center = cells(1.5, 1.5, 1.5) },
++			{
++				Case = "just below zero",
++				Position = cells(-0.01, -0.01, -0.01),
++				Center = cells(-0.5, -0.5, -0.5),
++			},
++			{
++				Case = "with mixed axes",
++				Position = cells(1, 0.25, -0.01),
++				Center = cells(1.5, 0.5, -0.5),
++			},
++		})("returns the center of the cell holding a position $Case", function(row)
++			expect(PlacementRules.snap(row.Position)).toEqual(row.Center)
++		end)
++	end)
++
++	describe("validate", function()
++		it("accepts a free cell in reach and returns its center without marking it", function()
++			local occupied = {}
++
++			local isAllowed, result =
++				PlacementRules.validate(VALID_BLOCK, INSIDE_ORIGIN_CELL, ORIGIN_CELL, occupied)
++
++			expect(isAllowed).toBe(true)
++			expect(result).toEqual(ORIGIN_CELL)
++			expect(next(occupied)).toBeNil()
++		end)
++
++		it("accepts every block type in BlockTypes", function()
++			local refused = {}
++
++			for _, blockType in BlockTypes.List do
++				local isAllowed =
++					PlacementRules.validate(blockType.Name, INSIDE_ORIGIN_CELL, ORIGIN_CELL, {})
++				if not isAllowed then
++					table.insert(refused, blockType.Name)
++				end
++			end
++
++			expect(refused).toEqual({})
++		end)
++
++		it.each({
++			{ Case = "a non-string", BlockTypeName = 42 :: unknown },
++			{ Case = "a name not in BlockTypes", BlockTypeName = "Lava" :: unknown },
++		})("refuses a block type that is $Case", function(row)
++			local isAllowed =
++				PlacementRules.validate(row.BlockTypeName, INSIDE_ORIGIN_CELL, ORIGIN_CELL, {})
++
++			expect(isAllowed).toBe(false)
++		end)
++
++		it.each({
++			{
++				Case = "a table shaped like a Vector3",
++				Position = { X = 1, Y = 1, Z = 1 } :: unknown,
++			},
++			{ Case = "NaN on X", Position = Vector3.new(0 / 0, 1, 1) :: unknown },
++			{ Case = "infinite on Y", Position = Vector3.new(1, math.huge, 1) :: unknown },
++			{
++				Case = "negative infinite on Z",
++				Position = Vector3.new(1, 1, -math.huge) :: unknown,
++			},
++		})("refuses a position that is $Case", function(row)
++			local isAllowed = PlacementRules.validate(VALID_BLOCK, row.Position, ORIGIN_CELL, {})
++
++			expect(isAllowed).toBe(false)
++		end)
++
++		it.each({
++			{ Case = "below the Baseplate", PositionY = -0.01, IsAllowed = false },
++			{ Case = "resting on the Baseplate", PositionY = 0, IsAllowed = true },
++			{
++				Case = "the highest under MaxHeight",
++				PositionY = getTopCellCenterY(),
++				IsAllowed = true,
++			},
++			{ Case = "above MaxHeight", PositionY = getTopCellCenterY() + SIZE, IsAllowed = false },
++		})("checks the height of a cell $Case", function(row)
++			const position = Vector3.new(SIZE / 4, row.PositionY, SIZE / 4)
++
++			local isAllowed = PlacementRules.validate(VALID_BLOCK, position, position, {})
++
++			expect(isAllowed).toBe(row.IsAllowed)
++		end)
++
++		it("refuses a player with no character", function()
++			local isAllowed = PlacementRules.validate(VALID_BLOCK, INSIDE_ORIGIN_CELL, nil, {})
++
++			expect(isAllowed).toBe(false)
++		end)
++
++		it.each({
++			{
++				Case = "inside MaxReach",
++				Offset = Vector3.new(PlacementRules.MaxReach - 0.5, 0, 0),
++				IsAllowed = true,
++			},
++			{
++				Case = "past MaxReach",
++				Offset = Vector3.new(PlacementRules.MaxReach + 0.5, 0, 0),
++				IsAllowed = false,
++			},
++			{
++				-- Each axis is inside MaxReach but the straight-line distance is not.
++				Case = "past MaxReach diagonally",
++				Offset = Vector3.one * (PlacementRules.MaxReach * 0.7),
++				IsAllowed = false,
++			},
++		})("checks reach to a cell $Case", function(row)
++			const rootPosition = ORIGIN_CELL + row.Offset
++
++			local isAllowed =
++				PlacementRules.validate(VALID_BLOCK, INSIDE_ORIGIN_CELL, rootPosition, {})
++
++			expect(isAllowed).toBe(row.IsAllowed)
++		end)
++
++		-- Fails on the current code. validate's doc comment says "A cell exactly
++		-- MaxReach away is in reach", but the check refuses it because it uses
++		-- `>=` where `>` would match the doc. Either the comparison or the doc
++		-- comment needs to change; this test assumes the doc is the intent.
++		it("accepts a cell exactly MaxReach away", function()
++			const rootPosition = ORIGIN_CELL + Vector3.new(PlacementRules.MaxReach, 0, 0)
++
++			local isAllowed =
++				PlacementRules.validate(VALID_BLOCK, INSIDE_ORIGIN_CELL, rootPosition, {})
++
++			expect(isAllowed).toBe(true)
++		end)
++
++		it.each({
++			{
++				Case = "refuses a position in an occupied cell",
++				Position = cells(0.75, 0.25, 0.5),
++				IsAllowed = false,
++			},
++			{
++				Case = "accepts the cell next to an occupied one",
++				Position = cells(1.25, 0.25, 0.25),
++				IsAllowed = true,
++			},
++		})("$Case", function(row)
++			const occupied = { [ORIGIN_CELL] = true }
++
++			local isAllowed =
++				PlacementRules.validate(VALID_BLOCK, row.Position, ORIGIN_CELL, occupied)
++
++			expect(isAllowed).toBe(row.IsAllowed)
++		end)
++	end)
++end)

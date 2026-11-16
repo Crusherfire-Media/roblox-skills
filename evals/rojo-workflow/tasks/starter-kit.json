@@ -1,0 +1,68 @@
+{
+	"id": 2,
+	"name": "starter-kit",
+	"skill": "rojo-workflow",
+	"prompt": "Add a starter kit. When a player joins, the server gives them a starting count of each block type, stored as number attributes on the Player (for example Brick = 20).\n\nDesigners want to tune the counts in Studio's Properties window, so keep them as attributes on a Configuration instance named StarterKit somewhere under ReplicatedStorage: Brick 20, Dirt 20, Grass 10, Window 0, Wood 10.\n\nOn the client, once the player's counts are set, show a one-time Roblox notification (StarterGui:SetCore(\"SendNotification\", ...)) listing what they got. The block types are in src/ReplicatedStorage/Shared/BlockTypes.luau.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const cp = require('child_process'); const fs = require('fs');\nconst fail = (m) => { console.log(m); process.exit(1); };\nlet sm;\ntry { cp.execFileSync('rojo', ['sourcemap', 'default.project.json', '-o', 'sourcemap.json', '--include-non-scripts'], { stdio: 'pipe' }); sm = JSON.parse(fs.readFileSync('sourcemap.json', 'utf8')); } catch (e) { fail('rojo sourcemap failed: ' + String((e.stderr && e.stderr.toString()) || e.message).replace(/[A-Za-z]:[\\\\/][^\\s]*[\\\\/]/g, '').slice(0, 400)); }\nconst kids = (n, name) => (n && n.children ? n.children : []).filter((c) => c.name === name);\nconst child = (n, name) => kids(n, name)[0];\nconst isPkg = (n) => /roblox_packages/.test((n.filePaths || []).join(' ')) || n.name === '.pesde';\nconst walk = (n, fn, p) => { if (!n) return; const here = (p ? p + '.' : '') + n.name; fn(n, here); for (const c of n.children || []) if (!isPkg(c)) walk(c, fn, here); };\nconst rel = (f) => { const s = f.replace(/\\\\/g, '/'); const i = s.indexOf('src/'); return i >= 0 ? s.slice(i) : s; };\nconst found = []; walk(child(sm, 'ReplicatedStorage'), (n, p) => { if (n.name === 'StarterKit') found.push([n, p]); });\nif (found.length !== 1) fail(found.length + ' instances named StarterKit under ReplicatedStorage in the place built from default.project.json (expected 1)');\nconst [kit, where] = found[0];\nif (kit.className !== 'Configuration') fail(where + ' is a ' + kit.className + ', not a Configuration');\nconst src = (kit.filePaths || []).find((f) => /\\.(model|meta)\\.json$/.test(f));\nif (!src) fail(where + ' has no .model.json or .meta.json holding its attributes');\nconst attrs = JSON.parse(fs.readFileSync(src, 'utf8').replace(/^﻿/, '')).attributes || {};\nconst want = { Brick: 20, Dirt: 20, Grass: 10, Window: 0, Wood: 10 };\nconst bad = Object.keys(want).filter((k) => attrs[k] !== want[k]);\nif (bad.length) fail(where + ' attributes ' + JSON.stringify(attrs) + ' differ from ' + JSON.stringify(want) + ' (numbers expected)');\nconsole.log(where + ' is a Configuration with the five number attributes, from ' + rel(src));"
+			],
+			"expect_exit": 0,
+			"timeout_seconds": 120,
+			"text": "The built place has one Configuration named StarterKit under ReplicatedStorage with the five counts as number attributes"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const cp = require('child_process'); const fs = require('fs');\nconst fail = (m) => { console.log(m); process.exit(1); };\nlet sm;\ntry { cp.execFileSync('rojo', ['sourcemap', 'default.project.json', '-o', 'sourcemap.json', '--include-non-scripts'], { stdio: 'pipe' }); sm = JSON.parse(fs.readFileSync('sourcemap.json', 'utf8')); } catch (e) { fail('rojo sourcemap failed: ' + String((e.stderr && e.stderr.toString()) || e.message).replace(/[A-Za-z]:[\\\\/][^\\s]*[\\\\/]/g, '').slice(0, 400)); }\nconst kids = (n, name) => (n && n.children ? n.children : []).filter((c) => c.name === name);\nconst child = (n, name) => kids(n, name)[0];\nconst isPkg = (n) => /roblox_packages/.test((n.filePaths || []).join(' ')) || n.name === '.pesde';\nconst walk = (n, fn, p) => { if (!n) return; const here = (p ? p + '.' : '') + n.name; fn(n, here); for (const c of n.children || []) if (!isPkg(c)) walk(c, fn, here); };\nconst rel = (f) => { const s = f.replace(/\\\\/g, '/'); const i = s.indexOf('src/'); return i >= 0 ? s.slice(i) : s; };\nconst read = (n) => (n.filePaths || []).filter((f) => /\\.luau?$/.test(f)).map((f) => fs.readFileSync(f, 'utf8')).join('\\n');\nconst server = []; walk(child(sm, 'ServerScriptService'), (n, p) => { if (n.className === 'Script' && /StarterKit/.test(read(n))) server.push(p); });\nconst client = [];\nfor (const [svc, sub] of [['StarterPlayer', 'StarterPlayerScripts'], ['StarterPlayer', 'StarterCharacterScripts'], ['StarterGui', null], ['ReplicatedFirst', null]]) {\n\tconst root = sub ? child(child(sm, svc), sub) : child(sm, svc);\n\twalk(root, (n, p) => { if (n.className === 'LocalScript' && /SendNotification/.test(read(n))) client.push(p); });\n}\nif (!server.length) fail('no Script under ServerScriptService mentions StarterKit');\nif (!client.length) fail('no LocalScript in a container where LocalScripts run calls SendNotification');\nconsole.log('server Script: ' + server.join(', ') + '; client LocalScript: ' + client.join(', '));"
+			],
+			"expect_exit": 0,
+			"timeout_seconds": 120,
+			"text": "A Script under ServerScriptService reads StarterKit and a LocalScript where LocalScripts run calls SendNotification"
+		},
+		{
+			"type": "command",
+			"run": [
+				"rojo",
+				"build",
+				"default.project.json",
+				"-o",
+				"check-build.rbxl"
+			],
+			"expect_exit": 0,
+			"text": "rojo build succeeds on default.project.json"
+		}
+	],
+	"rubric": [
+		"StarterKit is declared in files Rojo maps into the place: a .model.json with className Configuration and attributes, or a folder whose init.meta.json sets them, at a path the project mounts under ReplicatedStorage (such as src/ReplicatedStorage/Shared/StarterKit.model.json) or through a node added to default.project.json. A file directly in src/ReplicatedStorage isn't part of the place and fails this.",
+		"The five counts are JSON numbers (Brick 20, Dirt 20, Grass 10, Window 0, Wood 10), not strings.",
+		"The server part is a .server.luau file under src/ServerScriptService (a Script), and the client part is a .client.luau file under src/StarterPlayer/StarterPlayerScripts or another folder where LocalScripts run (such as StarterGui). Shared code, if any, is a plain .luau module under src/ReplicatedStorage/Shared.",
+		"The code reads StarterKit at the DataModel path the files actually produce (for example ReplicatedStorage.Shared.StarterKit, with WaitForChild on the client) and sets a count for every type in BlockTypes.List, treating a missing attribute as 0 or reporting it.",
+		"The server also handles players who joined before it connected (Players:GetPlayers()). The client shows the notification once, after the counts exist, and guards SetCore, which errors until the core scripts register it (for example pcall with a few retries).",
+		"No unrelated changes, and luau-lsp, selene, and StyLua pass. If default.project.json is edited, it stays valid and changes only what the kit needs."
+	],
+	"judge_facts": [
+		"Rojo 7.7.1 (built in the sandbox and read back with Lune): StarterKit.model.json containing { \"className\": \"Configuration\", \"attributes\": { \"Brick\": 20, \"Window\": 0 } } builds a Configuration named StarterKit with number attributes Brick = 20 and Window = 0, and a folder whose init.meta.json sets className Configuration and attributes builds the same kind of instance.",
+		"In this project, files directly in src/ReplicatedStorage (outside src/ReplicatedStorage/Shared) are not part of the place: the ReplicatedStorage node in default.project.json has no $path, only the children Shared ($path src/ReplicatedStorage/Shared) and Packages ($path roblox_packages). Verified with rojo sourcemap, Rojo 7.7.1.",
+		"This project's README.md (and Rojo 7.7.1's sourcemap output): Name.server.luau becomes a Script, Name.client.luau a LocalScript, and any other Name.luau a ModuleScript; Foo.spec.luau becomes the ModuleScript Foo.spec."
+	],
+	"notes": "New-files branch: script suffixes, which folders are mounted, and declaring a non-script instance (Configuration with attributes) in files. The trap is src/ReplicatedStorage/StarterKit.model.json, which isn't mapped because the ReplicatedStorage node has no $path. The checks read the built tree from rojo sourcemap, so they accept any correct location.",
+	"timeout_minutes": 20
+}

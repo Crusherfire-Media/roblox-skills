@@ -1,0 +1,133 @@
+diff --git a/src/ReplicatedStorage/Shared/StarterKit.model.json b/src/ReplicatedStorage/Shared/StarterKit.model.json
+new file mode 100644
+index 0000000..ffb152d
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/StarterKit.model.json
+@@ -0,0 +1,10 @@
++{
++  "className": "Configuration",
++  "attributes": {
++    "Brick": 20,
++    "Dirt": 20,
++    "Grass": 10,
++    "Window": 0,
++    "Wood": 10
++  }
++}
+diff --git a/src/ServerScriptService/StarterKit.server.luau b/src/ServerScriptService/StarterKit.server.luau
+new file mode 100644
+index 0000000..bd97ffa
+--- /dev/null
++++ b/src/ServerScriptService/StarterKit.server.luau
+@@ -0,0 +1,47 @@
++--!strict
++--[[
++	Gives each joining player one number attribute per block type, with counts
++	read from the StarterKit Configuration under ReplicatedStorage.
++]]
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++-- Set after every count, so the client knows the kit is complete. Keep in
++-- sync with StarterKitNotification.
++local GIVEN_ATTRIBUTE = "StarterKitGiven"
++
++-- Recursive so designers can move it anywhere under ReplicatedStorage.
++local starterKit = ReplicatedStorage:FindFirstChild("StarterKit", true)
++assert(
++	starterKit and starterKit:IsA("Configuration"),
++	"StarterKit Configuration is missing from ReplicatedStorage"
++)
++
++local function getStarterCount(blockName: string): number
++	local count = starterKit:GetAttribute(blockName)
++	-- count ~= count catches NaN, which passes the range check
++	if typeof(count) ~= "number" or count ~= count or count < 0 then
++		warn(`StarterKit.{blockName} is not a non-negative number; giving 0`)
++		return 0
++	end
++	return math.floor(count)
++end
++
++local function giveStarterKit(player: Player)
++	if player:GetAttribute(GIVEN_ATTRIBUTE) then
++		return
++	end
++
++	for _, blockType in BlockTypes.List do
++		player:SetAttribute(blockType.Name, getStarterCount(blockType.Name))
++	end
++	player:SetAttribute(GIVEN_ATTRIBUTE, true)
++end
++
++Players.PlayerAdded:Connect(giveStarterKit)
++for _, player in Players:GetPlayers() do
++	giveStarterKit(player)
++end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/StarterKitNotification.client.luau b/src/StarterPlayer/StarterPlayerScripts/StarterKitNotification.client.luau
+new file mode 100644
+index 0000000..56ce55e
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/StarterKitNotification.client.luau
+@@ -0,0 +1,58 @@
++--!strict
++--[[
++	Shows one notification listing the starter kit once the server has set the
++	player's block counts. StarterPlayerScripts run once per session, so it
++	does not repeat on respawn.
++]]
++
++local Players = game:GetService("Players")
++local StarterGui = game:GetService("StarterGui")
++
++local BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++-- Keep in sync with GIVEN_ATTRIBUTE in the server's StarterKit script.
++local GIVEN_ATTRIBUTE = "StarterKitGiven"
++local NOTIFICATION_DURATION = 8
++local SET_CORE_RETRY_DELAY = 0.5
++local SET_CORE_MAX_ATTEMPTS = 20
++
++local localPlayer = Players.LocalPlayer
++
++local function buildKitText(): string
++	local parts = {}
++	for _, blockType in BlockTypes.List do
++		local count = localPlayer:GetAttribute(blockType.Name)
++		if typeof(count) == "number" and count > 0 then
++			table.insert(parts, `{count} {blockType.DisplayName}`)
++		end
++	end
++
++	if #parts == 0 then
++		return "No blocks this time."
++	end
++	return table.concat(parts, ", ")
++end
++
++local function sendNotificationAsync(text: string)
++	for _ = 1, SET_CORE_MAX_ATTEMPTS do
++		-- SetCore errors until the CoreScripts register SendNotification,
++		-- which can be after this script starts.
++		local success = pcall(function()
++			StarterGui:SetCore("SendNotification", {
++				Title = "Starter kit",
++				Text = text,
++				Duration = NOTIFICATION_DURATION,
++			})
++		end)
++		if success then
++			return
++		end
++		task.wait(SET_CORE_RETRY_DELAY)
++	end
++	warn("Could not show the starter kit notification")
++end
++
++if not localPlayer:GetAttribute(GIVEN_ATTRIBUTE) then
++	localPlayer:GetAttributeChangedSignal(GIVEN_ATTRIBUTE):Wait()
++end
++sendNotificationAsync(buildKitText())

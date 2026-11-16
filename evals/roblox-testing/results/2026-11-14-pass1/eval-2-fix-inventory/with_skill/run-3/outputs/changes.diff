@@ -1,0 +1,46 @@
+diff --git a/src/ServerScriptService/Inventory/BlockInventory.luau b/src/ServerScriptService/Inventory/BlockInventory.luau
+index daa89f7..0652b96 100644
+--- a/src/ServerScriptService/Inventory/BlockInventory.luau
++++ b/src/ServerScriptService/Inventory/BlockInventory.luau
+@@ -45,11 +45,11 @@ end
+ 	Otherwise changes nothing and returns false.
+ ]]
+ function BlockInventory.take(inventory: Inventory, name: string, amount: number): boolean
+-	local current = inventory.Counts[name]
+-	if current and current < amount then
++	local current = inventory.Counts[name] or 0
++	if current < amount then
+ 		return false
+ 	end
+-	inventory.Counts[name] = (current or 0) - amount
++	inventory.Counts[name] = current - amount
+ 	return true
+ end
+ 
+diff --git a/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+new file mode 100644
+index 0000000..0c993aa
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+@@ -0,0 +1,21 @@
++--!strict
++const JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
++const describe = JestGlobals.describe
++const expect = JestGlobals.expect
++const it = JestGlobals.it
++
++const BlockInventory = require("@game/ServerScriptService/Inventory/BlockInventory")
++
++describe("BlockInventory", function()
++	it.each({
++		{ Case = "a type it was never given", Counts = { Brick = 5 }, Name = "Window" },
++		{ Case = "a type it has none left of", Counts = { Brick = 0 }, Name = "Brick" },
++	})("refuses to take $Case and leaves its count at 0", function(row)
++		local inventory = BlockInventory.new(row.Counts)
++
++		local wasTaken = BlockInventory.take(inventory, row.Name, 1)
++
++		expect(wasTaken).toBe(false)
++		expect(BlockInventory.count(inventory, row.Name)).toBe(0)
++	end)
++end)

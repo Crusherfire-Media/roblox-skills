@@ -1,0 +1,86 @@
+diff --git a/src/ServerScriptService/Stories/BlockPicker.story.luau b/src/ServerScriptService/Stories/BlockPicker.story.luau
+new file mode 100644
+index 0000000..15df10c
+--- /dev/null
++++ b/src/ServerScriptService/Stories/BlockPicker.story.luau
+@@ -0,0 +1,55 @@
++--!strict
++
++const BlockPicker = require("@game/StarterPlayer/StarterPlayerScripts/BlockPicker")
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const indexes = Vide.indexes
++const source = Vide.source
++
++const blockNames = {}
++for index, blockType in BlockTypes.List do
++	blockNames[index] = blockType.Name
++end
++
++const CONTROLS = {
++	Title = UILabs.Ordered(UILabs.String("Blocks"), 1),
++	-- Changing this starts the selection over from the chosen block.
++	Selected = UILabs.Ordered(UILabs.Choose(blockNames, 1), 2),
++}
++
++type StoryProps = {
++	controls: {
++		Title: () -> string,
++		Selected: () -> string,
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	const controls = props.controls
++
++	return indexes(function()
++		return { [controls.Selected()] = true }
++	end, function(_, initialName: string)
++		-- Stands in for BlockPlacer, so clicking a tile selects it as in game.
++		const selected = source(initialName)
++
++		return BlockPicker({
++			Title = controls.Title,
++			Selected = selected,
++			Select = function(name: string)
++				print(`Selected {name}`)
++				selected(name)
++			end,
++		})
++	end)
++end
++
++return {
++	summary = "The block picker. Click a tile to select it.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/ServerScriptService/Stories/Game.storybook.luau b/src/ServerScriptService/Stories/Game.storybook.luau
+new file mode 100644
+index 0000000..25d83e2
+--- /dev/null
++++ b/src/ServerScriptService/Stories/Game.storybook.luau
+@@ -0,0 +1,6 @@
++--!strict
++
++return {
++	name = "Game UI",
++	storyRoots = { script.Parent },
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index c12314d..a208a29 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -75,7 +75,7 @@ local function tile(props: TileProps): TextButton
+ end
+ 
+ export type BlockPickerProps = {
+-	Title: string,
++	Title: string | () -> string,
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
+ }

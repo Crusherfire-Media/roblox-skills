@@ -1,0 +1,80 @@
+{
+	"id": 3,
+	"name": "review-block-shop",
+	"skill": "luau-style-guide",
+	"prompt": "Before I build more on it, can you review src/ServerScriptService/BlockShop.server.luau and write up what you'd change in docs/review.md? Order the findings by how much they matter, and for each one say where it is, what's wrong, and what to do instead. Don't edit the script yet; I want to read the review first.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/shared/PlacementRules.luau",
+			"to": "src/ReplicatedStorage/Shared/PlacementRules.luau"
+		},
+		{
+			"from": "fixtures/review-block-shop/BlockShop.server.luau",
+			"to": "src/ServerScriptService/BlockShop.server.luau"
+		}
+	],
+	"auto_checks": [],
+	"checks": [
+		{
+			"type": "file_exists",
+			"path": "docs/review.md",
+			"text": "The review is in docs/review.md"
+		},
+		{
+			"type": "command",
+			"run": [
+				"node",
+				"-e",
+				"const cp = require('child_process'); const paths = process.argv.slice(1); let out; try { out = cp.execFileSync('git', ['status', '--porcelain', '--', ...paths], { encoding: 'utf8' }); } catch (e) { console.log('git status failed: ' + e.message); process.exit(1); } if (out.trim()) { console.log('changed:\\n' + out.trim()); process.exit(1); } console.log('unchanged: ' + paths.join(', '));",
+				"src"
+			],
+			"text": "No file under src changed (the task asks for a review only)"
+		},
+		{
+			"type": "file_matches",
+			"path": "docs/review.md",
+			"pattern": "\\bNaN\\b",
+			"flags": "i",
+			"text": "The review mentions NaN (it passes the amount range check, and a NaN position passes the reach check)"
+		},
+		{
+			"type": "file_matches",
+			"path": "docs/review.md",
+			"pattern": "race|double[- ]?spend|concurren|interleav|same time|in parallel|lost update|UpdateAsync|twice",
+			"flags": "i",
+			"text": "The review mentions the coin race across the DataStore yield"
+		},
+		{
+			"type": "file_matches",
+			"path": "docs/review.md",
+			"pattern": "pcall",
+			"text": "The review mentions pcall for the DataStore calls"
+		},
+		{
+			"type": "file_matches",
+			"path": "docs/review.md",
+			"pattern": "ShowReceipts",
+			"text": "The review mentions the ShowReceipts default"
+		},
+		{
+			"type": "file_matches",
+			"path": "docs/review.md",
+			"pattern": "getOwnerName",
+			"text": "The review mentions getOwnerName"
+		}
+	],
+	"rubric": [
+		"Finds the untrusted remote arguments: BuyBlocks and PlaceBlock trust bt, amt, and pos as annotated, but a client can send anything. NaN passes `amt < 1 or amt > MAX_PURCHASE` (every comparison with NaN is false) and makes the coins NaN, fractions pass, an unknown bt makes PRICES[bt] nil, and a NaN pos snaps to a NaN center that passes PlacementRules.check's height and reach tests. The fix checks type, whole number, range, and known block type first, rejecting NaN.",
+		"Finds the coin race: getCoins and setCoins yield on DataStore calls, so two quick BuyBlocks requests both read the same balance and the player is charged once for two purchases. It also notes the calls are not in pcall (DataStore errors throw) and, ideally, that nothing in their names says they yield. The fix keeps the balance in server memory, uses UpdateAsync, or serializes purchases per player.",
+		"Finds the false-setting bug: `plr:GetAttribute(\"ShowReceipts\") or DEFAULT_SHOW_RECEIPTS` turns a player's explicit false into true, so players who turned receipts off still get them. (The AutoAnchor check right below, which tests == nil, is correct.)",
+		"Finds the missing return: getOwnerName falls off its end when the owner has left, which returns no value at all, and in Luau tostring() with no argument errors (\"missing argument #1\"). So the RemoveBlock path meant for abandoned blocks always errors and those blocks can never be removed.",
+		"Finds the missing-player lookups: stock[plr] is indexed without a check in all three handlers. It is nil for a player who joined before PlayerAdded was connected and for one who left, including during the yield inside BuyBlocks, which then errors after the coins were already taken. The { [Player]: ... } annotation hides this, because Luau types a lookup in a table with an indexer as always present unless the value type is optional.",
+		"The review is accurate and useful: each finding names its location, why it matters, and a concrete fix; exploits and runtime bugs come before readability items (the positional booleans in placeBlock(plr, center, bt, autoAnchor, true), abbreviated names such as plr, bt, amt); it doesn't call correct code a bug (such as the == nil check for AutoAnchor); and the script itself is left unchanged."
+	],
+	"notes": "Review branch, no code changes (auto_checks is empty). Planted issues, each in the rubric: untrusted remote args with NaN passing range checks (Values from clients), a yield between read and write of coins plus missing pcall and missing Async names (Yielding, Error handling, Naming), `or` replacing an explicit false (if-then-else expressions), a function that falls off its end used in tostring (Functions: same number of values), unchecked { [Player]: T } lookups (Types: { [K]: V? }), a positional boolean call and abbreviated names (Functions, Naming), no --!strict (fair to mention). Control: the AutoAnchor == nil check is correct. Unplanned but fair findings: RemoveBlock refunds an abandoned block to whoever removes it, part is not type-checked, every purchase hits the DataStore. luau-lsp reports an ImplicitReturn lint on getOwnerName (exit 0); a trial that runs it gets a hint for one finding. The keyword checks are proxies; the judge reads the review.",
+	"timeout_minutes": 15
+}

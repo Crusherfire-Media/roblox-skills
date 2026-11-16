@@ -1,0 +1,12 @@
+Blocks now cost coins: Brick 5, Dirt 1, Grass 2, Window 8, Wood 3. Placing one takes its price from the player's coins. If they can't afford it, nothing is placed and they get a notification like "You need 3 more coins to place Window." I haven't tested any of it: I couldn't run StyLua or Selene (the permission request was auto-denied in this session), and I haven't playtested in Studio.
+
+**What changed**
+- **`Catalogs/BlockTypes.luau`**: each block type has a new `Price` field holding its cost.
+- **`PlacementServerService.luau`**: there's a new `SetChargeCallback(callback)`. Placement calls it only after every other check passes (valid block type, rate limit, free cell, within reach), right before the block is created. A player is never charged for a block that then isn't placed. If the callback refuses and gives a reason, that reason fires the existing `PlacementRejected` event, so the notification mediator you already have shows it. If no callback is set, blocks are free.
+- **New `Implementation/_PlacementCurrencyMediator.luau`** (plus its `.meta.json` file to keep it server-only): sets the callback. It uses `CurrencyServerService:TrySpend` and, when that fails, works out how many coins are missing for the message.
+
+**Why the extra mediator:** Currency already requires Placement, for passive income's `GetBlockCount`. If Placement required Currency to check coins, the two modules would require each other, a cycle. The mediator connects them so neither has to. Passive income is unchanged.
+
+**Decision for you:** a refused purchase now counts toward the 0.1-second placement rate limit. Without that, a player with no coins holding the place button would get a flood of notifications. Previously only successful placements counted. If you'd rather keep the old behavior, it's a one-line move in `PlacementServerService.luau`.
+
+**To check in Studio:** run StyLua on the changed files, then playtest. Confirm the output log has no `>> Failed` or `Skipping :Start()` lines mentioning `_PlacementCurrencyMediator`. With the starting 50 coins, place blocks until you run out, then check that the coins went down by the right amounts and that the "need more coins" notification appears.

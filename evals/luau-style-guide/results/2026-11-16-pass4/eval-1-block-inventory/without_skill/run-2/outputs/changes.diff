@@ -1,0 +1,195 @@
+diff --git a/src/ServerScriptService/BlockInventory.luau b/src/ServerScriptService/BlockInventory.luau
+new file mode 100644
+index 0000000..ddde7b3
+--- /dev/null
++++ b/src/ServerScriptService/BlockInventory.luau
+@@ -0,0 +1,189 @@
++--!strict
++-- Tracks how many of each block type every player has. Counts are loaded from the
++-- "BlockInventory" DataStore when a player joins and dropped when they leave (saving is not
++-- implemented yet).
++--
++-- Functions that change counts return (true) on success or (false, reason) on failure, so callers
++-- such as the placement remote handler can tell the player what went wrong.
++
++local DataStoreService = game:GetService("DataStoreService")
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++type BlockType = BlockTypes.BlockType
++type Counts = { [BlockType]: number }
++
++export type FailureReason =
++	"NotLoaded" -- The player's counts haven't loaded yet, or the player has left.
++	| "InvalidBlockType" -- The block type isn't one of BlockTypes.Order.
++	| "InvalidAmount" -- The amount to give isn't a positive whole number.
++	| "OutOfBlocks" -- The player has none of this block type left.
++	| "Full" -- The player already holds the normal maximum of this block type.
++
++local DATA_STORE_NAME = "BlockInventory"
++local STARTING_COUNT = 20
++-- The most a player can reach through normal play (returning removed blocks). Rewards and admin
++-- grants can go above this.
++local MAX_COUNT = 99
++
++local BlockInventory = {}
++
++BlockInventory.StartingCount = STARTING_COUNT
++BlockInventory.MaxCount = MAX_COUNT
++
++local countsByPlayer: { [Player]: Counts } = {}
++-- Players whose DataStore load is in flight. Cleared on leave so a late load is discarded.
++local loadingPlayers: { [Player]: true } = {}
++
++local function getDataStoreKey(player: Player): string
++	return `player_{player.UserId}`
++end
++
++local function makeDefaultCounts(): Counts
++	local counts = {}
++	for _, blockType in BlockTypes.Order do
++		counts[blockType] = STARTING_COUNT
++	end
++	return counts
++end
++
++-- Builds a full set of counts from saved data. Block types missing from the save (for example,
++-- types added after the player last played) or with unusable values get the starting count.
++local function countsFromSavedData(savedData: unknown): Counts
++	local counts = makeDefaultCounts()
++	if type(savedData) ~= "table" then
++		return counts
++	end
++
++	local savedTable = savedData :: { [unknown]: unknown }
++	for _, blockType in BlockTypes.Order do
++		local savedCount = savedTable[blockType]
++		-- `savedCount == savedCount` rules out NaN; the upper bound rules out infinity.
++		if type(savedCount) == "number" and savedCount == savedCount and savedCount < math.huge then
++			counts[blockType] = math.max(0, math.floor(savedCount))
++		end
++	end
++	return counts
++end
++
++local function loadCounts(player: Player): Counts
++	local success, result = pcall(function(): unknown
++		local dataStore = DataStoreService:GetDataStore(DATA_STORE_NAME)
++		return dataStore:GetAsync(getDataStoreKey(player))
++	end)
++
++	if not success then
++		warn(`BlockInventory: failed to load counts for {player.Name} ({player.UserId}): {result}`)
++		return makeDefaultCounts()
++	end
++
++	-- GetAsync returns nil for players who have never been saved.
++	return countsFromSavedData(result)
++end
++
++local function onPlayerAdded(player: Player)
++	if countsByPlayer[player] or loadingPlayers[player] then
++		return
++	end
++
++	loadingPlayers[player] = true
++	local counts = loadCounts(player)
++
++	-- The player may have left while the load was yielding.
++	if not loadingPlayers[player] then
++		return
++	end
++	loadingPlayers[player] = nil
++	countsByPlayer[player] = counts
++end
++
++local function onPlayerRemoving(player: Player)
++	loadingPlayers[player] = nil
++	countsByPlayer[player] = nil
++end
++
++-- Returns the player's counts and nil, or nil and the reason they can't be used. `blockType` is
++-- checked at runtime because it can come straight from a client.
++local function getCountsFor(player: Player, blockType: unknown): (Counts?, FailureReason?)
++	if not BlockTypes.isBlockType(blockType) then
++		return nil, "InvalidBlockType"
++	end
++	local counts = countsByPlayer[player]
++	if not counts then
++		return nil, "NotLoaded"
++	end
++	return counts, nil
++end
++
++-- Returns true once the player's counts have loaded, false while loading or after they leave.
++function BlockInventory.isLoaded(player: Player): boolean
++	return countsByPlayer[player] ~= nil
++end
++
++-- Returns how many of `blockType` the player has, or nil if their counts aren't loaded or the
++-- block type is invalid.
++function BlockInventory.getCount(player: Player, blockType: BlockType): number?
++	local counts = getCountsFor(player, blockType)
++	if not counts then
++		return nil
++	end
++	return counts[blockType]
++end
++
++-- Takes one block for placement. Fails with "OutOfBlocks" when the player has none left.
++function BlockInventory.takeBlock(player: Player, blockType: BlockType): (boolean, FailureReason?)
++	local counts, reason = getCountsFor(player, blockType)
++	if not counts then
++		return false, reason
++	end
++	if counts[blockType] <= 0 then
++		return false, "OutOfBlocks"
++	end
++
++	counts[blockType] -= 1
++	return true, nil
++end
++
++-- Returns one block when the player removes a placed block. Fails with "Full" when the player
++-- already has MaxCount or more of the type (possible after a reward); the count is left unchanged.
++function BlockInventory.returnBlock(player: Player, blockType: BlockType): (boolean, FailureReason?)
++	local counts, reason = getCountsFor(player, blockType)
++	if not counts then
++		return false, reason
++	end
++	if counts[blockType] >= MAX_COUNT then
++		return false, "Full"
++	end
++
++	counts[blockType] += 1
++	return true, nil
++end
++
++-- Gives `amount` blocks from a daily reward, admin command, or similar. Not limited by MaxCount.
++function BlockInventory.grantBlocks(
++	player: Player,
++	blockType: BlockType,
++	amount: number
++): (boolean, FailureReason?)
++	local counts, reason = getCountsFor(player, blockType)
++	if not counts then
++		return false, reason
++	end
++	if amount <= 0 or amount ~= math.floor(amount) or amount == math.huge then
++		return false, "InvalidAmount"
++	end
++
++	counts[blockType] += amount
++	return true, nil
++end
++
++Players.PlayerAdded:Connect(onPlayerAdded)
++Players.PlayerRemoving:Connect(onPlayerRemoving)
++-- Players who joined before this module was first required.
++for _, player in Players:GetPlayers() do
++	task.spawn(onPlayerAdded, player)
++end
++
++return BlockInventory

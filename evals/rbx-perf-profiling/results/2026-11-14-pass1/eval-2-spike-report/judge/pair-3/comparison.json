@@ -1,0 +1,127 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both open the slot correctly, compute frame stats correctly, report both frame ids, and dispose of everything on every path. B's self-time logic follows the documented LibMP method: at each thread's frame end it charges open scopes from EnterTimestampFrameLocal, an underflowed exit uses the frame's TickStartCpu, and a per-level stack subtracts the direct children. A's approach of splitting the time between entries is sound in principle, but it takes each frame's start from IsFrameBoundary and passes Configure fields that the verified API doesn't list, which puts its numbers at risk. B's StyLua failure is a real but cosmetic defect, so B wins narrowly.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. OpenFromSlot, failed open, no live/profiler changes, slot kept",
+          "score": 5,
+          "note": "`LibMP.Session.OpenFromSlot(slot)` with a nil check and a slot range check; no EnableCapture, SetFrameLimit, or ResetSlot."
+        },
+        {
+          "criterion": "2. Frame times via TickToMsCpu, skip incomplete, sorted median/p90",
+          "score": 5,
+          "note": "collectFrames uses `(TickEndCpu - TickStartCpu) * tickToMs`, skips IsIncomplete/IsPaused, and getMedian/getPercentile work on sortedMs."
+        },
+        {
+          "criterion": "3. Splits boundary-crossing scopes per frame",
+          "score": 3,
+          "note": "Splitting stretches between entries does divide scopes at boundaries, but the frame start comes from `state:IsFrameBoundary()`/`Timestamp()`, which the verified API doesn't list, and the Configure fields StartFrameId/EndFrameId aren't listed either."
+        },
+        {
+          "criterion": "4. Per-thread self time with stack, GPU skipped",
+          "score": 4,
+          "note": "Each stretch goes to the top-of-stack timer (EnterTimerId at depth-1), which gives self time correctly; `SkipGpuThreads = true`; the unclaimedTicks underflow handling is a heuristic."
+        },
+        {
+          "criterion": "5. FrameId + FrameAbsoluteId, normal average over non-slow frames",
+          "score": 5,
+          "note": "SlowFrame has FrameId, FrameAbsoluteId, and Name `Frame {id} (absolute {abs})`; normalTicksByTimer / normalFrameCount covers only frames at or under the threshold."
+        },
+        {
+          "criterion": "6. Safe LibMP use",
+          "score": 5,
+          "note": "The iterator is disposed after a pcall and the session after `pcall(buildReport)`; only Fetch*** is used; describeTimer caches timer and group names."
+        },
+        {
+          "criterion": "7. Returns table, scoped changes, checks pass",
+          "score": 5,
+          "note": "Returns a typed Report, adds only the new file, and luau-lsp, selene, and StyLua all pass."
+        }
+      ],
+      "overall_score": 6.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. OpenFromSlot, failed open, no live/profiler changes, slot kept",
+          "score": 5,
+          "note": "`LibMP.Session.OpenFromSlot(slot)` with a nil check and a clear error; no profiler toggling or slot reset."
+        },
+        {
+          "criterion": "2. Frame times via TickToMsCpu, skip incomplete, sorted median/p90",
+          "score": 5,
+          "note": "`(desc.TickEndCpu - desc.TickStartCpu) * tickToMs`, skips IsPaused/IsIncomplete, and median/percentile run on the sorted list."
+        },
+        {
+          "criterion": "3. Splits boundary-crossing scopes per frame",
+          "score": 5,
+          "note": "On IsThreadFrameEnd it charges open scopes from `el:EnterTimestampFrameLocal()` to now; an underflowed exit uses `FetchFrameDesc(frameId).TickStartCpu`."
+        },
+        {
+          "criterion": "4. Per-thread self time with stack, GPU skipped",
+          "score": 5,
+          "note": "addSpan keeps childTicks[threadId][level], subtracts the direct children, and adds this scope's duration to its parent level; `SkipGpuThreads = true`."
+        },
+        {
+          "criterion": "5. FrameId + FrameAbsoluteId, normal average over non-slow frames",
+          "score": 5,
+          "note": "frameId, frameAbsoluteId, and frameName are reported; the normal average skips slow frames and also frames marked partial by underflow."
+        },
+        {
+          "criterion": "6. Safe LibMP use",
+          "score": 5,
+          "note": "The iterator is disposed after a pcall and the session after `pcall(buildReport)`; only Fetch*** is used; timerNames are cached."
+        },
+        {
+          "criterion": "7. Returns table, scoped changes, checks pass",
+          "score": 3,
+          "note": "Returns the Report (and also prints it), but StyLua fails on the long collectSelfTicks signature."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 6.5,
+      "strengths": [
+        "Passes every automatic check",
+        "Splitting stretches between entries gives self time directly",
+        "Warm-up frame before the range, as the guide recommends",
+        "Disposes the iterator and session on every path; caches timer and group names"
+      ],
+      "weaknesses": [
+        "Frame-start timing depends on IsFrameBoundary and StartFrameId/EndFrameId, which the verified API doesn't list",
+        "Handling of time before an underflowed exit is a heuristic",
+        "Harder to check against the documented EnterTimestampFrameLocal method"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Follows the documented EmitThreadFrameEnd + EnterTimestampFrameLocal method for splitting scopes at frame boundaries",
+        "Uses the frame's TickStartCpu for underflowed exits, as the guide describes",
+        "Clear stack-based self time that subtracts direct children",
+        "Marks partial frames and leaves them out of the normal average"
+      ],
+      "weaknesses": [
+        "StyLua check fails",
+        "Uses ThreadStackWasOverflowed, which the verified API doesn't list",
+        "No warm-up frame, so early frames depend on underflow handling"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 6.5,
+    "without_skill": 7
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

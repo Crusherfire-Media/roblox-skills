@@ -1,0 +1,64 @@
+{
+  "id": 3,
+  "name": "sync-blocks-left",
+  "skill": "vide-charm",
+  "prompt": "Each player can place at most 50 blocks per server, and BlockPlacement.server.luau enforces that, but players can't see how close they are. Show \"<n> blocks left\" just above the hotbar, and keep it up to date as they place blocks.\n\nThe server is the source of truth for the count. Use Charm and CharmSync (both installed in ReplicatedStorage.Packages) to get it to the client instead of a hand-made remote for this one value: we'll sync more per-player data the same way soon, so adding the next value should be easy. The client UI is in src/StarterPlayer/StarterPlayerScripts (Main.client.luau and BlockPicker.luau); add modules or scripts where they fit.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/sync-blocks-left/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/sync-blocks-left/BlockPicker.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau" },
+    { "from": "fixtures/sync-blocks-left/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "any_file_matches",
+      "dir": "src/ServerScriptService",
+      "ext": ".luau",
+      "pattern": "addSignalsToClient\\(",
+      "text": "Server code subscribes players with CharmSync's addSignalsToClient"
+    },
+    {
+      "type": "any_file_matches",
+      "dir": "src/ServerScriptService",
+      "ext": ".luau",
+      "pattern": "removeClient\\(",
+      "text": "Server code removes leaving players from CharmSync"
+    },
+    {
+      "type": "any_file_matches",
+      "dir": "src",
+      "ext": ".luau",
+      "pattern": "addSignals\\(",
+      "text": "Client code registers its synced signals with CharmSync's addSignals"
+    },
+    {
+      "type": "any_file_matches",
+      "dir": "src",
+      "ext": ".luau",
+      "pattern": "\\.patch\\(",
+      "text": "Client code applies payloads with CharmSync's client.patch"
+    }
+  ],
+  "rubric": [
+    "The server keeps each player's placed count in Charm (a signal holding a table keyed by player or UserId and updated by copying, or one signal per player created and dropped with the player), the 50-block check reads that state, and the player's entry is cleared when they leave.",
+    "Server sync wiring: `CharmSync.server.connect` is called once, with a callback that fires one RemoteEvent to that player; each player is subscribed with `addSignalsToClient` under a key unique to that player (or to a getter that returns only their data under a per-player key); `removeClient` runs when they leave.",
+    "Client sync wiring: a client Charm signal is registered with `CharmSync.client.addSignals` under the key the server uses before any payload is applied, the remote's `OnClientEvent` passes payloads to `CharmSync.client.patch`, and the first full payload cannot be missed (for example a ready remote fired after the client is listening, which tells the server to subscribe that player).",
+    "The UI shows blocks left through a Vide-tracked bridge to the synced signal (vide-charm's `useSignalState` inside the mounted scope, or a Charm listener disposed with Vide's `cleanup`), never a Charm getter read inside a Vide binding. The 50 limit is defined in one place that server and client share, or the server syncs the remaining count itself, and the label shows something sensible before the first payload.",
+    "The UI never writes the synced client signal; the count changes only through payloads from the server.",
+    "The setup makes the next synced value easy to add: one place on each side lists the synced keys, rather than wiring specific to this one count spread through unrelated code.",
+    "Correct and in scope: placement and the hotbar keep working, the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files, such as a preview story or a spec, count neither for nor against."
+  ],
+  "judge_facts": [
+    "CharmSync 0.4.1 (charm-sync/src/config.luau, server.luau): `config.interval` defaults to 0, so after `server.connect(callback)` pending patches are sent on every Heartbeat; a negative interval turns automatic sending off. `flush` calls the callback with `task.spawn`.",
+    "CharmSync 0.4.1 (charm-sync/src/server.luau): a key added with `addSignalsToClient` is sent as its full value (an \"init\" payload) at the next sync, then as patches. Registering a different getter under a key that is already tracked warns \"Attempted to sync different states with the same key\" and keeps the first getter, so per-player data needs per-player keys.",
+    "CharmSync 0.4.1 (charm-sync/src/server.luau): `removeClient(player)` drops the player and stops tracking every key no remaining client uses.",
+    "CharmSync 0.4.1 (charm-sync/src/client.luau): `client.patch(payloads)` applies each payload inside `Charm.batch` by calling the setter registered for each key with `client.addSignals`, and warns about keys that are not registered.",
+    "CharmSync 0.4.1 (charm-sync/src/config.luau): `fixArrays` and `validatePatches` default to true; `preserveHistory` defaults to false.",
+    "Vide 0.4.1 (vide/src/source.luau) registers the running Vide scope only when a Vide source is read. A Charm 0.11.1 getter registers only with Charm's own running effect or computed (charm/src/init.luau), so a Charm getter read inside a Vide binding never makes that binding rerun.",
+    "vide-charm 0.4.1 (vide-charm/src/init.luau): `useSignalState(getter)` is `Vide.source(getter())` plus `Vide.cleanup(Charm.listen(getter, state))`, so it must run inside a Vide scope; Vide's `cleanup` errors \"cannot cleanup outside a stable or reactive scope\" otherwise.",
+    "Charm 0.11.1 (charm/src/init.luau): a signal setter does nothing when the new value `==` the pending one; with `flags.frozen` (on in Studio by default) every table stored in a signal is deep-frozen, so changing it in place errors."
+  ],
+  "timeout_minutes": 25
+}

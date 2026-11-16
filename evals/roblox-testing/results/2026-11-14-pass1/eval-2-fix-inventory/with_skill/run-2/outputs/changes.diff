@@ -1,0 +1,56 @@
+diff --git a/src/ServerScriptService/Inventory/BlockInventory.luau b/src/ServerScriptService/Inventory/BlockInventory.luau
+index daa89f7..0652b96 100644
+--- a/src/ServerScriptService/Inventory/BlockInventory.luau
++++ b/src/ServerScriptService/Inventory/BlockInventory.luau
+@@ -45,11 +45,11 @@ end
+ 	Otherwise changes nothing and returns false.
+ ]]
+ function BlockInventory.take(inventory: Inventory, name: string, amount: number): boolean
+-	local current = inventory.Counts[name]
+-	if current and current < amount then
++	local current = inventory.Counts[name] or 0
++	if current < amount then
+ 		return false
+ 	end
+-	inventory.Counts[name] = (current or 0) - amount
++	inventory.Counts[name] = current - amount
+ 	return true
+ end
+ 
+diff --git a/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+new file mode 100644
+index 0000000..9983537
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau
+@@ -0,0 +1,31 @@
++--!strict
++const JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
++const describe = JestGlobals.describe
++const expect = JestGlobals.expect
++const it = JestGlobals.it
++
++const BlockInventory = require("@game/ServerScriptService/Inventory/BlockInventory")
++
++type TakeRow = {
++	Case: string,
++	Held: number?,
++	WasTaken: boolean,
++	Left: number,
++}
++
++const TAKE_ROWS: { TakeRow } = {
++	{ Case = "a type it was never given", Held = nil, WasTaken = false, Left = 0 },
++	{ Case = "fewer than asked", Held = 2, WasTaken = false, Left = 2 },
++	{ Case = "exactly as many as asked", Held = 3, WasTaken = true, Left = 0 },
++}
++
++describe("BlockInventory", function()
++	it.each(TAKE_ROWS)("takes blocks only when it holds enough: $Case", function(row: TakeRow)
++		const inventory = BlockInventory.new({ Window = row.Held })
++
++		const wasTaken = BlockInventory.take(inventory, "Window", 3)
++
++		expect(wasTaken).toBe(row.WasTaken)
++		expect(BlockInventory.count(inventory, "Window")).toBe(row.Left)
++	end)
++end)

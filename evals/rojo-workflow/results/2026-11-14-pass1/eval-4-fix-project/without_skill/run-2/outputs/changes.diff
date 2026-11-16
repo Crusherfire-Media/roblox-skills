@@ -1,0 +1,179 @@
+diff --git a/default.project.json b/default.project.json
+index 71017cf..55a48a6 100644
+--- a/default.project.json
++++ b/default.project.json
+@@ -1,6 +1,7 @@
+ ﻿{
+   "name": "eval-sandbox",
+   "servePort": 34872,
++  "globIgnorePaths": ["src/ServerScriptService/Tests"],
+   "tree": {
+     "$className": "DataModel",
+     "ReplicatedStorage": {
+@@ -10,16 +11,19 @@
+       },
+       "Packages": {
+         "$path": "roblox_packages"
+-      },
+-      "TestPackages": {
+-        "$path": "test_packages/roblox_packages"
+       }
+     },
+     "ServerScriptService": {
+       "$className": "ServerScriptService",
+       "$path": "src/ServerScriptService",
+       "Tests": {
+-        "$path": "src/ServerScriptService/Tests"
++        "$className": "Folder",
++        "Specs": {
++          "$path": "src/ServerScriptService/Tests/Specs"
++        },
++        "Packages": {
++          "$path": "test_packages/roblox_packages"
++        }
+       }
+     },
+     "StarterGui": {
+@@ -30,7 +34,7 @@
+       "$className": "StarterPlayer",
+       "StarterPlayerScripts": {
+         "$className": "StarterPlayerScripts",
+-        "$path": "src/StarterPlayer/StarterPlayerScript"
++        "$path": "src/StarterPlayer/StarterPlayerScripts"
+       }
+     },
+     "Players": {
+@@ -49,38 +53,18 @@
+         "$properties": {
+           "Anchored": true,
+           "Locked": true,
+-          "Size": [
+-            2048,
+-            16,
+-            2048
+-          ],
+-          "Position": [
+-            0,
+-            -8,
+-            0
+-          ],
++          "Size": [2048, 16, 2048],
++          "Position": [0, -8, 0],
+           "Material": "Plastic",
+-          "Color": [
+-            0.388,
+-            0.373,
+-            0.384
+-          ]
++          "Color": [0.388, 0.373, 0.384]
+         }
+       },
+       "SpawnLocation": {
+         "$className": "SpawnLocation",
+         "$properties": {
+           "Anchored": true,
+-          "Size": [
+-            12,
+-            1,
+-            12
+-          ],
+-          "Position": [
+-            0,
+-            0.5,
+-            0
+-          ]
++          "Size": [12, 1, 12],
++          "Position": [0, 0.5, 0]
+         }
+       }
+     }
+diff --git a/docs/rojo-workflow.md b/docs/rojo-workflow.md
+new file mode 100644
+index 0000000..8544ecd
+--- /dev/null
++++ b/docs/rojo-workflow.md
+@@ -0,0 +1,84 @@
++# Working with Rojo day to day
++
++This repo is the source of truth for the game. Studio shows a live copy of it through
++`rojo serve`. Read the Layout table in `README.md` first: it lists every folder and where it
++appears in the place.
++
++## Setup (once)
++
++1. Install the tools with Rokit (`rokit install`), then install packages with pesde, both at the
++   root and in `test_packages/` (see README "Packages").
++2. Install the Rojo plugin in Studio. Use the same version as the `rojo` in `rokit.toml`.
++3. Make your **own** dev place: a new Baseplate in Studio, saved locally or published to your own
++   account. Don't serve into the shared/production place. Rojo replaces the contents of the
++   services it manages, and you can sync over someone else's work.
++
++## Daily loop
++
++1. `git pull`, then reinstall packages if `pesde.toml` or `pesde.lock` changed.
++2. From the repo root: `rojo serve` (uses `default.project.json`, port 34872).
++3. In your dev place, open the Rojo plugin and click **Connect**.
++4. Edit files in your editor. Saves sync into Studio right away. Playtest in Studio.
++5. Before you commit, run the checks in README "Checks" (sourcemap, luau-lsp, selene, stylua).
++
++## Where to make changes
++
++- **Code: always in `src/`**, in your editor. Never edit synced scripts in Studio. Rojo
++  overwrites them, and those edits never reach git.
++- Pick the folder from the README Layout table: server code in `src/ServerScriptService`, shared
++  modules in `src/ReplicatedStorage/Shared`, client code in
++  `src/StarterPlayer/StarterPlayerScripts`, UI in `src/StarterGui`, and specs in
++  `src/ServerScriptService/Tests/Specs`.
++- File suffixes decide the script type: `.server.luau` makes a Script, `.client.luau` makes a
++  LocalScript, and anything else makes a ModuleScript.
++- **Packages:** change `pesde.toml` (or `test_packages/pesde.toml` for test-only packages) and
++  reinstall. Never edit `roblox_packages/`, because it's generated and gitignored.
++- **Things built in Studio** (models, parts, UI made by hand): Rojo doesn't save Studio edits back
++  to disk. Export them to files (for example `.rbxm`/`.model.json`) under the right `src/` folder,
++  or ask before adding a new mapping.
++- Anything outside the folders Rojo manages (such as extra parts in Workspace) lives only in your
++  dev place, and teammates won't get it.
++
++## What to check while serving
++
++- **The `rojo serve` terminal.** Read its errors and warnings. A bad project file or a bad
++  `.meta.json`/`.model.json` shows up here first.
++- **The plugin stays connected.** If it disconnects or warns about a version mismatch, fix that
++  before you trust what Studio shows.
++- **The Explorer matches the Layout table.** In particular, check:
++  - `ServerScriptService.Tests` exists **once**, with `Specs` and `Packages` (`Jest`,
++    `JestGlobals`) inside it.
++  - `ReplicatedStorage.Packages` has `Vide`, `Charm`, and the other packages.
++  - There are no duplicate folders, and no stray folders like `TestPackages`.
++- **New or renamed files appear in Studio** in the right place. If one doesn't, it's probably in
++  the wrong folder or has the wrong suffix.
++- **Output window** while playtesting: a `require` error usually means something mapped to the
++  wrong place.
++
++## Don't break `default.project.json`
++
++The project file decides the whole place layout, so a small slip breaks everyone's sync, the
++sourcemap, and Jest.
++
++- **Change it rarely, and on purpose.** You only need to edit it to add a new top-level mapping.
++  New files inside existing `src/` folders need no edit. When you do change it, update the README
++  Layout table in the same commit.
++- **Merge conflicts:** don't just "accept both" or pick a side blindly. Rebuild the file so that it
++  matches the README Layout table. Watch for these merge mistakes (all of them happened once):
++  - typos in `$path` (for example `StarterPlayerScript` instead of `StarterPlayerScripts`)
++  - a mapping moved to the wrong service (test packages ended up in
++    `ReplicatedStorage.TestPackages` instead of `ServerScriptService.Tests.Packages`)
++  - the `Tests` node turned back into a `$path` to `src/ServerScriptService/Tests`. That creates
++    a **second** `Tests` folder, and Jest can't find its packages. `Tests` must stay a plain
++    `Folder` node with `Specs` and `Packages` children. The `globIgnorePaths` entry keeps the
++    copy from disk out.
++  - an encoding change. Save the file as **UTF-8 without a BOM**. Rojo fails with
++    `Failed to parse JSONC` if the file starts with a BOM, and some merge tools and Windows
++    editors add one. In VS Code, the status bar should say `UTF-8`, not `UTF-8 with BOM`.
++- **Check before you push** any change to the project file:
++  1. `rojo sourcemap default.project.json -o sourcemap.json --include-non-scripts` must succeed.
++  2. Restart `rojo serve` and reconnect. Confirm the Explorer still matches the Layout table
++     (see the checklist above).
++  3. Run the rest of the README checks.
++- Keep the diff small, and mention project-file changes in your PR description so reviewers
++  look at them.

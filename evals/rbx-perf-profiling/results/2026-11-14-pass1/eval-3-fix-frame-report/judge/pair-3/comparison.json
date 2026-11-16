@@ -1,0 +1,131 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "B fixes every reported symptom with the methods the LibMP guide recommends: a snapshot instead of pausing, EmitThreadFrameEnd with EnterTimestampFrameLocal, and GPU time from the GPU thread's scopes. It also fixes all the unreported misuses and passes every check. A has a sound pause/resume structure and a workable overlap split, but it still leaks the GetCounterSamples array, still reports GPU spans that are far wider than the frame, skips stack level 0 when checking for nested Physics scopes, and fails StyLua.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Stops breaking the overlay",
+          "score": 5,
+          "note": "It opens its own session with `LibMP.Session.OpenFromLiveData()` while capture is paused, disposes it after `pcall(buildReport, session)`, and no longer uses `FpsOverlay.getSession()`."
+        },
+        {
+          "criterion": "Leaves the shared profiler as it found it",
+          "score": 5,
+          "note": "Capture comes back on every path: on open failure, and after the pcall even when it fails. It drops the `SetFrameLimit(256)` call entirely."
+        },
+        {
+          "criterion": "Per-frame scope times clipped to frame",
+          "score": 4,
+          "note": "`distribute` splits each enter/exit interval across the overlapping frame spans, so no frame gets more scope time than it lasted. Underflowed scopes, scopes still open at the end, and the missing warm-up frame lose a little time at the edges."
+        },
+        {
+          "criterion": "Physics nested counted once",
+          "score": 4,
+          "note": "It checks the ancestors for a Physics-group timer and counts only the outermost scope. The loop `for ancestorDepth = 1, depth - 1` skips stack level 0, though, even though the stack is 0-based."
+        },
+        {
+          "criterion": "GPU time correct",
+          "score": 3,
+          "note": "It uses `tickToMsGpu` and clamps negative spans with `math.max(0, ...)`. Spans far wider than the frame are still reported as-is, and it does not use the GPU thread."
+        },
+        {
+          "criterion": "Unreported misuses",
+          "score": 3,
+          "note": "It switches to `FetchTimerDesc` and hoists `FindGroupId`. `session:GetCounterSamples(heapId):FetchLastSample()` still leaks the array, and `if heapId` and `assert(mainThreadId)` never catch a 0 result, because 0 is truthy in Luau."
+        },
+        {
+          "criterion": "Keeps fields/overlay; checks pass",
+          "score": 3,
+          "note": "The report fields are kept and FpsOverlay is untouched. Incomplete frames are now left out, and StyLua fails on the long `table.insert(spans, ...)` line."
+        }
+      ],
+      "overall_score": 6
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Stops breaking the overlay",
+          "score": 5,
+          "note": "It takes a snapshot with `CaptureToBufferSync`, opens it with `OpenFromBuffer`, disposes that session, and never touches the overlay's session."
+        },
+        {
+          "criterion": "Leaves the shared profiler as it found it",
+          "score": 5,
+          "note": "It never pauses capture. It sets the limit to 256 for the capture and restores `FpsOverlay.FrameLimit` afterwards, even when the capture fails, because the capture call is wrapped in a pcall."
+        },
+        {
+          "criterion": "Per-frame scope times clipped to frame",
+          "score": 5,
+          "note": "It uses `EmitThreadFrameEnd` with `EnterTimestampFrameLocal`, takes the frame start for underflowed exits, and starts one frame early to warm up the stack."
+        },
+        {
+          "criterion": "Physics nested counted once",
+          "score": 5,
+          "note": "The `openPhysicsScopes` counter adds a Physics scope only when it is outermost, and the stack walk at frame end uses an `isPhysicsCounted` flag."
+        },
+        {
+          "criterion": "GPU time correct",
+          "score": 5,
+          "note": "It sums the top-level scopes on the GPU thread (`GetThreadIdGpu`, depth 0) with `tickToMsGpu` and no longer relies on the frame's GPU ticks."
+        },
+        {
+          "criterion": "Unreported misuses",
+          "score": 5,
+          "note": "It uses `FetchTimerDesc`, finds the Physics group once, uses `FetchLastCounterSample`, compares IDs with `~= 0`, and reads each view before the next fetch."
+        },
+        {
+          "criterion": "Keeps fields/overlay; checks pass",
+          "score": 4,
+          "note": "The fields and FpsOverlay are unchanged and all checks pass. `run()` now waits about 122 frames, and `isPhysics` fetches the timer description on every call instead of caching it."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 6,
+      "strengths": [
+        "Clean pause/resume, with the session disposed on every path",
+        "Does not touch the frame limit at all",
+        "Splitting scopes by frame-span overlap is valid in principle",
+        "Caches each timer's group"
+      ],
+      "weaknesses": [
+        "Still leaks the GetCounterSamples array",
+        "Spans far wider than the frame are still reported as GPU time",
+        "The ancestor scan misses stack level 0",
+        "Truthiness checks on Find*** results never catch 0",
+        "Fails the StyLua check"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Reads from a snapshot, so capture is never paused",
+        "Restores the frame limit, even when the capture errors",
+        "Clips scopes per frame with the method the guide recommends",
+        "Measures GPU time from the GPU thread",
+        "Fixes every unreported misuse",
+        "Guards against two reports running at once"
+      ],
+      "weaknesses": [
+        "The report now waits about 2 seconds",
+        "Changing the frame limit temporarily clears the overlay's counter history",
+        "Group lookups for timers are not cached"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 6,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

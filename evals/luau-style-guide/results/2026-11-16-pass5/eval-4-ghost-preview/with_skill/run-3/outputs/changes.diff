@@ -1,0 +1,197 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+new file mode 100644
+index 0000000..1c96b6a
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+@@ -0,0 +1,191 @@
++--!strict
++-- A see-through copy of the selected block that follows the mouse, snapped to
++-- the grid cell a click would place it in.
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
++local UserInputService = game:GetService("UserInputService")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
++
++local DEFAULT_TRANSPARENCY = 0.5
++local DEFAULT_RAY_LENGTH = 500
++local BLOCKED_COLOR = Color3.fromRGB(255, 60, 60)
++local PLACED_BLOCKS_FOLDER_NAME = "PlacedBlocks"
++
++type BlockType = BlockTypes.BlockType
++
++export type Options = {
++	Transparency: number?,
++	RayLength: number?,
++}
++
++local localPlayer = Players.LocalPlayer
++-- Each instance binds its own render step, and the names must be unique.
++local nextRenderStepId = 0
++
++local GhostPreview = {}
++GhostPreview.__index = GhostPreview
++
++export type GhostPreview = typeof(setmetatable(
++	{} :: {
++		_BlockType: BlockType,
++		_Part: Part,
++		_RaycastParams: RaycastParams,
++		_RayLength: number,
++		_Transparency: number,
++		_RenderStepName: string,
++		_CharacterAddedConnection: RBXScriptConnection,
++		_Cell: Vector3?,
++		_IsPlaceable: boolean,
++	},
++	GhostPreview
++))
++
++local function createPart(): Part
++	local part = Instance.new("Part")
++	part.Name = "GhostPreview"
++	part.Size = Vector3.one * BlockTypes.BlockSize
++	part.Anchored = true
++	part.CanCollide = false
++	part.CanTouch = false
++	-- Keeps the mouse raycast and PlacementRules.check from hitting the ghost.
++	part.CanQuery = false
++	part.CastShadow = false
++	part.Transparency = 1
++	return part
++end
++
++local function getMouseRay(): Ray
++	local camera = workspace.CurrentCamera
++	local mouseLocation = UserInputService:GetMouseLocation()
++	-- GetMouseLocation includes the top bar inset, which ViewportPointToRay
++	-- expects and ScreenPointToRay does not.
++	return camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
++end
++
++--[[
++	Creates a ghost of blockType that follows the mouse every frame.
++	Options.Transparency is from 0 to 1 and Options.RayLength is in studs; both
++	fall back to the defaults. Call Destroy when build mode ends.
++]]
++function GhostPreview.new(blockType: BlockType, options: Options?): GhostPreview
++	local resolvedOptions: Options = options or {}
++	local transparency = resolvedOptions.Transparency or DEFAULT_TRANSPARENCY
++	local rayLength = resolvedOptions.RayLength or DEFAULT_RAY_LENGTH
++	assert(transparency >= 0 and transparency <= 1, "Transparency must be from 0 to 1")
++	assert(rayLength > 0, "RayLength must be greater than 0")
++
++	local raycastParams = RaycastParams.new()
++	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
++	if localPlayer.Character then
++		raycastParams.FilterDescendantsInstances = { localPlayer.Character }
++	end
++
++	nextRenderStepId += 1
++
++	local self = setmetatable({
++		_BlockType = blockType,
++		_Part = createPart(),
++		_RaycastParams = raycastParams,
++		_RayLength = rayLength,
++		_Transparency = transparency,
++		_RenderStepName = `GhostPreview{nextRenderStepId}`,
++		_CharacterAddedConnection = localPlayer.CharacterAdded:Connect(function(character)
++			raycastParams.FilterDescendantsInstances = { character }
++		end),
++		_Cell = nil,
++		_IsPlaceable = false,
++	}, GhostPreview)
++
++	self:_ApplyStyle()
++	self._Part.Parent = workspace
++
++	-- Runs after the camera moves, so the ghost never trails it by a frame.
++	RunService:BindToRenderStep(
++		self._RenderStepName,
++		Enum.RenderPriority.Camera.Value + 1,
++		function()
++			self:_Update()
++		end
++	)
++
++	return self
++end
++
++function GhostPreview.SetBlockType(self: GhostPreview, blockType: BlockType)
++	self._BlockType = blockType
++	self:_ApplyStyle()
++end
++
++--[[
++	Returns true and the center of the ghost's cell when a block can go there,
++	or false and nil when it can't or the ghost is hidden. Reflects the last
++	rendered frame, so it matches what the player sees.
++]]
++function GhostPreview.GetPlacement(self: GhostPreview): (boolean, Vector3?)
++	if self._IsPlaceable and self._Cell then
++		return true, self._Cell
++	end
++	return false, nil
++end
++
++function GhostPreview.Destroy(self: GhostPreview)
++	RunService:UnbindFromRenderStep(self._RenderStepName)
++	self._CharacterAddedConnection:Disconnect()
++	self._Part:Destroy()
++	self._Cell = nil
++	self._IsPlaceable = false
++end
++
++function GhostPreview._ApplyStyle(self: GhostPreview)
++	local style = BlockTypes.Styles[self._BlockType]
++	self._Part.Material = style.Material
++	self._Part.Color = if self._IsPlaceable then style.Color else BLOCKED_COLOR
++end
++
++function GhostPreview._Hide(self: GhostPreview)
++	if not self._Cell then
++		return
++	end
++	self._Cell = nil
++	self._IsPlaceable = false
++	self._Part.Transparency = 1
++end
++
++function GhostPreview._Update(self: GhostPreview)
++	local ray = getMouseRay()
++	local direction = ray.Direction * self._RayLength
++	local result = workspace:Raycast(ray.Origin, direction, self._RaycastParams)
++	if not result then
++		self:_Hide()
++		return
++	end
++
++	-- Half a block out along the normal lands inside the neighboring cell
++	-- rather than on its boundary, where snap could round either way.
++	local offset = result.Normal * (BlockTypes.BlockSize / 2)
++	local cell = PlacementRules.snap(result.Position + offset)
++
++	local isPlaceable = false
++	local blocksFolder = workspace:FindFirstChild(PLACED_BLOCKS_FOLDER_NAME)
++	if blocksFolder then
++		isPlaceable = PlacementRules.check(cell, localPlayer.Character, blocksFolder)
++	end
++
++	if cell ~= self._Cell then
++		if not self._Cell then
++			self._Part.Transparency = self._Transparency
++		end
++		self._Cell = cell
++		self._Part.CFrame = CFrame.new(cell)
++	end
++	if isPlaceable ~= self._IsPlaceable then
++		self._IsPlaceable = isPlaceable
++		self:_ApplyStyle()
++	end
++end
++
++return GhostPreview

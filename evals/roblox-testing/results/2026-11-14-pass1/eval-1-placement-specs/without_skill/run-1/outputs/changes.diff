@@ -1,0 +1,393 @@
+diff --git a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+new file mode 100644
+index 0000000..237b8d2
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+@@ -0,0 +1,387 @@
++--[[
++	Specs for ReplicatedStorage.Shared.PlacementRules.
++
++	Assumptions:
++	- Rejection reasons are compared exactly. They are only meant for the server log, but checking
++	  them proves each test is rejected by the rule it targets and not by some earlier rule. If the
++	  wording changes, update the REASONS table below.
++	- Positions are worked out from BlockTypes.BlockSize, PlacementRules.MaxHeight and
++	  PlacementRules.MaxReach instead of hard-coded numbers, so the specs keep working if those
++	  values change (as long as MaxReach is a few cells or more).
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local ServerScriptService = game:GetService("ServerScriptService")
++
++local JestGlobals = require(ServerScriptService.Tests.Packages.JestGlobals)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
++
++local describe = JestGlobals.describe
++local expect = JestGlobals.expect
++local it = JestGlobals.it
++
++local SIZE = BlockTypes.BlockSize
++local HALF = SIZE / 2
++local VALID_TYPE = BlockTypes.List[1].Name
++
++local REASONS = {
++	unknownType = "unknown block type",
++	notVector = "position is not a Vector3",
++	notFinite = "position is not finite",
++	height = "out of height range",
++	noCharacter = "no character",
++	reach = "out of reach",
++	occupied = "cell is occupied",
++}
++
++-- The cell resting on the Baseplate at the origin, and a point inside it that isn't its center.
++local ORIGIN_CELL = Vector3.new(HALF, HALF, HALF)
++local INSIDE_ORIGIN_CELL = Vector3.new(SIZE * 0.9, SIZE * 0.1, SIZE * 0.25)
++
++local function emptyOccupied(): { [Vector3]: boolean }
++	-- Frozen so any write by validate errors and fails the test.
++	return table.freeze({})
++end
++
++local function expectVector(actual: Vector3, expected: Vector3)
++	expect({ actual.X, actual.Y, actual.Z }).toEqual({ expected.X, expected.Y, expected.Z })
++end
++
++local function expectAccepted(expectedCenter: Vector3, ok: boolean, result: Vector3 | string)
++	-- Checked first so a failure prints the rejection reason rather than just "false".
++	expect(if ok then nil else result).toBeNil()
++	expect(ok).toBe(true)
++	expect(typeof(result)).toBe("Vector3")
++	expectVector(result :: Vector3, expectedCenter)
++end
++
++local function expectRejected(expectedReason: string, ok: boolean, result: Vector3 | string)
++	expect(ok).toBe(false)
++	expect(result).toBe(expectedReason)
++end
++
++describe("PlacementRules.snap", function()
++	it("puts the origin in the cell resting on the Baseplate", function()
++		expectVector(PlacementRules.snap(Vector3.zero), ORIGIN_CELL)
++	end)
++
++	it("returns the center of the cell for any point inside it", function()
++		expectVector(PlacementRules.snap(INSIDE_ORIGIN_CELL), ORIGIN_CELL)
++	end)
++
++	it("returns the center unchanged", function()
++		expectVector(PlacementRules.snap(ORIGIN_CELL), ORIGIN_CELL)
++	end)
++
++	it("puts a point on a cell boundary in the cell above it", function()
++		expectVector(
++			PlacementRules.snap(Vector3.new(SIZE, SIZE, SIZE)),
++			Vector3.new(SIZE + HALF, SIZE + HALF, SIZE + HALF)
++		)
++	end)
++
++	it("puts a point just below a boundary in the cell below it", function()
++		local justBelow = SIZE - 0.01
++		expectVector(PlacementRules.snap(Vector3.new(justBelow, justBelow, justBelow)), ORIGIN_CELL)
++	end)
++
++	it("snaps negative coordinates to the cell below zero", function()
++		expectVector(
++			PlacementRules.snap(Vector3.new(-0.01, -SIZE, -SIZE - 0.01)),
++			Vector3.new(-HALF, -HALF, -SIZE - HALF)
++		)
++	end)
++
++	it("snaps each axis on its own", function()
++		expectVector(
++			PlacementRules.snap(Vector3.new(SIZE * 3.2, SIZE * 0.5, SIZE * -7.9)),
++			Vector3.new(SIZE * 3.5, SIZE * 0.5, SIZE * -7.5)
++		)
++	end)
++
++	it("gives the same result when snapping twice", function()
++		local once = PlacementRules.snap(Vector3.new(13.7, 41.2, -88.8))
++		expectVector(PlacementRules.snap(once), once)
++	end)
++end)
++
++describe("PlacementRules.validate", function()
++	describe("block type", function()
++		for _, blockType in BlockTypes.List do
++			it(`accepts {blockType.Name}`, function()
++				expectAccepted(
++					ORIGIN_CELL,
++					PlacementRules.validate(
++						blockType.Name,
++						ORIGIN_CELL,
++						ORIGIN_CELL,
++						emptyOccupied()
++					)
++				)
++			end)
++		end
++
++		it("rejects a name that isn't a block type", function()
++			expectRejected(
++				REASONS.unknownType,
++				PlacementRules.validate("Lava", ORIGIN_CELL, ORIGIN_CELL, emptyOccupied())
++			)
++		end)
++
++		it("matches names case-sensitively", function()
++			expectRejected(
++				REASONS.unknownType,
++				PlacementRules.validate(
++					string.lower(VALID_TYPE),
++					ORIGIN_CELL,
++					ORIGIN_CELL,
++					emptyOccupied()
++				)
++			)
++		end)
++
++		it("rejects the empty string", function()
++			expectRejected(
++				REASONS.unknownType,
++				PlacementRules.validate("", ORIGIN_CELL, ORIGIN_CELL, emptyOccupied())
++			)
++		end)
++
++		local nonStrings: { { name: string, value: unknown } } = {
++			{ name = "nil", value = nil },
++			{ name = "a number", value = 1 },
++			{ name = "a boolean", value = true },
++			{ name = "a table", value = { Name = VALID_TYPE } },
++			{ name = "a block type entry", value = BlockTypes.List[1] },
++		}
++		for _, case in nonStrings do
++			it(`rejects {case.name} without erroring`, function()
++				expectRejected(
++					REASONS.unknownType,
++					PlacementRules.validate(case.value, ORIGIN_CELL, ORIGIN_CELL, emptyOccupied())
++				)
++			end)
++		end
++	end)
++
++	describe("position", function()
++		it("returns the snapped center of the cell", function()
++			expectAccepted(
++				ORIGIN_CELL,
++				PlacementRules.validate(
++					VALID_TYPE,
++					INSIDE_ORIGIN_CELL,
++					ORIGIN_CELL,
++					emptyOccupied()
++				)
++			)
++		end)
++
++		local nonVectors: { { name: string, value: unknown } } = {
++			{ name = "nil", value = nil },
++			{ name = "a number", value = 0 },
++			{ name = "a string", value = "0, 2, 0" },
++			{ name = "a table shaped like a Vector3", value = { X = HALF, Y = HALF, Z = HALF } },
++			{ name = "a CFrame", value = CFrame.new(ORIGIN_CELL) },
++			{ name = "a Vector2", value = Vector2.new(HALF, HALF) },
++			{ name = "a Vector3int16", value = Vector3int16.new(2, 2, 2) },
++		}
++		for _, case in nonVectors do
++			it(`rejects {case.name} without erroring`, function()
++				expectRejected(
++					REASONS.notVector,
++					PlacementRules.validate(VALID_TYPE, case.value, ORIGIN_CELL, emptyOccupied())
++				)
++			end)
++		end
++
++		local badValues: { { name: string, value: number } } = {
++			{ name = "NaN", value = 0 / 0 },
++			{ name = "infinity", value = math.huge },
++			{ name = "negative infinity", value = -math.huge },
++		}
++		for _, bad in badValues do
++			for _, axis in { "X", "Y", "Z" } do
++				it(`rejects {bad.name} in {axis}`, function()
++					local position = Vector3.new(
++						if axis == "X" then bad.value else HALF,
++						if axis == "Y" then bad.value else HALF,
++						if axis == "Z" then bad.value else HALF
++					)
++					expectRejected(
++						REASONS.notFinite,
++						PlacementRules.validate(VALID_TYPE, position, ORIGIN_CELL, emptyOccupied())
++					)
++				end)
++			end
++		end
++	end)
++
++	describe("height", function()
++		-- Highest cell center that is still <= MaxHeight, and the center of the cell above it.
++		local topCenterY = (math.floor(PlacementRules.MaxHeight / SIZE - 0.5) + 0.5) * SIZE
++		local aboveTopCenterY = topCenterY + SIZE
++
++		it("accepts the cell resting on the Baseplate", function()
++			local onBaseplate = Vector3.new(HALF, 0, HALF)
++			expectAccepted(
++				ORIGIN_CELL,
++				PlacementRules.validate(VALID_TYPE, onBaseplate, ORIGIN_CELL, emptyOccupied())
++			)
++		end)
++
++		it("rejects a cell inside the Baseplate", function()
++			local justBelowTop = Vector3.new(HALF, -0.01, HALF)
++			local center = Vector3.new(HALF, -HALF, HALF)
++			expectRejected(
++				REASONS.height,
++				PlacementRules.validate(VALID_TYPE, justBelowTop, center, emptyOccupied())
++			)
++		end)
++
++		it("rejects a cell deep below the Baseplate", function()
++			local deep = Vector3.new(HALF, -100 * SIZE, HALF)
++			expectRejected(
++				REASONS.height,
++				PlacementRules.validate(VALID_TYPE, deep, deep, emptyOccupied())
++			)
++		end)
++
++		it("accepts the highest cell whose center is within MaxHeight", function()
++			local top = Vector3.new(HALF, topCenterY, HALF)
++			expect(topCenterY <= PlacementRules.MaxHeight).toBe(true)
++			expectAccepted(top, PlacementRules.validate(VALID_TYPE, top, top, emptyOccupied()))
++		end)
++
++		it("rejects the cell above that", function()
++			local aboveTop = Vector3.new(HALF, aboveTopCenterY, HALF)
++			expect(aboveTopCenterY > PlacementRules.MaxHeight).toBe(true)
++			expectRejected(
++				REASONS.height,
++				PlacementRules.validate(VALID_TYPE, aboveTop, aboveTop, emptyOccupied())
++			)
++		end)
++	end)
++
++	describe("reach", function()
++		it("rejects a player with no character", function()
++			expectRejected(
++				REASONS.noCharacter,
++				PlacementRules.validate(VALID_TYPE, ORIGIN_CELL, nil, emptyOccupied())
++			)
++		end)
++
++		it("accepts a cell just inside MaxReach", function()
++			local root = ORIGIN_CELL + Vector3.new(0, 0, PlacementRules.MaxReach - 0.01)
++			expectAccepted(
++				ORIGIN_CELL,
++				PlacementRules.validate(VALID_TYPE, ORIGIN_CELL, root, emptyOccupied())
++			)
++		end)
++
++		-- BUG: validate's doc comment says "A cell exactly MaxReach away is in reach", but the
++		-- check is `(rootPosition - center).Magnitude >= PlacementRules.MaxReach`, which rejects a
++		-- cell exactly MaxReach away. This test follows the documented contract and is expected
++		-- to fail until the comparison becomes `>`. (Or, if the code is right, the doc comment and
++		-- this test should change to say exactly MaxReach is out of reach.) The distance here is
++		-- exactly representable, so float rounding isn't a factor.
++		it("accepts a cell exactly MaxReach away", function()
++			local root = ORIGIN_CELL + Vector3.new(0, 0, PlacementRules.MaxReach)
++			expect((root - ORIGIN_CELL).Magnitude).toBe(PlacementRules.MaxReach)
++			expectAccepted(
++				ORIGIN_CELL,
++				PlacementRules.validate(VALID_TYPE, ORIGIN_CELL, root, emptyOccupied())
++			)
++		end)
++
++		it("rejects a cell just beyond MaxReach", function()
++			local root = ORIGIN_CELL + Vector3.new(0, 0, PlacementRules.MaxReach + 0.01)
++			expectRejected(
++				REASONS.reach,
++				PlacementRules.validate(VALID_TYPE, ORIGIN_CELL, root, emptyOccupied())
++			)
++		end)
++
++		it("measures distance in 3D, not just horizontally", function()
++			-- Each axis alone is within reach, but the straight-line distance is not.
++			local offset = PlacementRules.MaxReach * 0.6
++			local root = ORIGIN_CELL + Vector3.new(offset, offset, offset)
++			expectRejected(
++				REASONS.reach,
++				PlacementRules.validate(VALID_TYPE, ORIGIN_CELL, root, emptyOccupied())
++			)
++		end)
++
++		it("measures from the cell's center, not the requested position", function()
++			-- The requested point is near the top of the origin cell and within reach of the root,
++			-- but the cell's center is one stud beyond reach.
++			local requested = Vector3.new(HALF, SIZE - 0.1, HALF)
++			local root = ORIGIN_CELL + Vector3.new(0, PlacementRules.MaxReach + 1, 0)
++			expect((root - requested).Magnitude < PlacementRules.MaxReach).toBe(true)
++			expectRejected(
++				REASONS.reach,
++				PlacementRules.validate(VALID_TYPE, requested, root, emptyOccupied())
++			)
++		end)
++	end)
++
++	describe("occupied cells", function()
++		it("rejects a cell that is already occupied", function()
++			local occupied = table.freeze({ [ORIGIN_CELL] = true })
++			expectRejected(
++				REASONS.occupied,
++				PlacementRules.validate(VALID_TYPE, ORIGIN_CELL, ORIGIN_CELL, occupied)
++			)
++		end)
++
++		it("rejects any point inside an occupied cell", function()
++			local occupied = table.freeze({ [ORIGIN_CELL] = true })
++			expectRejected(
++				REASONS.occupied,
++				PlacementRules.validate(VALID_TYPE, INSIDE_ORIGIN_CELL, ORIGIN_CELL, occupied)
++			)
++		end)
++
++		it("matches a key built separately with the same coordinates", function()
++			local occupied = table.freeze({ [Vector3.new(HALF, HALF, HALF)] = true })
++			expectRejected(
++				REASONS.occupied,
++				PlacementRules.validate(VALID_TYPE, Vector3.zero, ORIGIN_CELL, occupied)
++			)
++		end)
++
++		it("accepts a cell next to an occupied one", function()
++			local occupied = table.freeze({ [ORIGIN_CELL] = true })
++			local neighbor = ORIGIN_CELL + Vector3.new(0, SIZE, 0)
++			expectAccepted(
++				neighbor,
++				PlacementRules.validate(VALID_TYPE, neighbor, ORIGIN_CELL, occupied)
++			)
++		end)
++
++		it("does not mark the cell when it accepts", function()
++			-- Not frozen here, so a write would go through and be caught by the check below.
++			local occupied: { [Vector3]: boolean } = {}
++			expectAccepted(
++				ORIGIN_CELL,
++				PlacementRules.validate(VALID_TYPE, ORIGIN_CELL, ORIGIN_CELL, occupied)
++			)
++			expect(next(occupied)).toBeNil()
++		end)
++
++		it("does not change the table when it rejects", function()
++			local occupied: { [Vector3]: boolean } = { [ORIGIN_CELL] = true }
++			expectRejected(
++				REASONS.occupied,
++				PlacementRules.validate(VALID_TYPE, ORIGIN_CELL, ORIGIN_CELL, occupied)
++			)
++			local count = 0
++			for _ in occupied do
++				count += 1
++			end
++			expect(count).toBe(1)
++			expect(occupied[ORIGIN_CELL]).toBe(true)
++		end)
++	end)
++end)

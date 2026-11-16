@@ -1,0 +1,127 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts get the core rework right: change-only sends capped at 20 a second, ghosts built on each client, the builder's own ghost drawn locally every frame, and 20 Hz server batches. B is stronger where it matters for network health. It moves ghost traffic onto UnreliableRemoteEvents and makes that safe with sequence numbers, a periodic refresh, and batch splitting. It also adds a per-player rate limit on the server and is more defensive about players who have left. A keeps both ghost remotes reliable and has no rate limit. B's 1-per-second idle resend and the odd 'skill' citation in its write-up are minor costs next to those gains.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Change-only, capped client sends",
+          "score": 5,
+          "note": "`updateOwnGhost` returns early when the block type and cell match what was last sent, and is gated by `SEND_INTERVAL = 1/20`, so an idle builder sends nothing and frame rate doesn't change the send rate."
+        },
+        {
+          "criterion": "Client-side ghost visuals, server relays",
+          "score": 5,
+          "note": "The server keeps only `states[player]` buffers and batches them through `GhostUpdates`. Clients make their own parts with `createGhostPart` and smooth them in `moveRemoteGhosts`."
+        },
+        {
+          "criterion": "Own ghost local every frame",
+          "score": 5,
+          "note": "`ownGhost.CFrame = CFrame.new(cell)` runs every RenderStepped with no server round trip."
+        },
+        {
+          "criterion": "Unreliable transport / PlaceBlock unchanged",
+          "score": 2,
+          "note": "`MoveGhost` and `GhostUpdates` are both still reliable `RemoteEvent`s, so ghost traffic still shares the ordered reliable stream. PlaceBlock is untouched."
+        },
+        {
+          "criterion": "Server validation, rate limit, no echo, cleanup",
+          "score": 3,
+          "note": "`isValidState` checks the type, the length and the block index, and the i16 format rules out NaN. There is no per-player rate limit (only overwriting), and `FireAllClients` sends each builder's state back to them, which the client then filters out. PlayerRemoving cleanup and hidden states work."
+        },
+        {
+          "criterion": "Write-up quality",
+          "score": 4,
+          "note": "Clear formulas and scenarios, with assumptions labelled as round-number estimates and a pointer to F9 for checking. It lists what players will notice, including the added lag and skipped cells."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "All checks pass and the code is readable. The `GetGhosts` snapshot path guards against applying stale data with `onlyNew`."
+        }
+      ],
+      "overall_score": 7
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Change-only, capped client sends",
+          "score": 4,
+          "note": "Reports are sent only when `statesEqual` says the state changed and 50 ms have passed, independent of frame rate, but `REPORT_RESEND_INTERVAL = 1` means an idle builder still sends one report a second."
+        },
+        {
+          "criterion": "Client-side ghost visuals, server relays",
+          "score": 5,
+          "note": "The server stores a `PlayerGhost` table with no parts and relays dirty states in `GhostBatch`. Clients draw their own parts and smooth them in `glideRemoteGhosts`."
+        },
+        {
+          "criterion": "Own ghost local every frame",
+          "score": 5,
+          "note": "`updateOwnGhost` sets `ownGhost.CFrame` from `getOwnState()` every RenderStepped."
+        },
+        {
+          "criterion": "Unreliable transport / PlaceBlock unchanged",
+          "score": 5,
+          "note": "`GhostReport` and `GhostBatch` are `UnreliableRemoteEvent`s, with sequence numbers to drop out-of-order updates, a 1 s refresh to repair lost packets, and batches split to stay under the 1,000-byte limit. PlaceBlock is untouched."
+        },
+        {
+          "criterion": "Server validation, rate limit, no echo, cleanup",
+          "score": 4,
+          "note": "`decodeReport` checks the type, the length and the block index, `MAX_REPORTS_PER_SECOND = 30` limits each player, and reports that arrive after PlayerRemoving are ignored. The builder's own entry is still broadcast back and only skipped on the client."
+        },
+        {
+          "criterion": "Write-up quality",
+          "score": 4,
+          "note": "A thorough write-up: per-frame-rate tables, an explicit 'estimates, not measurements' disclaimer, a section on how to check the numbers, and a list of what players will notice. However, it attributes its unit costs to a 'roblox-performance skill', an odd source that is out of place in a project doc."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "Uses `--!strict` with typed records, all checks pass, keeps the raycast filter up to date on character changes, and stays in scope apart from the shared codec module."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7,
+      "strengths": [
+        "Clean change-only throttling that sends nothing when idle",
+        "Compact 7-byte buffer protocol, with tests",
+        "Server batches updates at a fixed 20 Hz",
+        "Late joiners get a snapshot through `GetGhosts`"
+      ],
+      "weaknesses": [
+        "Ghost remotes are still reliable `RemoteEvent`s, not `UnreliableRemoteEvent`s",
+        "No per-player rate limit on the server",
+        "Each builder's own state is broadcast back to them"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Ghost traffic moved off the reliable stream onto `UnreliableRemoteEvent`s",
+        "Handles dropped and out-of-order updates with sequence numbers and a periodic refresh",
+        "Per-player rate limit and careful validation on the server",
+        "Detailed write-up with clear estimate disclaimers and verification steps"
+      ],
+      "weaknesses": [
+        "An idle builder still sends a report every second",
+        "Each builder's state is still broadcast back to them",
+        "The write-up cites a 'skill' reference table as the source of its measured unit costs"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 7,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

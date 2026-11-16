@@ -1,0 +1,112 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts fix the require error, the TileClick pile-up, the live Show Names toggle and the Block group read, and both keep the picker behaving the same in game. A wins narrowly on code quality: it adds a typed StoryProps and puts the player name in its own Player control group. B's self-contained sound is neat, but its story keeps `props: any`.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Fixes the require error",
+          "score": 5,
+          "note": "Removes the top-level `Players.LocalPlayer.DisplayName` read. The name now comes in through a `PlayerName` prop: Main passes `localPlayer.DisplayName` and the story passes a `Player.Name` control."
+        },
+        {
+          "criterion": "Fixes the TileClick pile-up",
+          "score": 5,
+          "note": "BlockPicker no longer makes a sound. Main.client creates it only at runtime. The story makes one only when `Environment.PluginWidget` exists, parents it to the widget, and registers `cleanup(clickSound)`."
+        },
+        {
+          "criterion": "Fixes Show Names",
+          "score": 5,
+          "note": "The story passes the `props.controls.Look.ShowNames` source itself, and each tile's `BlockName` label binds `Visible = props.ShowName`, so toggling updates the preview live."
+        },
+        {
+          "criterion": "Fixes the Block group read",
+          "score": 5,
+          "note": "Uses `props.controls.Block.Selected`."
+        },
+        {
+          "criterion": "In game behaves as before",
+          "score": 5,
+          "note": "Main passes the display name, `ShowNames = true`, and a `tileClick` sound in SoundService, so the title, the click sound and the names all work as before."
+        },
+        {
+          "criterion": "Scope, typing, readability, checks",
+          "score": 5,
+          "note": "Changes stay in the three allowed files. A typed `StoryProps` replaces `any`, the comments are clear, and all checks pass."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Fixes the require error",
+          "score": 5,
+          "note": "Removes the top-level read. The new `PlayerName` prop is fed by `Players.LocalPlayer.DisplayName` in Main and by a control in the story."
+        },
+        {
+          "criterion": "Fixes the TileClick pile-up",
+          "score": 5,
+          "note": "The sound is created with `create(\"Sound\")` inside `blockPicker` and parented to the picker's Frame, so it is destroyed with the tree. Nothing is created at require time."
+        },
+        {
+          "criterion": "Fixes Show Names",
+          "score": 5,
+          "note": "The story passes the source. A `showNames` function wraps `read(props.ShowNames)` and is bound to the label's `Visible`."
+        },
+        {
+          "criterion": "Fixes the Block group read",
+          "score": 5,
+          "note": "Uses `props.controls.Block.Selected`."
+        },
+        {
+          "criterion": "In game behaves as before",
+          "score": 5,
+          "note": "Main passes the display name. A sound under the PlayerGui frame plays globally, so clicks still sound."
+        },
+        {
+          "criterion": "Scope, typing, readability, checks",
+          "score": 4,
+          "note": "The diff is small and clean and all checks pass, but the story keeps `props: any`. PlayerName also sits in the `Look` group, which is a slightly odd place for it."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Typed StoryProps replaces `props: any`",
+        "The picker reads no game state; the caller passes the sound in",
+        "The story's sound has scoped cleanup and is parented outside the place"
+      ],
+      "weaknesses": [
+        "More moving parts: sound creation is split between Main and the story",
+        "Main still adds a runtime Sound to SoundService (this is acceptable, since it only happens while the game runs)"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Smallest, self-contained fix: the picker owns its sound",
+        "Clear comments explaining why sources are passed"
+      ],
+      "weaknesses": [
+        "The story is still typed `props: any`",
+        "The PlayerName control is grouped under Look"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 8.5
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

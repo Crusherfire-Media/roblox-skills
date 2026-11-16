@@ -1,0 +1,123 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "The architectures are nearly identical and both are correct: one owner module, immutable updates, a useSignalState bridge, and a direct Charm guard. B edges ahead because its new module matches the project's existing conventions, while A uses `const` and an `@game` string require. B also adds name validation and skips unchanged updates. A handles the state before the first StockChanged slightly better, but that doesn't outweigh the style inconsistency.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Stock in one Charm signal owned by a module",
+          "score": 5,
+          "note": "BlockStock.luau holds `Charm.signal({})`, exposes `getStock`/`getCount`, and only `onStockChanged` writes it."
+        },
+        {
+          "criterion": "2. Immutable updates",
+          "score": 5,
+          "note": "Updater does `table.clone(stock)`, sets one entry, returns the new table."
+        },
+        {
+          "criterion": "3. Shared derived values; guard reads Charm",
+          "score": 3,
+          "note": "`BlockStock.getCount` is shared and BlockPlacer's guard reads it directly, but there is no computed for the selected count or can-place; the UI derives the selected count separately (`props.Counts()[props.Selected()]`)."
+        },
+        {
+          "criterion": "4. Vide-tracked bridge",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` inside `app()`, passed down as `Counts` source."
+        },
+        {
+          "criterion": "5. Live updates and pre-arrival appearance",
+          "score": 5,
+          "note": "Counts, gray-out, and the \"<n> left\" label all bind to `Counts` and `Selected`; before data arrives the tile is grayed with a blank count, which is sensible."
+        },
+        {
+          "criterion": "6. No yields in Charm callbacks / no leaked effects",
+          "score": 5,
+          "note": "Updater is pure; the only listener is useSignalState's, which is cleaned up with its scope."
+        },
+        {
+          "criterion": "7. Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "All checks pass and changes stay in scope, but BlockStock uses `const` and `require(\"@game/...\")`, which don't match the other files' `local`/`script.Parent` style and lean on newer features."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Stock in one Charm signal owned by a module",
+          "score": 5,
+          "note": "BlockStock.luau owns `Charm.signal({} :: Stock)`, exposes the getter and `getCount`, and writes only in `onStockChanged`."
+        },
+        {
+          "criterion": "2. Immutable updates",
+          "score": 5,
+          "note": "Clones `current` and sets one entry, returning `current` unchanged when the count is the same."
+        },
+        {
+          "criterion": "3. Shared derived values; guard reads Charm",
+          "score": 3,
+          "note": "`getCount` is shared and BlockPlacer's guard calls it directly, but there is no computed for the selected count or can-place; the UI has its own `countOf`."
+        },
+        {
+          "criterion": "4. Vide-tracked bridge",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` in `app()` is passed down as the `Stock` source."
+        },
+        {
+          "criterion": "5. Live updates and pre-arrival appearance",
+          "score": 5,
+          "note": "Tile count, gray-out, and the \"<n> left\" label (which also grays at 0) track both `Stock` and `Selected`; before data arrives it shows 0, grayed."
+        },
+        {
+          "criterion": "6. No yields in Charm callbacks / no leaked effects",
+          "score": 5,
+          "note": "Pure updater; no effects created in components."
+        },
+        {
+          "criterion": "7. Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "All checks pass, matches the existing require and `local` style, validates names against `BlockTypes.ByName`, and has an exported `Stock` type."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Clean owner module with immutable updates",
+        "Correct vide-charm bridge in the mounted scope",
+        "Shows a blank count rather than 0 before the server reports; gray-out keeps each color's brightness"
+      ],
+      "weaknesses": [
+        "`const` and the `@game` string require don't match the rest of the codebase",
+        "No shared computed for the selected count or can-place"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Owner module matches the codebase style and validates incoming names",
+        "Immutable updates that skip unchanged counts",
+        "Correct Vide bridge, with live tiles and a live label that grays at 0"
+      ],
+      "weaknesses": [
+        "Shows a possibly misleading 0 before the first StockChanged",
+        "No shared computed for the selected count or can-place"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8,
+    "without_skill": 8.5
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "id": 1,
+  "name": "stutter-diagnosis",
+  "skill": "rbx-perf-profiling",
+  "prompt": "Sam says the game stutters every couple of seconds while he builds on his laptop, and feels a bit choppy the rest of the time. He saved a MicroProfiler dump, and Priya ran our LibMP scripts on it; the output is in docs/perf/captures/laptop-stutter-analysis.txt. The game scripts involved aren't in this repo yet, so don't change any code.\n\nWrite a diagnosis in docs/perf/stutter-diagnosis.md: what causes the stutter, what makes the rest of the frames choppy, and anything in the capture that looks alarming but isn't the problem. Name the frames behind each finding so I can find them both in our LibMP scripts and in the MicroProfiler UI, and say what to look at next.",
+  "setup_files": [
+    {
+      "from": "fixtures/stutter-diagnosis/laptop-stutter-analysis.txt",
+      "to": "docs/perf/captures/laptop-stutter-analysis.txt"
+    }
+  ],
+  "auto_checks": [],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/perf/stutter-diagnosis.md",
+      "text": "The diagnosis was written to docs/perf/stutter-diagnosis.md"
+    },
+    {
+      "type": "file_matches",
+      "path": "docs/perf/stutter-diagnosis.md",
+      "pattern": "604130|604221|604313",
+      "text": "The diagnosis cites the absolute frame id of at least one stutter frame"
+    },
+    {
+      "type": "file_matches",
+      "path": "docs/perf/stutter-diagnosis.md",
+      "pattern": "BuildAutosave",
+      "text": "The diagnosis names the BuildAutosave:Snapshot scope"
+    },
+    {
+      "type": "file_matches",
+      "path": "docs/perf/stutter-diagnosis.md",
+      "pattern": "BlockHighlight",
+      "text": "The diagnosis names the BlockHighlight:Update scope"
+    }
+  ],
+  "rubric": [
+    "Identifies the stutter as the 95 to 97 ms frames about every 2.1 seconds (frame ids 18236, 18327, 18419; absolute ids 604130, 604221, 604313), caused on the main thread by the BuildAutosave:Snapshot user scope (about 75 ms inclusive, of which about 54 ms is the GC step nested inside it), and links that GC step to the snapshot's own allocations (the Luau heap jumps by about 48 MB at exactly those frames).",
+    "Treats frame 18223 (absolute 604117, 352.6 ms, about 12 frames after the profiler was turned on) as separate from the stutter: almost all of its time is MicroProfileFlip, the profiler's own work, so the diagnosis does not build a finding on it, and it does not let that one frame drive averages.",
+    "Identifies the steady-state choppiness (frames around 22 ms against the 16.7 ms a 60 FPS frame allows) as main-thread script time: BlockHighlight:Update costs about 10 ms every frame (about 7.9 ms of its own plus about 2.3 ms of GC under it), and the main thread is busy for nearly the whole frame (about 21.6 of 22 ms) while the worker and render threads have time to spare.",
+    "Reads inclusive times correctly: it does not add a scope's time to its parents' (Heartbeat, RunService.Heartbeat, Script_Main, and BlockHighlight:Update are one nested cost, not four), and it does not treat the merged worker total (about 31 ms per frame, more than the frame itself) as frame time or as the bottleneck, since that total adds up four worker threads that each run about 8 ms in parallel.",
+    "Does not call the game GPU-bound: the GPU frame span (about 21.7 ms) is close to the CPU frame time, but the GPU thread is busy only about 6.4 ms per frame, and Present and waitUntilCompleted take about 0.3 and 0.2 ms, so the CPU is not waiting on the GPU.",
+    "Gives both the frame id and the absolute frame id for the frames it names, and uses only numbers that appear in the capture output (or are computed from them), without inventing measurements.",
+    "Next steps follow from the evidence (for example profiling or reviewing BuildAutosave:Snapshot and BlockHighlight:Update and what each allocates, then capturing again on the same build after a fix) rather than surveying subsystems the capture already rules out. No code is changed. Extra supporting files count neither for nor against."
+  ],
+  "judge_facts": [
+    "LibMP (Roblox/libmp upstream api-reference.md and guide; LibMP is not in the sandbox): FetchFrameDesc(id) has FrameId, FrameAbsoluteId (the frame number also used to find the frame in the MicroProfiler UI; it has gaps where capture paused), TickStartCpu, TickEndCpu, TickStartGpu, TickEndGpu. CPU and GPU timestamps have different origins and scales. A frame's GPU start and end can be too broad or even end before they start; continuous scope sections on the GPU thread give the reliable GPU time, and a GPU frame time close to the CPU frame time does not by itself mean the game is GPU-bound.",
+    "LibMP guide (Roblox/libmp upstream): MicroProfiler scope times are inclusive, so a scope's time includes the scopes nested inside it. Summing the same scopes across several threads gives work volume across threads, not wall time on the frame's critical path.",
+    "Roblox MicroProfiler scope reference (upstream ALL-SCOPES.md from Roblox/libmp): MicroProfileFlip is the profiler's own per-frame housekeeping and its duration is profiler overhead; Present and waitUntilCompleted are where the CPU waits for the GPU, and wide values there indicate a GPU-bound frame; GC is one step of the Luau garbage collector; Script_<Name> marks a script running, and debug.profilebegin scopes appear nested inside it."
+  ],
+  "timeout_minutes": 15
+}

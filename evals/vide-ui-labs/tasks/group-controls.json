@@ -1,0 +1,45 @@
+{
+  "id": 3,
+  "name": "group-controls",
+  "skill": "vide-ui-labs",
+  "prompt": "The controls panel of my BlockTile story (src/ServerScriptService/Stories/BlockTile.story.luau) has grown into one long list of 13 controls, and they come out in a different order every time the story reloads, so I can never find anything.\n\nSort it out: put related controls into groups, and give the groups and the controls inside them a fixed order. What the tile shows and its state should come first, then how it looks, and story-only settings like the backdrop last. Every control has to keep doing exactly what it does now. Only change the story, not BlockTile.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/group-controls/BlockTile.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockTile.luau" },
+    { "from": "fixtures/group-controls/BlockTile.story.luau", "to": "src/ServerScriptService/Stories/BlockTile.story.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_matches",
+      "path": "src/ServerScriptService/Stories/BlockTile.story.luau",
+      "pattern": "ControlGroup\\(",
+      "text": "The story groups its controls with ControlGroup"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\");const src=fs.readFileSync(\"src/ServerScriptService/Stories/BlockTile.story.luau\",\"utf8\");const n=(src.match(/\\bOrdered\\s*\\(/g)||[]).length;console.log(n+\" Ordered calls\");process.exit(n>=16?0:1)"
+      ],
+      "expect_exit": 0,
+      "text": "The story wraps at least 16 entries in Ordered (13 controls plus their groups)"
+    }
+  ],
+  "rubric": [
+    "Every one of the 13 controls has a fixed place: each control and each group is wrapped in `UILabs.Ordered(entry, n)`, numbered within its own level (groups among the top-level entries, controls within their group). Passing an order as `ControlGroup`'s second argument does nothing in the Luau package, so it does not count.",
+    "The groups are coherent and named for what their controls change, for example the block and what it shows (block, name override, count, show name, show count), its state (selected, locked), its look (size, corner radius, highlight color and thickness), and story-only settings (backdrop, centered) apart from the tile's props.",
+    "The order follows the request: what the tile shows and its state first, then its look, then the story-only settings last.",
+    "Every read in the story is updated to the control's new place (for example `props.controls.Look.TileSize`), and the story's `StoryProps` type matches the new nesting, so no read is left pointing at a top-level name that is now nil.",
+    "Each control keeps its default, range, and effect on the preview, nothing is added or dropped, and BlockTile.luau is untouched.",
+    "luau-lsp, selene, and StyLua pass on the changed story."
+  ],
+  "judge_facts": [
+    "UI Labs utilities 2.4.2 (ui-labs/src/Controls/ControlUtils.luau): `Ordered(control, order)` sets the entry's `Order` field and returns it; it accepts controls, groups, and plain string, number, boolean, or Color3 values (converted by Controls/ControlConversion.luau). `ControlGroup(controls)` takes only the controls table and returns `{ EntryType = \"ControlGroup\", Controls = controls }`. The package's TypeScript typing declares an optional order argument for `ControlGroup`, but the Luau function ignores any second argument, so only `Ordered` sets a group's order.",
+    "UI Labs utilities 2.4.2 typings (ui-labs/src/Typing/Vide.d.ts): a Vide story's `props.controls` holds one Vide source per control, and a `ControlGroup` becomes a nested table of sources under the group's key, so a control moved into group `Look` is read as `props.controls.Look.TileSize()`.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Controls/AdvancedControls.luau): `Slider(default, min, max, step?)` errors when max <= min, and `Choose(list, defaultIndex?)` errors on an empty list.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Controls/DatatypeControls.luau): `Datatype` has only `Color3`; its UDim2, UDim, CFrame, Vector2, and Vector3 constructors are commented out."
+  ],
+  "timeout_minutes": 15
+}

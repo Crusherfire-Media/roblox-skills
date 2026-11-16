@@ -1,0 +1,50 @@
+{
+  "id": 1,
+  "name": "selection-signal",
+  "skill": "vide-charm",
+  "prompt": "We're moving our game state over to Charm (Charm and vide-charm are installed in ReplicatedStorage.Packages). Start with the selected block type. Right now BlockPlacer keeps it in a plain local and fires a BlockTypeChanged event, Main.client.luau copies it into a Vide source for the hotbar, and PlacementPreview listens to the event to recolor its ghost block.\n\nMake the selection a Charm signal owned by BlockPlacer, and have the hotbar (Main.client.luau and BlockPicker.luau) and PlacementPreview read it from there. Number keys and tile clicks should keep working, and so should the outline and the ghost color. Remove BlockTypeChanged once nothing needs it. All of these files are in src/StarterPlayer/StarterPlayerScripts.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/shared/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/selection-signal/BlockPicker.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau" },
+    { "from": "fixtures/selection-signal/PlacementPreview.luau", "to": "src/StarterPlayer/StarterPlayerScripts/PlacementPreview.luau" },
+    { "from": "fixtures/selection-signal/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau",
+      "pattern": "require\\([^)]*Charm",
+      "text": "BlockPlacer requires Charm"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\");const re=new RegExp(process.argv[1]);const hits=[];const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(f.endsWith(\".luau\")&&re.test(fs.readFileSync(f,\"utf8\")))hits.push(f.split(p.sep).join(\"/\"))}};walk(\"src\");if(hits.length){console.log(\"matched in \"+hits.join(\", \"));process.exit(1)}console.log(\"no file matched\")",
+        "BlockTypeChanged"
+      ],
+      "expect_exit": 0,
+      "text": "No file under src mentions BlockTypeChanged any more"
+    }
+  ],
+  "rubric": [
+    "BlockPlacer owns the selection as a Charm signal: other modules can read it (a getter), only BlockPlacer can write it (the setter is not exported), and every write still goes through `setBlockType`, which keeps rejecting unknown block names. Number keys and tile clicks both select through it.",
+    "The hotbar turns the Charm signal into Vide state that Vide tracks and that is disposed with the UI: vide-charm's `useSignalState` (or `Charm.listen`/`subscribe` whose disposer is registered with Vide's `cleanup`) called inside the mounted Vide scope, for example in the body of the component passed to `mount`. Calling it at module top level before `mount` errors; passing the raw Charm getter as the `Selected` prop, or reading it inside a Vide binding, leaves the outline stuck on the first block.",
+    "Exactly one copy of the selection remains: no hand-mirrored Vide source or duplicate local kept in sync by a separate event, and `BlockTypeChanged` (with its BindableEvent) is gone.",
+    "PlacementPreview follows the selection through Charm (`Charm.listen`, `subscribe`, or a Charm `effect` on the getter), so the ghost takes the selected block's color at start and after every change.",
+    "BlockPicker's look and behavior are unchanged, and its props interface changes only as much as needed (it still works as a view fed by its caller rather than reaching into BlockPlacer for state).",
+    "Correct and in scope: placement, number keys, and the server keep working, the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files, such as a preview story or a spec, count neither for nor against."
+  ],
+  "judge_facts": [
+    "Vide 0.4.1 (vide/src/source.luau) registers the running Vide scope only when a Vide source is read. A Charm 0.11.1 getter (charm/src/init.luau, signalGetter) registers only with Charm's own running effect or computed. So reading a Charm getter inside a Vide binding never makes that binding rerun.",
+    "vide-charm 0.4.1 (vide-charm/src/init.luau): `useSignalState(getter)` is `Vide.source(getter())` plus `Vide.cleanup(Charm.listen(getter, state))`, so the returned source follows the getter and stops listening when the calling Vide scope is destroyed. `useAtom` is an alias.",
+    "Vide 0.4.1 `cleanup` (vide/src/cleanup.luau) errors \"cannot cleanup outside a stable or reactive scope\" when no Vide scope is running, so vide-charm's `useSignalState` must be called inside `mount`/`root` or a component body they run.",
+    "Charm 0.11.1 (charm/src/init.luau): a signal setter takes a value or an updater function, does nothing when the new value `==` the pending one (or a custom `equals` matches), and returns the new value.",
+    "Charm 0.11.1 (charm/src/init.luau): `listen(getter, cb)` calls `cb(current, nil)` once right away and then on each change; `subscribe(getter, cb)` skips the first call. Both return a dispose function. Charm 0.11.1 has no `peek`; `untracked` reads without subscribing."
+  ],
+  "timeout_minutes": 20
+}

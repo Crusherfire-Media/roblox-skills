@@ -1,0 +1,113 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are correct and pass every check. A converts the signal to Vide state in Main's mounted `app()` and leaves BlockPicker untouched. B instead puts the conversion inside BlockPicker, which ties that view to Charm and changes what its `Selected` prop means. B also renames the public getter for no reason. That makes A the cleaner, smaller change.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns Charm signal",
+          "score": 5,
+          "note": "`Charm.signal` is local, only the getter is exported as `getBlockType`, and `setBlockType` still rejects unknown names using `error` instead of `assert`."
+        },
+        {
+          "criterion": "Hotbar bridges via useSignalState in mounted scope",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockPlacer.getBlockType)` is called in the `app()` body that `mount` runs, and the resulting Vide source is passed as `Selected`."
+        },
+        {
+          "criterion": "Single copy, BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirrored `source` and its event connection are gone, along with the BindableEvent."
+        },
+        {
+          "criterion": "PlacementPreview follows via Charm",
+          "score": 5,
+          "note": "`Charm.listen(BlockPlacer.getBlockType, applyBlockType)` colors the ghost right away and again on every change."
+        },
+        {
+          "criterion": "BlockPicker unchanged",
+          "score": 5,
+          "note": "BlockPicker isn't touched and still receives a Vide source from its caller."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 5,
+          "note": "`placeAt` reads `getSelectedName()`, the getter type is cast to `() -> string`, and all checks pass."
+        }
+      ],
+      "overall_score": 9.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns Charm signal",
+          "score": 4,
+          "note": "The signal is private and only the getter is exported, but under a new name, `selectedBlockType`; `setBlockType` keeps its assert."
+        },
+        {
+          "criterion": "Hotbar bridges via useSignalState in mounted scope",
+          "score": 4,
+          "note": "`useSignalState(props.Selected)` runs in the BlockPicker body inside the mounted scope, so it works, but the conversion lives in the view instead of the caller."
+        },
+        {
+          "criterion": "Single copy, BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirrored source and the BindableEvent are removed."
+        },
+        {
+          "criterion": "PlacementPreview follows via Charm",
+          "score": 5,
+          "note": "The `Charm.effect` reads `selectedBlockType()` and applies the color now and on every change."
+        },
+        {
+          "criterion": "BlockPicker unchanged",
+          "score": 3,
+          "note": "BlockPicker now requires VideCharm and treats `Selected` as a Charm getter, so a caller or story passing a Vide source would get a stuck outline."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 4,
+          "note": "It works and all checks pass, but renaming `getBlockType` to `selectedBlockType` is an API change beyond what was needed."
+        }
+      ],
+      "overall_score": 7.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9.5,
+      "strengths": [
+        "Keeps the `getBlockType` API name, so callers don't change",
+        "Converts to Vide state in the app component, exactly where the rubric wants it",
+        "Uses `Charm.listen` for the ghost color, which also handles the initial color",
+        "BlockPicker is unchanged"
+      ],
+      "weaknesses": [
+        "Swaps `assert` for `error` with no real need (it still behaves correctly)"
+      ]
+    },
+    "B": {
+      "score": 7.5,
+      "strengths": [
+        "Works end to end",
+        "`Charm.effect` is a clean way to keep the ghost color in sync",
+        "Keeps the original assert in `setBlockType`"
+      ],
+      "weaknesses": [
+        "BlockPicker is now tied to Charm and no longer works as a plain view fed by its caller",
+        "Renames the public getter for no reason"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9.5,
+    "without_skill": 7.5
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

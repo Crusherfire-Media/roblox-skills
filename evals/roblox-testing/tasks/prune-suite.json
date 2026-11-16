@@ -1,0 +1,98 @@
+{
+  "id": 4,
+  "name": "prune-suite",
+  "skill": "roblox-testing",
+  "prompt": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau has grown to 31 tests. It breaks whenever someone refactors src/ReplicatedStorage/Shared/PlacementRules.luau, even when placement still works, and two of its tests fail and nobody knows why.\n\nClean the suite up: delete tests that aren't earning their place, fix the ones worth keeping, and make sure every rule PlacementRules documents is still covered. Don't change PlacementRules.luau in this change. Write a short note for the pull request at docs/placement-spec-cleanup.md saying what you removed or changed and why. Specs can't run here, so make sure luau-lsp, selene, and StyLua pass. I can't answer questions while you work, so make reasonable calls and note any assumptions in a comment or in your write-up.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/prune-suite/PlacementRules.luau",
+      "to": "src/ReplicatedStorage/Shared/PlacementRules.luau"
+    },
+    {
+      "from": "fixtures/prune-suite/PlacementRules.spec.luau",
+      "to": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau",
+      "pattern": "_isFinite",
+      "text": "No test reaches the private _isFinite helper"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau",
+      "pattern": "toHaveBeenCalledTimes|spyOn",
+      "text": "No spy counts calls to the module's own functions"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau",
+      "pattern": "\\)\\s*:\\s*(to[A-Z]\\w*|never)\\b",
+      "text": "No matcher is called with a colon"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau",
+      "pattern": "math\\.floor",
+      "text": "No expected value is computed with the module's floor formula"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau",
+      "pattern": "Color3\\.fromRGB",
+      "text": "The field-by-field BlockTypes restatement is gone"
+    },
+    {
+      "type": "file_matches",
+      "path": "src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau",
+      "pattern": "\\bnil\\b",
+      "text": "Some test passes nil (the missing-character case had no test)"
+    },
+    {
+      "type": "file_exists",
+      "path": "docs/placement-spec-cleanup.md",
+      "text": "The pull request note exists"
+    },
+    {
+      "type": "command",
+      "run": [
+        "git",
+        "diff",
+        "--quiet",
+        "HEAD",
+        "--",
+        "src/ReplicatedStorage/Shared/PlacementRules.luau"
+      ],
+      "expect_exit": 0,
+      "text": "PlacementRules.luau is unchanged"
+    }
+  ],
+  "rubric": [
+    "Removes the implementation-coupled tests: the three _isFinite tests (a private helper; non-finite input belongs to validate) and 'calls snap exactly once' (a spy counting an internal call). The rules they touched stay covered through validate.",
+    "Removes the tautological and restating tests: 'snaps positions to cell centers' (expected values computed with the module's own formula), 'returns the snapped center' (expected value from calling snap), and 'has the right block types' (restates the BlockTypes catalog field by field, colors included).",
+    "Trims redundant rows: the five 'accepts a $Name block' rows become one case (the rule treats block types alike) and the snap rows (1, 1, 1) and (2, 2, 2) (same interior case) merge, while both sides of each boundary stay: snap at 0, 3.9, 4, and -0.1; height at Y -0.1, 0, 196, and 200; reach at 24 and 28 studs.",
+    "Fixes the two failing tests worth keeping: the non-Vector3 test's colon calls become dot calls (expect(ok).toBe(false)), and 'doesn't mark the cell occupied' asserts the count is 0 (toBe(0), or that the table is empty), because toBeFalsy fails on 0 in Lua.",
+    "Removes the hidden dependency between tests: 'rejects placing twice in the same cell' relied on the previous test writing to the shared occupied table. Each remaining test builds its own occupied table, and the duplicate occupied test is merged or deleted.",
+    "Every rule validate's doc lists is covered, including the one with no test before: a missing character (rootPosition nil). Keeping or dropping the reason-string assertions is fine either way.",
+    "docs/placement-spec-cleanup.md lists what was removed or changed and why, matching the diff. PlacementRules.luau is unchanged, and luau-lsp, selene, and StyLua pass on the spec."
+  ],
+  "judge_facts": [
+    "Jest Roblox 3.21.0 (expect/src/init.lua, expect_): matchers are plain functions called with a dot, and negation is .never (expectation.never[name]). A colon call such as expect(ok):toBe(false) passes the expectation table as the expected value, so the assertion fails.",
+    "Jest Roblox 3.21.0 toBeFalsy passes only when `not received` is true (expect/src/matchers.lua), so only false and nil are falsy: expect(0).toBeFalsy() fails.",
+    "Jest Roblox 3.21.0: toBe compares with LuauPolyfill Object.is, which starts with == (luau-polyfill-collections/src/Object/is.lua), and toEqual tries Object.is first (roblox-shared/src/expect.lua, eq). Both compare Vector3 values by value, so expect(Vector3.new(6, 2, -2)).toBe(Vector3.new(6, 2, -2)) passes.",
+    "Jest Roblox 3.21.0 it.each / test.each accept a list of keyed rows, it.each({ { Z = 25, Accepted = true } })(\"name $Z\", function(row) ... end): the callback gets each row table and $Key in the title interpolates (jest-each/src/bind.lua, table/array.lua). Rows built at runtime count one test each."
+  ],
+  "notes": "PlacementRules here is the correct version (> MaxReach), with `PlacementRules._isFinite` exposed 'for the spec' and validate calling PlacementRules.snap through the table so the spy works. The 31 tests: snap 1 + 6 rows; _isFinite 3; validate 5 block-type rows + unknown type + non-Vector3 (colon calls, fails) + NaN + returns snapped center + calls snap once + 4 height rows + 3 reach rows + occupied + placing twice (relies on the previous test's write) + doesn't mark occupied (toBeFalsy on 0, fails); BlockTypes restatement 1. No test covers rootPosition nil.",
+  "timeout_minutes": 20
+}

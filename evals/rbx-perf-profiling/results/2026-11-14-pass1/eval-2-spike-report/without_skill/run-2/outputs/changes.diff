@@ -1,0 +1,399 @@
+diff --git a/src/ReplicatedStorage/Shared/Dev/SpikeReport.luau b/src/ReplicatedStorage/Shared/Dev/SpikeReport.luau
+new file mode 100644
+index 0000000..b10498c
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/Dev/SpikeReport.luau
+@@ -0,0 +1,393 @@
++--[[
++	Dev-only report on a MicroProfiler snapshot saved by HitchSnapshot. Run it from the Studio
++	command bar in Edit mode after the playtest:
++
++		require(game.ReplicatedStorage.Shared.Dev.SpikeReport).run(2)
++
++	run(slot) returns:
++		medianMs, p90Ms    frame times over the analyzed frames (paused and incomplete frames are
++		                   left out), interpolated between the nearest frames
++		slowThresholdMs    2 * medianMs
++		slowFrames         every frame slower than the threshold, in order. Each has:
++		                     name             "frame <FrameId> (absolute <FrameAbsoluteId>)". LibMP's
++		                                      guidance is to give both IDs: FrameId to open the
++		                                      frame from a LibMP session, and FrameAbsoluteId to
++		                                      find it in the MicroProfiler UI.
++		                     frameId, absoluteFrameId, frameMs
++		                     topScopes        the 5 scopes with the most self time in this frame,
++		                                      summed over all CPU threads. Self time leaves out
++		                                      time spent in nested scopes. Each entry has
++		                                      { name, timerName, groupName, timerId, selfMs,
++		                                      normalAvgMs }. normalAvgMs is that scope's average
++		                                      self time per normal frame.
++		normalTopScopes    the 5 scopes with the highest average self time over the normal (not
++		                   slow) frames: { name, timerName, groupName, timerId, avgSelfMs }
++		frameCount, normalFrameCount, skippedFrameCount
++
++	A scope that runs across a frame boundary counts toward each frame it overlaps. GPU threads are
++	left out because their clock isn't the CPU's.
++]]
++
++local LibMP = require(script.Parent.LibMPLoader)
++
++local TOP_SCOPE_COUNT = 5
++local SLOW_FACTOR = 2
++
++export type ScopeEntry = {
++	name: string,
++	timerName: string,
++	groupName: string,
++	timerId: number,
++	selfMs: number,
++	normalAvgMs: number,
++}
++
++export type NormalScopeEntry = {
++	name: string,
++	timerName: string,
++	groupName: string,
++	timerId: number,
++	avgSelfMs: number,
++}
++
++export type SlowFrame = {
++	name: string,
++	frameId: number,
++	absoluteFrameId: number,
++	frameMs: number,
++	topScopes: { ScopeEntry },
++}
++
++export type Report = {
++	slot: number,
++	medianMs: number,
++	p90Ms: number,
++	slowThresholdMs: number,
++	slowFrames: { SlowFrame },
++	normalTopScopes: { NormalScopeEntry },
++	frameCount: number,
++	normalFrameCount: number,
++	skippedFrameCount: number,
++}
++
++local SpikeReport = {}
++
++-- Linear interpolation between the nearest ranks. `sorted` must be ascending and non-empty.
++local function percentile(sorted: { number }, p: number): number
++	local rank = p * (#sorted - 1) + 1
++	local lower = math.floor(rank)
++	local upper = math.min(lower + 1, #sorted)
++	local fraction = rank - lower
++	return sorted[lower] + (sorted[upper] - sorted[lower]) * fraction
++end
++
++-- Takes the self time of each scope instance in each frame (in ticks, summed over CPU threads) and
++-- returns it as { [frameId]: { [timerId]: ticks } }. Only frames in `wantedFrames` are kept.
++local function collectSelfTicks(
++	session: any,
++	frameDescs: { [number]: any },
++	wantedFrames: { [number]: boolean },
++	minId: number,
++	maxId: number
++)
++	local selfTicks: { [number]: { [number]: number } } = {}
++
++	-- childTicks[threadId][level] = total time of the scopes at `level` that have finished in this
++	-- frame since their parent (at level - 1) opened. Scopes always finish before their parent,
++	-- so when a scope finishes, the child total for level + 1 belongs to that scope.
++	local childTicks: { [number]: { [number]: number } } = {}
++
++	local function processScope(
++		frameId: number,
++		threadId: number,
++		level: number,
++		timerId: number,
++		startTick: number,
++		endTick: number
++	)
++		local children = childTicks[threadId]
++		if not children then
++			children = {}
++			childTicks[threadId] = children
++		end
++
++		local duration = math.max(endTick - startTick, 0)
++		local nested = children[level + 1] or 0
++		children[level + 1] = 0
++		children[level] = (children[level] or 0) + duration
++
++		if not wantedFrames[frameId] or timerId == 0 then
++			return
++		end
++		local frameSelf = selfTicks[frameId]
++		if not frameSelf then
++			frameSelf = {}
++			selfTicks[frameId] = frameSelf
++		end
++		frameSelf[timerId] = (frameSelf[timerId] or 0) + math.max(duration - nested, 0)
++	end
++
++	local iter = session:CreateLogIterator()
++	local ok, err = pcall(function()
++		iter:Configure({
++			SkipGpuThreads = true,
++			SkipEvents = true,
++			EmitThreadFrameEnd = true,
++		})
++		local state = iter:GetState()
++		iter:RewindTo(minId, maxId)
++
++		-- This follows the frame-local iteration pattern from the LibMP examples, which splits
++		-- scopes that run across frames at the frame boundaries.
++		while iter:Step() do
++			if state:IsThreadFrameEnd() then
++				-- The thread's log for this frame has ended. The scopes still open get the time
++				-- from where they started in this frame up to here, innermost scope first.
++				local frameId = state:FrameId()
++				local threadId = state:ThreadId()
++				local endTick = state:Timestamp()
++				local depth = state:ThreadStackDepth()
++				for level = depth - 1, 0, -1 do
++					local el = iter:GetCurrentThreadStackElement(level)
++					if el then
++						processScope(
++							frameId,
++							threadId,
++							level,
++							el:EnterTimerId(),
++							el:EnterTimestampFrameLocal(),
++							endTick
++						)
++					end
++				end
++				-- Child totals don't carry into the next frame. Open scopes start over from the
++				-- frame start.
++				childTicks[threadId] = nil
++			elseif state:IsExit() and not state:ThreadStackWasOverflowed() then
++				local frameId = state:FrameId()
++				local level = state:ThreadStackDepth()
++				local startTick: number
++				if not state:ThreadStackIsUnderflowed() then
++					startTick = iter:GetCurrentThreadStackElement(level):EnterTimestampFrameLocal()
++				else
++					-- The scope started before the first frame in the snapshot.
++					local desc = frameDescs[frameId]
++					startTick = if desc then desc.TickStartCpu else state:Timestamp()
++				end
++				processScope(
++					frameId,
++					state:ThreadId(),
++					level,
++					state:TimerId(),
++					startTick,
++					state:Timestamp()
++				)
++			end
++		end
++	end)
++	iter:Dispose()
++	if not ok then
++		error(err, 0)
++	end
++
++	return selfTicks
++end
++
++local function buildReport(session: any, slot: number): Report
++	local tickToMs = session:FetchGlobalDesc().TickToMsCpu
++	local minId = session:GetFrameIdMin()
++	local maxId = session:GetFrameIdMax()
++	if minId == 0 or maxId < minId then
++		error(`SpikeReport: slot {slot} has no frames`, 0)
++	end
++
++	-- Frame times
++	local frameDescs: { [number]: any } = {}
++	local analyzed: { number } = {}
++	local frameMs: { [number]: number } = {}
++	local skipped = 0
++	for frameId = minId, maxId do
++		local desc = session:FetchFrameDesc(frameId)
++		frameDescs[frameId] = desc
++		if desc.IsPaused or desc.IsIncomplete then
++			skipped += 1
++		else
++			table.insert(analyzed, frameId)
++			frameMs[frameId] = (desc.TickEndCpu - desc.TickStartCpu) * tickToMs
++		end
++	end
++	if #analyzed == 0 then
++		error(`SpikeReport: slot {slot} has no complete, unpaused frames`, 0)
++	end
++
++	local sortedMs = table.create(#analyzed)
++	for i, frameId in analyzed do
++		sortedMs[i] = frameMs[frameId]
++	end
++	table.sort(sortedMs)
++	local medianMs = percentile(sortedMs, 0.5)
++	local p90Ms = percentile(sortedMs, 0.9)
++	local thresholdMs = medianMs * SLOW_FACTOR
++
++	local slowIds: { number } = {}
++	local normalIds: { number } = {}
++	local wanted: { [number]: boolean } = {}
++	for _, frameId in analyzed do
++		wanted[frameId] = true
++		if frameMs[frameId] > thresholdMs then
++			table.insert(slowIds, frameId)
++		else
++			table.insert(normalIds, frameId)
++		end
++	end
++
++	-- Self time per scope
++	local selfTicks = collectSelfTicks(session, frameDescs, wanted, minId, maxId)
++
++	local normalAvgMs: { [number]: number } = {}
++	if #normalIds > 0 then
++		for _, frameId in normalIds do
++			for timerId, ticks in selfTicks[frameId] or {} do
++				normalAvgMs[timerId] = (normalAvgMs[timerId] or 0) + ticks * tickToMs
++			end
++		end
++		for timerId, total in normalAvgMs do
++			normalAvgMs[timerId] = total / #normalIds
++		end
++	end
++
++	local groupNames: { [number]: string } = {}
++	local timerInfo: { [number]: { timerName: string, groupName: string } } = {}
++	local function describeTimer(timerId: number)
++		local info = timerInfo[timerId]
++		if not info then
++			local desc = session:FetchTimerDesc(timerId)
++			local groupName = groupNames[desc.GroupId]
++			if not groupName then
++				groupName = if desc.GroupId ~= 0
++					then session:FetchGroupDesc(desc.GroupId).GroupName
++					else ""
++				groupNames[desc.GroupId] = groupName
++			end
++			info = { timerName = desc.TimerName, groupName = groupName }
++			timerInfo[timerId] = info
++		end
++		return info
++	end
++	local function displayName(info): string
++		return if info.groupName ~= "" then `{info.groupName}/{info.timerName}` else info.timerName
++	end
++
++	local function topTimers(values: { [number]: number }): { number }
++		local ids = {}
++		for timerId in values do
++			table.insert(ids, timerId)
++		end
++		table.sort(ids, function(a, b)
++			return values[a] > values[b]
++		end)
++		local top = {}
++		for i = 1, math.min(TOP_SCOPE_COUNT, #ids) do
++			top[i] = ids[i]
++		end
++		return top
++	end
++
++	local slowFrames: { SlowFrame } = {}
++	for _, frameId in slowIds do
++		local desc = frameDescs[frameId]
++		local frameSelf = selfTicks[frameId] or {}
++		local topScopes: { ScopeEntry } = {}
++		for _, timerId in topTimers(frameSelf) do
++			local info = describeTimer(timerId)
++			table.insert(topScopes, {
++				name = displayName(info),
++				timerName = info.timerName,
++				groupName = info.groupName,
++				timerId = timerId,
++				selfMs = frameSelf[timerId] * tickToMs,
++				normalAvgMs = normalAvgMs[timerId] or 0,
++			})
++		end
++		table.insert(slowFrames, {
++			name = `frame {desc.FrameId} (absolute {desc.FrameAbsoluteId})`,
++			frameId = desc.FrameId,
++			absoluteFrameId = desc.FrameAbsoluteId,
++			frameMs = frameMs[frameId],
++			topScopes = topScopes,
++		})
++	end
++
++	local normalTopScopes: { NormalScopeEntry } = {}
++	for _, timerId in topTimers(normalAvgMs) do
++		local info = describeTimer(timerId)
++		table.insert(normalTopScopes, {
++			name = displayName(info),
++			timerName = info.timerName,
++			groupName = info.groupName,
++			timerId = timerId,
++			avgSelfMs = normalAvgMs[timerId],
++		})
++	end
++
++	return {
++		slot = slot,
++		medianMs = medianMs,
++		p90Ms = p90Ms,
++		slowThresholdMs = thresholdMs,
++		slowFrames = slowFrames,
++		normalTopScopes = normalTopScopes,
++		frameCount = #analyzed,
++		normalFrameCount = #normalIds,
++		skippedFrameCount = skipped,
++	}
++end
++
++local function printReport(report: Report)
++	local lines = {
++		string.format(
++			"SpikeReport (slot %d): %d frames, median %.2f ms, p90 %.2f ms, %d slower than %.2f ms",
++			report.slot,
++			report.frameCount,
++			report.medianMs,
++			report.p90Ms,
++			#report.slowFrames,
++			report.slowThresholdMs
++		),
++	}
++	for _, frame in report.slowFrames do
++		table.insert(lines, string.format("  %s: %.2f ms", frame.name, frame.frameMs))
++		for _, scope in frame.topScopes do
++			table.insert(
++				lines,
++				string.format(
++					"    %7.2f ms self  (normal %.2f ms)  %s",
++					scope.selfMs,
++					scope.normalAvgMs,
++					scope.name
++				)
++			)
++		end
++	end
++	table.insert(lines, "  Top self time in normal frames (average):")
++	for _, scope in report.normalTopScopes do
++		table.insert(lines, `    {string.format("%7.2f", scope.avgSelfMs)} ms  {scope.name}`)
++	end
++	print(table.concat(lines, "\n"))
++end
++
++function SpikeReport.run(slot: number): Report
++	local session = LibMP.Session.OpenFromSlot(slot)
++	if not session then
++		error(`SpikeReport: couldn't open MicroProfiler slot {slot}. Is there a snapshot in it?`, 0)
++	end
++	local ok, result = pcall(buildReport, session, slot)
++	session:Dispose()
++	if not ok then
++		error(result, 0)
++	end
++	printReport(result)
++	return result
++end
++
++return SpikeReport

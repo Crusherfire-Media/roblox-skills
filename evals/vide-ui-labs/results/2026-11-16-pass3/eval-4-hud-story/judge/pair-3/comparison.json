@@ -1,0 +1,111 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts split the panel into a side-effect-free view and keep the effects out of the story. Only B moves the WaitForChild yield out of the component body: it runs the wait in a spawned thread with cleanups on both the thread and the connection. A leaves the yield unchanged inside buildModeHud, which fails a core part of the task.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story with live controls",
+          "score": 4,
+          "note": "`UILabs.CreateVideStory({vide = Vide, controls = ...})` with a Choose built from `BlockTypes.List`, a String control for the name and a Number control for the count, each passed to the view as a live source; there is no shortcut for trying a long name."
+        },
+        {
+          "criterion": "Data arrives through props",
+          "score": 5,
+          "note": "BuildModeHudView takes `playerName`, `selectedBlock` and `placedCount` as sources, and BuildModeHud supplies LocalPlayer, the BlockPlacer selection and the remote count."
+        },
+        {
+          "criterion": "No yield inside a Vide scope",
+          "score": 2,
+          "note": "The unchanged `ReplicatedStorage:WaitForChild(\"BlockPlaced\")` still runs synchronously in the `buildModeHud` component body; the story avoids it, but the yield was never moved out of the scope."
+        },
+        {
+          "criterion": "Effects kept out of the story and undone in game",
+          "score": 5,
+          "note": "The blur, zoom and sound stay in BuildModeHud with their existing cleanups, and the story renders only BuildModeHudView."
+        },
+        {
+          "criterion": "In-game behavior unchanged",
+          "score": 5,
+          "note": "The wrapper keeps every effect and feeds the same live sources, so the HUD looks and updates as before."
+        },
+        {
+          "criterion": "Story safety, typing and checks",
+          "score": 4,
+          "note": "All checks pass, the story never yields or touches game state, and the Props type is clear."
+        }
+      ],
+      "overall_score": 6.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story with live controls",
+          "score": 4,
+          "note": "Returns `{vide = Vide, controls = CONTROLS, story = story}` with `Ordered` Choose, String and Slider controls, all live; long names are only mentioned in a comment."
+        },
+        {
+          "criterion": "Data arrives through props",
+          "score": 5,
+          "note": "Props accept either a value or a source (read through `read`), and the story and the wrapper each supply them."
+        },
+        {
+          "criterion": "No yield inside a Vide scope",
+          "score": 4,
+          "note": "The WaitForChild call moves into `task.spawn`, with cleanups registered on both the thread and the connection, so the component body no longer yields."
+        },
+        {
+          "criterion": "Effects kept out of the story and undone in game",
+          "score": 5,
+          "note": "The blur, zoom and sound stay only in the game wrapper with their cleanups intact."
+        },
+        {
+          "criterion": "In-game behavior unchanged",
+          "score": 5,
+          "note": "The name, the selection (through `BlockTypes.ByName`) and the count still update, and the effects still run."
+        },
+        {
+          "criterion": "Story safety, typing and checks",
+          "score": 4,
+          "note": "Uses strict mode with a typed StoryProps, and all checks pass; the `@game/` string requires and `const` syntax are less conventional."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 6.5,
+      "strengths": [
+        "Clean split into a pure view and a game-side wrapper",
+        "Simple, readable story built with CreateVideStory"
+      ],
+      "weaknesses": [
+        "The WaitForChild yield is left inside the component body",
+        "No easy preset for trying a long name"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Fixes the yield-in-scope problem with proper cleanup",
+        "Flexible value-or-source props and ordered controls"
+      ],
+      "weaknesses": [
+        "Unusual require aliases and `const` syntax",
+        "No preset for a long name"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 6.5,
+    "with_skill": 8
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

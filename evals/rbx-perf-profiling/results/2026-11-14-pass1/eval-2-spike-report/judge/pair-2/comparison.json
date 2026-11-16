@@ -1,0 +1,125 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "A's per-level child-time stack computes self time correctly in every frame without discarding any, handles scopes entered before the snapshot using the frame's start, and gives both a normal-frame top five and a normal average for each slow-frame scope. B's parent-timer subtraction makes it drop frames right after a capture pause and the first frame, which can hide hitches. It also has no separate normal-frame top five and calls Configure outside its pcall.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Opens slot snapshot safely",
+          "score": 5,
+          "note": "`LibMP.Session.OpenFromSlot(slot)` with a nil check that raises an error; it never reads live data, changes the profiler or clears the slot."
+        },
+        {
+          "criterion": "Frame times and stats",
+          "score": 5,
+          "note": "Uses `(TickEndCpu - TickStartCpu) * tickToMs`, skips `IsPaused`/`IsIncomplete` frames, and takes an interpolated percentile of the sorted times for both the median and the 90th percentile."
+        },
+        {
+          "criterion": "Frame-boundary splitting",
+          "score": 5,
+          "note": "`IsThreadFrameEnd` charges open scopes using `EnterTimestampFrameLocal`, and an underflowed exit uses `frameDescs[frameId].TickStartCpu`."
+        },
+        {
+          "criterion": "Per-thread stack self time, GPU excluded",
+          "score": 5,
+          "note": "`childTicks[threadId][level]` subtracts the time of directly nested scopes per thread and resets at each frame end; `SkipGpuThreads = true`."
+        },
+        {
+          "criterion": "Both IDs and normal average",
+          "score": 5,
+          "note": "Each slow frame has `frameId`, `absoluteFrameId` and a name like `frame X (absolute Y)`; `normalAvgMs` is averaged over `normalIds`, and `normalTopScopes` gives a separate top five."
+        },
+        {
+          "criterion": "Safe LibMP use",
+          "score": 5,
+          "note": "The iterator and session are disposed after a `pcall`; it uses only `Fetch***` calls and caches timer and group names in `describeTimer`."
+        },
+        {
+          "criterion": "Returns table, scope, checks",
+          "score": 5,
+          "note": "Returns `Report` (and also prints it); only the new file changed; all checks pass."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Opens slot snapshot safely",
+          "score": 5,
+          "note": "Checks the slot number, calls `OpenFromSlot`, checks for nil and `IsValid()`, and disposes the session if it is invalid; it never touches the profiler's settings."
+        },
+        {
+          "criterion": "Frame times and stats",
+          "score": 4,
+          "note": "CPU ticks times `TickToMsCpu`, incomplete frames skipped and a sorted median and percentile, but it also drops the first frame and frames right after a capture pause from the statistics."
+        },
+        {
+          "criterion": "Frame-boundary splitting",
+          "score": 4,
+          "note": "Uses `EmitThreadFrameEnd` and `EnterTimestampFrameLocal`, with `frameStartTick` for underflowed exits, but it needs to discard frames right after a capture pause to stay correct."
+        },
+        {
+          "criterion": "Per-thread stack self time, GPU excluded",
+          "score": 4,
+          "note": "`addScope` subtracts a child's ticks from its parent's timer ID found through the stack element, which works, but children of scopes whose enter is unknown aren't subtracted, hence the skipped frames; GPU threads are skipped."
+        },
+        {
+          "criterion": "Both IDs and normal average",
+          "score": 4,
+          "note": "Reports `FrameId` and `FrameAbsoluteId` and gives a normal average per scope, but has no separate top five for normal frames."
+        },
+        {
+          "criterion": "Safe LibMP use",
+          "score": 4,
+          "note": "Disposes after a `pcall` and reads stack-element views before the next fetch, but `Configure` runs outside the `pcall`, and it calls `FetchGroupDesc` without checking for group ID 0."
+        },
+        {
+          "criterion": "Returns table, scope, checks",
+          "score": 5,
+          "note": "Returns `Report`; only the new file changed; all checks pass."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Correct per-level child-time accounting for self time",
+        "Splits scopes at frame boundaries correctly, including enters from before the snapshot",
+        "Gives a top five for normal frames and a normal average for each slow-frame scope",
+        "Thorough disposal and caching"
+      ],
+      "weaknesses": [
+        "The `Configure` call on the iterator could have been checked more defensively, though it is inside the `pcall`",
+        "Can call `FetchTimerDesc` on unusual timer IDs, though it guards against timer ID 0"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Checks the slot number and session validity",
+        "Takes care to read views before fetching the next one",
+        "Clean, strictly typed code"
+      ],
+      "weaknesses": [
+        "Skips frames right after a capture pause and the first frame, so it may miss slow frames",
+        "No top five for normal frames",
+        "`Configure` runs outside the `pcall`, so the iterator can leak if it errors"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8.5,
+    "with_skill": 7
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

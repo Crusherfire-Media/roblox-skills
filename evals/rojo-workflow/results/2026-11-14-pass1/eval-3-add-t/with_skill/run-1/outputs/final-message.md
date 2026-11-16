@@ -1,0 +1,3 @@
+The `BlockTypes` error came from an out-of-date `sourcemap.json`, not from the code. I regenerated it with the `rojo sourcemap` command from the README, and luau-lsp now finds `BlockTypes`. That `require` was in the script before this change; it just moved down two lines.
+
+One error is left: `Unknown require: game/ReplicatedStorage/Packages/t`. It's expected for now and isn't something I can fix in the code. `ReplicatedStorage.Packages` maps to `roblox_packages`, and t won't be there until you run `pesde install`, which I couldn't run here. After you install, regenerate the sourcemap and run `luau-lsp analyze` again; that error should go away. These steps are already in the PR description's "Before testing" section.

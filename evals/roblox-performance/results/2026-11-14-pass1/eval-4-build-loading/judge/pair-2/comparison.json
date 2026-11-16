@@ -1,0 +1,125 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts pass every check, cut each block to one instance, set properties before parenting, and spread loading and unloading across frames with shared budgets. The deciding difference is criterion 4. A reserves every saved cell in `occupied` before any work is spread across frames, so nobody can place into a cell that is still loading. B reserves cells only as stepLoad reaches them, so the owner or another player can place into a loading plot and saved blocks get skipped. B handles unload lifecycle better (the slot stays reserved and cells are freed per destroyed part), but A's teardown overlap is brief and documented. A's write-up is also more complete and clearly labels its timings as estimates.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Fewer instances per block",
+          "score": 5,
+          "note": "createBlock replaces the StringValue and NumberValue children with the `OwnerId` and `PlacedAt` attributes; saved blocks keep savedBlock.PlacedAt and new ones get os.time()."
+        },
+        {
+          "criterion": "Properties set before parenting",
+          "score": 5,
+          "note": "createBlock returns an unparented Part. continueBuild builds each frame's parts in a detached `SavedBlocks` Folder that is parented once."
+        },
+        {
+          "criterion": "Loading/unloading spread across frames",
+          "score": 5,
+          "note": "The Heartbeat step runs under a shared cap of BLOCKS_PER_FRAME (400) plus a FRAME_ALLOWANCE of 4 ms; continueTeardown destroys children within the same budget."
+        },
+        {
+          "criterion": "No overlaps/half states during load; clean mid-load leave",
+          "score": 4,
+          "note": "loadBuild reserves every cell in `occupied` and `plot.Cells` before queueing, and the `plots[job.Plot.Owner] ~= job.Plot` check abandons the job after a leave. However, onPlayerRemoving frees the cells at once while the parts are still being torn down, so brief overlaps are possible (the write-up says so)."
+        },
+        {
+          "criterion": "Removal/placement rules preserved",
+          "score": 5,
+          "note": "The owner check is now `GetAttribute(\"OwnerId\") ~= player.UserId` and the reach check is kept. It also requires the block to be in the player's current plot, which is stricter and is explained. All placement checks are unchanged."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 5,
+          "note": "Covers 50 frames, about 0.8 s at 60 Hz, and 2 to 3 s on a busy server, with the 'After' column labeled as estimates. It lists what players will notice, including the overlap during teardown and queued loads. One line cites a '2.5x benchmark' without a source."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "Changes stay in Builds.server.luau and the doc, the code uses typed Plot/BuildJob/TeardownJob, and all checks pass."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Fewer instances per block",
+          "score": 5,
+          "note": "The `blockOwners` and `blockPlacedAt` tables, keyed by part, replace the value objects; placed time is recorded for both saved and new blocks."
+        },
+        {
+          "criterion": "Properties set before parenting",
+          "score": 5,
+          "note": "Each block is cloned from a per-type template, gets its CFrame, and is parented last."
+        },
+        {
+          "criterion": "Loading/unloading spread across frames",
+          "score": 5,
+          "note": "runJobs on Heartbeat uses a FRAME_BUDGET of 2 ms and MAX_BLOCKS_PER_FRAME of 250 for both stepLoad and stepUnload."
+        },
+        {
+          "criterion": "No overlaps/half states during load; clean mid-load leave",
+          "score": 2,
+          "note": "stepLoad reserves `occupied[cell]` only as each block is created, so the owner or anyone else can place into a cell that hasn't loaded yet and the saved block is skipped. Mid-load leave is handled well: the job is removed and the slot stays reserved until unloading finishes."
+        },
+        {
+          "criterion": "Removal/placement rules preserved",
+          "score": 5,
+          "note": "The owner check becomes `blockOwners[block] ~= player.UserId`, the reach check is kept, and placement validation is unchanged."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 4,
+          "note": "Says builds take about 1.5 s at 250 blocks per frame, says nothing was verified in Studio, and lists what players will notice. It does describe the skipped saved blocks as a feature. 'Capped at about 2 ms' is stated as a design budget, not a measurement."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "Uses typed job unions, stays in scope, and passes all checks. The wait-for-slot loop is a sensible extra."
+        }
+      ],
+      "overall_score": 6.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Reserves every saved cell before any work is spread across frames, so placements can't overlap a loading build.",
+        "Builds each frame's blocks under a detached folder that is parented once.",
+        "Shares the budget across all plots, runs teardowns first, and stops cleanly on a mid-load leave.",
+        "Thorough, honest write-up with verification steps."
+      ],
+      "weaknesses": [
+        "Frees cells when the player leaves, before their parts are destroyed, so blocks can overlap briefly during teardown.",
+        "Loaded blocks now sit inside nested SavedBlocks folders, which changes the plot hierarchy."
+      ]
+    },
+    "B": {
+      "score": 6.5,
+      "strengths": [
+        "Template cloning keeps block creation cheap.",
+        "Keeps the slot reserved until unloading finishes, and frees cells per destroyed part, so there are no overlaps during teardown.",
+        "Cancels the load job cleanly on a mid-load leave.",
+        "Keeps owner and placed time on the server, adding no replicated data."
+      ],
+      "weaknesses": [
+        "Doesn't reserve a save's cells before loading, so placements can go into a loading build and drop saved blocks.",
+        "Placed time isn't visible to clients, which the upcoming feature may need (the write-up mentions this)."
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 6.5
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

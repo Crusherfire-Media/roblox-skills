@@ -1,0 +1,128 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are correct and well structured. Each keeps per-player signals with per-player keys, guards the first payload with a ready handshake, bridges the signal into the UI with useSignalState, and passes every check. A wins narrowly for three reasons: it uses --!strict throughout; the label and picker share a layout container instead of a hand-computed offset; and both the limit and the starting values live only in the shared module, while B sets its starting value inside gameplay code. B's handling of the limit (synced remaining count, label hidden until known) is equally valid.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Server state in Charm",
+          "score": 5,
+          "note": "Per-player signal from Charm.signal(SyncedPlayerData.Default) is created on join and dropped on leave; update copies with table.clone; the check reads data.BlocksLeft <= 0."
+        },
+        {
+          "criterion": "2. Server sync wiring",
+          "score": 5,
+          "note": "connect is called once and fires syncRemote to that player; addSignalsToClient uses the per-player key PlayerData-{userId} only after readyRemote; removeClient runs on PlayerRemoving."
+        },
+        {
+          "criterion": "3. Client sync wiring",
+          "score": 5,
+          "note": "startAsync registers setData under the matching key, then connects OnClientEvent to client.patch, then fires readyRemote, so the first full payload can't be missed."
+        },
+        {
+          "criterion": "4. Vide bridge, single limit, initial display",
+          "score": 5,
+          "note": "VideCharm.useSignalState runs inside the mounted app() scope; the 50 lives only in the shared Default, and the client default shows '50 blocks left' before the first payload."
+        },
+        {
+          "criterion": "5. UI never writes the synced signal",
+          "score": 5,
+          "note": "Only getData is exported; setData goes only to CharmSync.client.addSignals."
+        },
+        {
+          "criterion": "6. Easy to add the next value",
+          "score": 5,
+          "note": "SyncedPlayerData holds one Data type and Default table with one key per player, so a new field only touches the type and the default."
+        },
+        {
+          "criterion": "7. Correct, in scope, checks pass",
+          "score": 4,
+          "note": "All checks pass and the code is --!strict; a new Hotbar stacks the label above the picker with a UIListLayout, but this refactor moves positioning out of BlockPicker, and const and local are mixed."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Server state in Charm",
+          "score": 5,
+          "note": "entryFor lazily creates one signal per player, dropped on PlayerRemoving; update clones the state; the check reads PlayerStateServer.get(player).blocksLeft <= 0."
+        },
+        {
+          "criterion": "2. Server sync wiring",
+          "score": 5,
+          "note": "connect is called once; addSignalsToClient uses the per-player key playerState-{userId} when the client fires the shared remote; removeClient runs on leave."
+        },
+        {
+          "criterion": "3. Client sync wiring",
+          "score": 5,
+          "note": "start registers setState under the key, connects OnClientEvent to patch, then fires the remote as its ready signal."
+        },
+        {
+          "criterion": "4. Vide bridge, single limit, initial display",
+          "score": 5,
+          "note": "useSignalState(PlayerStateClient.get) runs inside app(); the server syncs the remaining count itself with MAX_BLOCKS_PER_PLAYER kept only in BlockPlacement, and the label stays hidden while the state is nil."
+        },
+        {
+          "criterion": "5. UI never writes the synced signal",
+          "score": 5,
+          "note": "Only getState is exported."
+        },
+        {
+          "criterion": "6. Easy to add the next value",
+          "score": 4,
+          "note": "The shared PlayerState type and Default are one place, but setting the starting value in BlockPlacement's PlayerAdded puts initialization inside gameplay code."
+        },
+        {
+          "criterion": "7. Correct, in scope, checks pass",
+          "score": 4,
+          "note": "All checks pass and HotbarLayout cleanly shares the sizes, but there is no --!strict and the label is positioned with a hand-computed absolute offset."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "The 50 limit is defined once, in a shared module both sides use, and the label shows a sensible value before the first sync",
+        "A separate ready remote makes sure the first full payload reaches the client",
+        "Strict typing and an easy-to-extend per-player key design",
+        "The label and hotbar share a layout container, so the label always sits just above the picker"
+      ],
+      "weaknesses": [
+        "Refactors more than needed (a new Hotbar wrapper, and BlockPicker no longer positions itself)",
+        "The gameplay limit lives in a data-defaults table rather than next to the code that enforces it",
+        "Mixes const and local"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "The limit stays next to the code that enforces it, and the server syncs the remaining count directly",
+        "The label is hidden until real data arrives, so it never shows a wrong number",
+        "One remote does both the ready signal and the sync, which keeps things simple",
+        "Small changes to BlockPicker through shared HotbarLayout constants"
+      ],
+      "weaknesses": [
+        "No --!strict",
+        "The label's absolute position depends on constants being kept in sync with the hotbar rather than on a layout",
+        "Starting values are set in BlockPlacement's PlayerAdded handler, so initialization is spread across files",
+        "entryFor hands out throwaway entries for players who have left, adding a little complexity"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

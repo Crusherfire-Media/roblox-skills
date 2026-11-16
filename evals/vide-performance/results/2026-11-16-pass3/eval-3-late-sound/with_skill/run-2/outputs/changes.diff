@@ -1,0 +1,235 @@
+diff --git a/docs/perf/ui-sounds.md b/docs/perf/ui-sounds.md
+new file mode 100644
+index 0000000..4f0b459
+--- /dev/null
++++ b/docs/perf/ui-sounds.md
+@@ -0,0 +1,68 @@
++# UI sounds: playing on time
++
++## The problem
++
++`UiSounds.play` created a new `Sound` for every cue and destroyed it when it
++ended. Once the last Sound using an asset is gone, the engine can drop that
++asset. The next cue then has to load it again before it can play. That is why
++`IsLoaded` was `false` when a cue started and the click came 0.3 to 0.5 s late,
++worst on phones with slower storage and network. `ContentProvider:PreloadAsync`
++at startup did not help: it loads the asset once, but nothing kept a Sound
++referencing it afterward, so later cues loaded it again.
++
++## What changed
++
++- **`UiSounds.luau`** now has a counted cache:
++  - `UiSounds.hold(soundId)` keeps one cached `Sound` per id in
++    `SoundService.UiSoundCache` and returns a release function. Several holders
++    of the same id share one Sound. The last release destroys it (deferred by a
++    frame, so a quick release and re-hold keeps it).
++  - `UiSounds.play(soundId)` clones the cached Sound, so the asset is already
++    loaded and the cue starts at once. If nothing holds the id, it falls back to
++    the old behavior (plays late) and warns once per id in Studio, so a missing
++    hold shows up in Output.
++  - `UiSounds.isCached(soundId)` is there for specs and in-game checks.
++  - `hold` does nothing when the game is not running, so stories and edit-mode
++    code cache nothing.
++- **`Main.client.luau`**: the HUD (`app`) holds `Click` and `PickerOpen` for its
++  whole life. `Click` is the shared button sound that later screens will play
++  too. `PickerOpen` plays the moment build mode starts, and the Build button or
++  the B key can start it at any time, so it must be loaded before then. The
++  `PreloadAsync` call is removed; the holds replace it.
++- **`BlockPicker.luau`**: the picker holds `PickerClose` while it is open, so the
++  close sound is loaded only while build mode is on and is freed after it
++  closes.
++
++Adding a screen: hold the sounds only that screen plays from its component body,
++with `cleanup(UiSounds.hold(SoundIds.X))`, so they are cached while it is open.
++Do not hold `Click` again; the HUD already does.
++
++One remaining edge: `PickerClose` starts loading when the picker opens, so
++closing it again within the load time (about 0.4 s on a slow phone, the very
++first time) can still play that close sound late.
++
++## Checking it in Studio
++
++1. Start a playtest (on a phone emulator profile too, if you want the worst
++   case). Output should show no "played without a hold" warning while you use
++   the Build button and the picker.
++2. In the Explorer, open `SoundService > UiSoundCache`. With build mode off it
++   holds two Sounds (Click and PickerOpen). Turn build mode on: a third
++   (PickerClose) appears. Turn it off: it is gone a frame later.
++3. To check the timing directly, run this in the client command bar while
++   playing, then click Build and the tiles:
++
++   ```lua
++   game:GetService("SoundService").ChildAdded:Connect(function(child)
++   	if child:IsA("Sound") then
++   		task.defer(function()
++   			print(child.SoundId, "IsLoaded:", child.IsLoaded)
++   		end)
++   	end
++   end)
++   ```
++
++   Each cue should print `IsLoaded: true`. Before the change, they printed
++   `false`. Step 2 is the way to see what is cached: the command bar gets its
++   own copy of any module it requires, so `UiSounds.isCached` read from there
++   always reports nothing cached.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index 4a1efce..f40cf86 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -66,6 +66,10 @@ export type BlockPickerProps = {
+ }
+ 
+ local function blockPicker(props: BlockPickerProps): Frame
++	-- PickerOpen and Click are held by the HUD, since the picker can open at any
++	-- moment and other screens play Click.
++	cleanup(UiSounds.hold(SoundIds.PickerClose))
++
+ 	UiSounds.play(SoundIds.PickerOpen)
+ 	cleanup(function()
+ 		UiSounds.play(SoundIds.PickerClose)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 6fc7d18..7257ae9 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,4 +1,3 @@
+-local ContentProvider = game:GetService("ContentProvider")
+ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local UserInputService = game:GetService("UserInputService")
+@@ -9,6 +8,7 @@ local SoundIds = require(ReplicatedStorage.Shared.SoundIds)
+ local UiSounds = require(script.Parent.UiSounds)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local cleanup = Vide.cleanup
+ local create = Vide.create
+ local mount = Vide.mount
+ local show = Vide.show
+@@ -60,6 +60,11 @@ local function buildButton()
+ end
+ 
+ local function app()
++	-- The HUD is always up, so it holds the shared Click and the picker's open
++	-- sound, which plays the moment build mode starts.
++	cleanup(UiSounds.hold(SoundIds.Click))
++	cleanup(UiSounds.hold(SoundIds.PickerOpen))
++
+ 	return create("ScreenGui")({
+ 		Name = "BuildGui",
+ 
+@@ -84,10 +89,5 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEv
+ 	setBuildMode(not isBuildMode())
+ end)
+ 
+--- Tried to warm the UI sounds up front; clicks still play late.
+-task.spawn(function()
+-	ContentProvider:PreloadAsync({ SoundIds.Click, SoundIds.PickerOpen, SoundIds.PickerClose })
+-end)
+-
+ BlockPlacer.setEnabled(false)
+ BlockPlacer.start()
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UiSounds.luau b/src/StarterPlayer/StarterPlayerScripts/UiSounds.luau
+index 96c3d10..6b9d049 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/UiSounds.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/UiSounds.luau
+@@ -1,17 +1,98 @@
+ --[[
+ 	Plays UI sounds for the local player.
++
++	A cue plays on time only while its sound is held: a Sound made when it is
++	cued loads its asset first and plays late. Screens hold the sounds they can
++	play, and holders of the same sound share one cached copy.
+ ]]
+ 
++local RunService = game:GetService("RunService")
+ local SoundService = game:GetService("SoundService")
+ 
++local cachedSounds: { [string]: Sound? } = {}
++local holdCounts: { [string]: number? } = {}
++local warnedSoundIds: { [string]: boolean? } = {}
++local cacheFolder: Folder? = nil
++
+ local UiSounds = {}
+ 
++local function getCacheFolder(): Folder
++	local folder = cacheFolder
++	if not folder then
++		folder = Instance.new("Folder")
++		folder.Name = "UiSoundCache"
++		folder.Parent = SoundService
++		cacheFolder = folder
++	end
++	return folder
++end
++
++--[[
++	Keeps <soundId> cached until the returned release is called. Releasing
++	twice is harmless. Does nothing while the game is not running.
++]]
++function UiSounds.hold(soundId: string): () -> ()
++	if not RunService:IsRunning() then
++		return function() end
++	end
++
++	holdCounts[soundId] = (holdCounts[soundId] or 0) + 1
++	if not cachedSounds[soundId] then
++		local sound = Instance.new("Sound")
++		sound.SoundId = soundId
++		sound.Parent = getCacheFolder()
++		cachedSounds[soundId] = sound
++	end
++
++	local isReleased = false
++	return function()
++		if isReleased then
++			return
++		end
++		isReleased = true
++		local count = (holdCounts[soundId] or 1) - 1
++		holdCounts[soundId] = if count > 0 then count else nil
++		if count > 0 then
++			return
++		end
++		-- Deferred, so a release followed at once by a new hold, or a cue
++		-- played from the same cleanup, keeps the cached copy.
++		task.defer(function()
++			if holdCounts[soundId] then
++				return
++			end
++			local sound = cachedSounds[soundId]
++			cachedSounds[soundId] = nil
++			if sound then
++				sound:Destroy()
++			end
++		end)
++	end
++end
++
++--[[
++	Whether <soundId> is cached right now.
++]]
++function UiSounds.isCached(soundId: string): boolean
++	return cachedSounds[soundId] ~= nil
++end
++
+ --[[
+-	Plays the sound with <soundId> once.
++	Plays the sound with <soundId> once. Plays late unless something holds it.
+ ]]
+ function UiSounds.play(soundId: string)
+-	local sound = Instance.new("Sound")
+-	sound.SoundId = soundId
++	local cachedSound = cachedSounds[soundId]
++	local sound: Sound
++	if cachedSound then
++		sound = cachedSound:Clone()
++	else
++		if RunService:IsStudio() and not warnedSoundIds[soundId] then
++			warnedSoundIds[soundId] = true
++			warn(`UI sound {soundId} played without a hold, so it plays late`)
++		end
++		sound = Instance.new("Sound")
++		sound.SoundId = soundId
++	end
+ 	sound.Parent = SoundService
+ 	sound.Ended:Once(function()
+ 		sound:Destroy()

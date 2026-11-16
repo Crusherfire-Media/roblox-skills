@@ -1,0 +1,331 @@
+diff --git a/.github/workflows/specs.yml b/.github/workflows/specs.yml
+new file mode 100644
+index 0000000..721c04e
+--- /dev/null
++++ b/.github/workflows/specs.yml
+@@ -0,0 +1,65 @@
++# Runs the Jest specs in src/ServerScriptService/Tests/Specs on every pull
++# request: builds the place with Rojo, saves it as a new version of the CI
++# place, and runs ci/run-specs.luau there through Open Cloud Luau Execution.
++#
++# Secrets: ROBLOX_UNIVERSE_ID and ROBLOX_PLACE_ID of a CI place in its own
++# experience (specs can reach that experience's real DataStores), and
++# ROBLOX_API_KEY with the universe-places:write and
++# universe.place.luau-execution-session:write scopes for that experience.
++# Pull requests from forks get no secrets, so this job fails for them.
++name: Specs
++
++on:
++  pull_request:
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  specs:
++    runs-on: ubuntu-latest
++    # Covers tool install plus the 8 minute poll deadline in run_luau_task.py.
++    timeout-minutes: 20
++    # Open Cloud allows 5 task creations per minute per key owner and 10
++    # unfinished tasks per place, so a newer push cancels the older run.
++    concurrency:
++      group: luau-execution-${{ github.ref }}
++      cancel-in-progress: true
++    steps:
++      - uses: actions/checkout@v4
++
++      - name: Install Rokit
++        run: |
++          curl -sSf https://raw.githubusercontent.com/rojo-rbx/rokit/main/scripts/install.sh | bash
++          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
++
++      - name: Install tools from rokit.toml
++        env:
++          # Avoids GitHub API rate limits when Rokit downloads releases.
++          GITHUB_TOKEN: ${{ github.token }}
++        run: rokit install --no-trust-check
++
++      - name: Install packages
++        # Installs the workspace member test_packages (Jest) as well.
++        run: pesde install --locked
++
++      - name: Write the CI project file
++        # LoadStringEnabled lets Jest load modules on the game server the task
++        # runs on. It is set only in this generated copy so the real game
++        # keeps loadstring off.
++        run: |
++          jq '.tree.ServerScriptService["$properties"].LoadStringEnabled = true' \
++            default.project.json > ci.project.json
++
++      - name: Build the place
++        run: |
++          mkdir -p build
++          rojo build ci.project.json -o build/ci.rbxl
++
++      - name: Run specs in the CI place
++        env:
++          ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
++          ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
++          ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
++        run: python3 ci/run_luau_task.py build/ci.rbxl ci/run-specs.luau
+diff --git a/.gitignore b/.gitignore
+index 5989870..0a2e100 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -10,3 +10,4 @@ roblox.yml
+ *.lock
+ !pesde.lock
+ build/
++ci.project.json
+diff --git a/README.md b/README.md
+index 9e549e3..d1c8a0c 100644
+--- a/README.md
++++ b/README.md
+@@ -44,6 +44,18 @@ Jest specs live under `src/ServerScriptService/Tests/Specs`, beside `jest.config
+ `testMatch` picks up every ModuleScript named `*.spec`. Specs run only in Studio, which this
+ project can't reach, so check specs with the commands below like any other file.
+ 
++### CI
++
++`.github/workflows/specs.yml` runs the whole suite on every pull request. It builds the place from
++`ci.project.json`, a copy of `default.project.json` generated in the job with
++`ServerScriptService.LoadStringEnabled` on (Jest needs `loadstring` on a game server), saves the
++build as a new version of a dedicated CI place, and runs `ci/run-specs.luau` in that version
++through Open Cloud Luau Execution (`ci/run_luau_task.py`). The job fails when any spec fails or
++fails to load. It needs the repository secrets `ROBLOX_UNIVERSE_ID`, `ROBLOX_PLACE_ID`, and
++`ROBLOX_API_KEY` (scopes `universe-places:write` and
++`universe.place.luau-execution-session:write`). Specs run there on a server, so
++`RunService:IsServer()` is true, unlike in Studio's edit mode.
++
+ ## Checks
+ 
+ Tools come from Rokit (`rokit.toml`). Run each command on its own from the project root:
+diff --git a/ci/run-specs.luau b/ci/run-specs.luau
+new file mode 100644
+index 0000000..2a80228
+--- /dev/null
++++ b/ci/run-specs.luau
+@@ -0,0 +1,62 @@
++--!strict
++--[[
++	Script of the Open Cloud Luau Execution task that .github/workflows/specs.yml
++	runs. It errors when any spec fails or fails to load, because a task ends
++	FAILED only when its script raises an error.
++]]
++
++const ServerScriptService = game:GetService("ServerScriptService")
++
++-- The task's script is not a ModuleScript in the place, so it requires by
++-- instance rather than by a string path relative to itself.
++const Jest = require(ServerScriptService.Tests.Packages.Jest)
++
++const SPECS_ROOT = ServerScriptService.Tests.Specs
++const MAX_LISTED_FAILURES = 50
++
++local function collectFailures(results: any): { string }
++	local failures = {}
++	for _, fileResult in results.testResults or {} do
++		const filePath = tostring(fileResult.testFilePath)
++		if fileResult.testExecError then
++			table.insert(failures, `{filePath}: failed to load`)
++		end
++		for _, testResult in fileResult.testResults or {} do
++			if testResult.status == "failed" then
++				table.insert(failures, `{filePath}: {testResult.fullName}`)
++			end
++		end
++	end
++	return failures
++end
++
++const status, result = Jest.runCLI(SPECS_ROOT, {
++	ci = true,
++	verbose = false,
++	-- An empty suite passes with the warning below instead of failing CI
++	passWithNoTests = true,
++}, { SPECS_ROOT }):awaitStatus()
++
++if status == "Rejected" then
++	error(`Jest could not run: {tostring(result)}`)
++end
++
++const results = result.results
++const summary = `{results.numPassedTests} passed, {results.numFailedTests} failed, `
++	.. `{results.numTotalTests} total in {results.numTotalTestSuites} spec files`
++print(`[run-specs] {summary}`)
++
++if results.numTotalTestSuites == 0 then
++	warn("[run-specs] No spec files matched; check jest.config testMatch")
++end
++
++if not results.success then
++	const failures = collectFailures(results)
++	const listed = table.move(failures, 1, math.min(#failures, MAX_LISTED_FAILURES), 1, {})
++	if #failures > MAX_LISTED_FAILURES then
++		table.insert(listed, `...and {#failures - MAX_LISTED_FAILURES} more`)
++	end
++	error(`Specs failed ({summary}):\n` .. table.concat(listed, "\n"))
++end
++
++return summary
+diff --git a/ci/run_luau_task.py b/ci/run_luau_task.py
+new file mode 100644
+index 0000000..9868174
+--- /dev/null
++++ b/ci/run_luau_task.py
+@@ -0,0 +1,154 @@
++"""Upload a place build to the CI place and run a Luau script there.
++
++Uses Roblox Open Cloud: the Places API to save a new place version, then the
++Luau Execution API to run one task pinned to that version. Exits non-zero when
++the upload fails, the task ends in any state other than COMPLETE, or the poll
++deadline passes. Standard library only, so the job needs no pip install.
++
++Environment: ROBLOX_API_KEY, ROBLOX_UNIVERSE_ID, ROBLOX_PLACE_ID.
++Usage: python3 ci/run_luau_task.py <place.rbxl> <script.luau>
++"""
++
++import json
++import os
++import sys
++import time
++import urllib.error
++import urllib.request
++
++API_ROOT = "https://apis.roblox.com"
++# The task itself stops at this limit (the API maximum is 300 seconds).
++TASK_TIMEOUT_SECONDS = 300
++# A task can sit in PROCESSING past its own timeout and end INTERNAL_ERROR
++# about 11 minutes later, so the poll loop gives up on its own.
++POLL_DEADLINE_SECONDS = 480
++POLL_INTERVAL_SECONDS = 3
++MAX_429_RETRIES = 3
++
++
++def request(method, url, api_key, body=None, content_type=None):
++    """Send a request, honoring retry-after on HTTP 429. Returns parsed JSON."""
++    for attempt in range(MAX_429_RETRIES + 1):
++        req = urllib.request.Request(url, data=body, method=method)
++        req.add_header("x-api-key", api_key)
++        if content_type:
++            req.add_header("Content-Type", content_type)
++        try:
++            with urllib.request.urlopen(req, timeout=120) as response:
++                payload = response.read()
++                return json.loads(payload) if payload else {}
++        except urllib.error.HTTPError as error:
++            detail = error.read().decode("utf-8", "replace")
++            if error.code == 429 and attempt < MAX_429_RETRIES:
++                wait = int(error.headers.get("retry-after") or 30)
++                print(f"HTTP 429 from {url}; retrying in {wait}s", flush=True)
++                time.sleep(wait)
++                continue
++            raise SystemExit(f"{method} {url} failed with HTTP {error.code}: {detail}")
++    raise SystemExit(f"{method} {url} still rate limited after {MAX_429_RETRIES} retries")
++
++
++def upload_place(api_key, universe_id, place_id, place_path):
++    # Saved, not Published: the build becomes a version the task can pin
++    # without going live to anyone who joins the CI place.
++    url = (
++        f"{API_ROOT}/universes/v1/{universe_id}/places/{place_id}/versions"
++        "?versionType=Saved"
++    )
++    with open(place_path, "rb") as place_file:
++        body = place_file.read()
++    response = request("POST", url, api_key, body, "application/octet-stream")
++    return response["versionNumber"]
++
++
++def create_task(api_key, universe_id, place_id, version, script):
++    url = (
++        f"{API_ROOT}/cloud/v2/universes/{universe_id}/places/{place_id}"
++        f"/versions/{version}/luau-execution-session-tasks"
++    )
++    body = json.dumps({"script": script, "timeout": f"{TASK_TIMEOUT_SECONDS}s"})
++    response = request("POST", url, api_key, body.encode("utf-8"), "application/json")
++    return response["path"]
++
++
++def wait_for_task(api_key, task_path):
++    deadline = time.monotonic() + POLL_DEADLINE_SECONDS
++    last_state = None
++    while time.monotonic() < deadline:
++        task = request("GET", f"{API_ROOT}/cloud/v2/{task_path}", api_key)
++        state = task.get("state")
++        if state != last_state:
++            print(f"Task state: {state}", flush=True)
++            last_state = state
++        if state in ("COMPLETE", "FAILED", "CANCELLED"):
++            return task
++        time.sleep(POLL_INTERVAL_SECONDS)
++    return None
++
++
++def print_logs(api_key, task_path):
++    page_token = ""
++    while True:
++        url = f"{API_ROOT}/cloud/v2/{task_path}/logs?view=STRUCTURED&maxPageSize=10000"
++        if page_token:
++            url += f"&pageToken={page_token}"
++        response = request("GET", url, api_key)
++        for log in response.get("luauExecutionSessionTaskLogs", []):
++            for entry in log.get("structuredMessages", []):
++                message_type = entry.get("messageType", "")
++                prefix = "" if message_type == "OUTPUT" else f"[{message_type}] "
++                print(f"{prefix}{entry.get('message', '')}")
++        page_token = response.get("nextPageToken")
++        if not page_token:
++            return
++
++
++def main():
++    if len(sys.argv) != 3:
++        raise SystemExit("usage: run_luau_task.py <place.rbxl> <script.luau>")
++    place_path, script_path = sys.argv[1], sys.argv[2]
++
++    missing = [
++        name
++        for name in ("ROBLOX_API_KEY", "ROBLOX_UNIVERSE_ID", "ROBLOX_PLACE_ID")
++        if not os.environ.get(name)
++    ]
++    if missing:
++        raise SystemExit(f"Missing secrets: {', '.join(missing)}")
++    api_key = os.environ["ROBLOX_API_KEY"]
++    universe_id = os.environ["ROBLOX_UNIVERSE_ID"]
++    place_id = os.environ["ROBLOX_PLACE_ID"]
++
++    with open(script_path, encoding="utf-8") as script_file:
++        script = script_file.read()
++
++    version = upload_place(api_key, universe_id, place_id, place_path)
++    print(f"Uploaded place version {version}", flush=True)
++
++    task_path = create_task(api_key, universe_id, place_id, version, script)
++    print(f"Created task {task_path}", flush=True)
++
++    task = wait_for_task(api_key, task_path)
++    if task is None:
++        raise SystemExit(f"Task did not finish within {POLL_DEADLINE_SECONDS}s")
++
++    print("::group::Task logs")
++    print_logs(api_key, task_path)
++    print("::endgroup::")
++
++    state = task["state"]
++    if state == "COMPLETE":
++        results = task.get("output", {}).get("results", [])
++        print(f"Specs passed: {results[0] if results else 'no summary returned'}")
++        return
++    error = task.get("error", {})
++    message = error.get("message", "no error message")
++    print(message)
++    # Workflow commands end at a newline, so the annotation escapes them.
++    message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
++    print(f"::error title=Specs {state}::{error.get('code', state)}: {message}")
++    sys.exit(1)
++
++
++if __name__ == "__main__":
++    main()

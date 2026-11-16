@@ -1,0 +1,351 @@
+diff --git a/docs/figma/hotbar-notes.md b/docs/figma/hotbar-notes.md
+new file mode 100644
+index 0000000..9d3485f
+--- /dev/null
++++ b/docs/figma/hotbar-notes.md
+@@ -0,0 +1,38 @@
++# Hotbar: Figma → Roblox notes
++
++Source: `design/figma/hotbar.json`, frame **HUD / Desktop** (`31:100`) and the **Hotbar Slot**
++component set (`31:2`). The code is in `src/StarterPlayer/StarterPlayerScripts/UI/Hotbar.luau`.
++
++The design is a 1920×1080 frame. Our UI is laid out in offsets for a screen 1080 pixels tall and
++`Screen.uiScale()` scales it up from there, so Figma pixel values are used directly.
++
++## What Roblox can't reproduce exactly
++
++| Design | Problem in Roblox | What we used instead |
++| --- | --- | --- |
++| **Selected Name** font: Gilroy ExtraBold (800) | Gilroy isn't a Roblox font, and Roblox doesn't let you upload custom fonts. | **Montserrat ExtraBold**, the closest geometric sans Roblox has. It's a little wider than Gilroy, so names take up a bit more width. If the designer would rather match the rest of our UI, use `BuilderSans` ExtraBold instead. |
++| **Selected Name** letter spacing −0.5px | TextLabels have no letter-spacing (tracking) setting, and RichText doesn't support it either. | Default spacing. Names are about 0.5px per character wider than in the design. |
++| **Selected Name** line height 28px | `LineHeight` is a multiplier, not a pixel value. | The name is always one line, so the label is just 28px tall with the text centred vertically. That looks the same. |
++| **Selected Name** 2px outside stroke, black at 60% | `TextStrokeColor3` only draws a thin, fixed-width outline. | A `UIStroke` (Contextual) on the label: thickness 2, black, transparency 0.4. It draws outward from the glyph edges, but the corners are rounded differently from Figma's, so sharp letter corners look slightly softer. |
++| **Hotbar** layer opacity 0.8 | Roblox has no opacity for a frame and everything inside it. Setting transparency on each element separately isn't the same, because overlapping layers (a swatch on a slot on the bar) would show through each other. | A **`CanvasGroup`** with `GroupTransparency = 0.2`. This fades the bar as one layer, like Figma does. Downsides: a CanvasGroup renders to a texture, so it uses extra GPU memory and can look slightly soft at some scales. If that becomes a problem, swap it for a Frame with `BackgroundTransparency = 0.2` and keep the slots opaque. That's a visible change, so check with the designer first. |
++| **Hotbar** stroke: 2px inside, top edge only, white at 12% | `UIStroke` draws on all sides or none. | A 2px white `Frame` (transparency 0.88) across the top of the bar. The CanvasGroup's rounded corners clip it. In Figma the top stroke curves down into the corners and tapers off. Ours is a straight line cut off where the corners start, so the ends are slightly shorter and don't curve. |
++| **Hotbar Slot** corner smoothing 0.6 (squircle) | `UICorner` only draws circular arcs. Roblox has no corner smoothing. | `UICorner` 12px. The corners look a little rounder and less "iOS" than in Figma. Getting an exact squircle would need 9-slice images, and then the swatch colour couldn't be a simple fill. |
++| **Selected** stroke: 3px outside, horizontal linear gradient #FFD25A → #FF801A | A `UIStroke` can take a `UIGradient` as a child, but the gradient is stretched across the stroke's own bounds (slot plus 3px on each side), not just the slot. | `UIStroke` (Border mode, which draws outside) with a `UIGradient` child, rotation 0. The ends of the gradient sit about 3px further out than in Figma, which you can't see at this size. |
++| **Pressed** variant is 60×60 (swatch 36×36, badge at 3,3) | Not a Roblox limitation, but swapping a 64px slot for a 60px one inside the auto-layout bar would push every other slot over by 4px. | Each slot keeps a fixed 64×64 cell. A `Body` frame inside it shrinks to 60×60 around its centre, with a 36×36 swatch and the badge at 3,3. Click/tap detection uses an invisible 64×64 button on top, so a press near the edge still counts after the body shrinks. |
++| **Hover / Pressed** pointer states | Roblox has no variants. Touch screens have no hover. | The slot follows the hit area's `GuiState` (Idle → Default, Hover → Hover, Press → Pressed). On touch screens you get Pressed while your finger is down and never Hover, which is what you'd expect. |
++| **Selected combined with Hover/Pressed** | The design treats the four states as separate and doesn't show what a selected slot looks like when hovered or pressed. | The gradient stroke shows whenever the slot is selected. The fill and size still follow the pointer state, so a selected slot also darkens and shrinks when pressed. |
++
++## Matched exactly
++
++- Bar fill `#0E1020`, corner 14, padding 10, slot gap 8. That makes the bar 732×84, the same as in Figma.
++- Bar sits 24px above the bottom of the screen, with the name 8px above the bar.
++- Slot fills: Default `#262B45`, Hover `#313858`, Pressed `#1D2136`. Slots are 64×64 with corner 12.
++- Swatch 40×40, centred, corner 8. Its fill is the block's colour from `BlockTypes` (the design says to do this).
++- Key badge 18×18 circle, black at 55%, inset 4px. The key number is Builder Sans Bold 12, white, centred.
++- Selected Name: 22px, white, centred, width fits the text.
++
++## Behaviour (unchanged)
++
++- Clicking or tapping a slot selects that block (`Activated` on the hit area → `BlockPlacer.setBlockType`).
++- Number keys 1–9 and 0 still change the selection. `BlockPlacer` handles them, and the hotbar shows whatever is selected.
++- The design's `Show Key` property is always true. Every slot gets a badge as long as there's a key label for its position.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Hotbar.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Hotbar.luau
+index dacf413..061dcb4 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/UI/Hotbar.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Hotbar.luau
+@@ -1,7 +1,11 @@
+ --[[
+ 	The hotbar: one slot per block type along the bottom of the screen, each showing the block's
+ 	color and its number key, under the name of the selected block. Clicking or tapping a slot
+-	selects that block.
++	selects that block. Number keys are handled by BlockPlacer; this only reflects the selection.
++
++	Styled from the Figma "HUD / Desktop" frame (31:100) and the "Hotbar Slot" component set (31:2)
++	in design/figma/hotbar.json. Places where Roblox can't match the design exactly are listed in
++	docs/figma/hotbar-notes.md.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+@@ -9,18 +13,52 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local changed = Vide.changed
+ local create = Vide.create
++local source = Vide.source
+ 
+ type BlockType = BlockTypes.BlockType
+ 
+-local SLOT_SIZE = 56
+-local SLOT_GAP = 6
+-local SWATCH_SIZE = 40
+ local KEY_LABELS = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" }
+-local BAR_COLOR = Color3.fromRGB(30, 30, 36)
+-local SLOT_COLOR = Color3.fromRGB(50, 50, 58)
+-local SELECTED_COLOR = Color3.fromRGB(255, 200, 60)
+-local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
++
++-- Layout, in offsets at the 1080-tall reference screen (see Screen.luau).
++local BOTTOM_MARGIN = 24 -- 1080 - (972 + 84)
++local NAME_GAP = 8 -- name bottom (964) to bar top (972)
++local NAME_HEIGHT = 28
++local BAR_PADDING = 10
++local BAR_CORNER = 14
++local BAR_HIGHLIGHT_THICKNESS = 2
++local SLOT_GAP = 8
++local SLOT_SIZE = 64
++local SLOT_PRESSED_SIZE = 60
++local SLOT_CORNER = 12
++local SWATCH_SIZE = 40
++local SWATCH_PRESSED_SIZE = 36
++local SWATCH_CORNER = 8
++local BADGE_SIZE = 18
++local BADGE_INSET = 4
++local BADGE_PRESSED_INSET = 3
++local SELECTED_STROKE_THICKNESS = 3
++
++-- Colors from the Figma fills, converted from 0-1 floats to 0-255.
++local BAR_COLOR = Color3.fromRGB(14, 16, 32)
++local BAR_TRANSPARENCY = 0.2 -- layer opacity 0.8
++local BAR_HIGHLIGHT_COLOR = Color3.new(1, 1, 1)
++local BAR_HIGHLIGHT_TRANSPARENCY = 0.88 -- alpha 0.12
++local SLOT_COLOR = Color3.fromRGB(38, 43, 69)
++local SLOT_HOVER_COLOR = Color3.fromRGB(49, 56, 88)
++local SLOT_PRESSED_COLOR = Color3.fromRGB(29, 33, 54)
++local SELECTED_GRADIENT = ColorSequence.new(Color3.fromRGB(255, 210, 90), Color3.fromRGB(255, 128, 26))
++local BADGE_COLOR = Color3.new(0, 0, 0)
++local BADGE_TRANSPARENCY = 0.45 -- alpha 0.55
++local TEXT_COLOR = Color3.new(1, 1, 1)
++local NAME_STROKE_COLOR = Color3.new(0, 0, 0)
++local NAME_STROKE_TRANSPARENCY = 0.4 -- alpha 0.6
++local NAME_STROKE_THICKNESS = 2
++
++-- Gilroy ExtraBold isn't available in Roblox; Montserrat is the closest geometric sans.
++local NAME_FONT = Font.fromName("Montserrat", Enum.FontWeight.ExtraBold)
++local KEY_FONT = Font.fromName("BuilderSans", Enum.FontWeight.Bold)
+ 
+ type SlotProps = {
+ 	BlockType: BlockType,
+@@ -29,42 +67,106 @@ type SlotProps = {
+ 	Select: () -> (),
+ }
+ 
+-local function slot(props: SlotProps): TextButton
+-	return create("TextButton")({
++local function slot(props: SlotProps): Frame
++	-- Pointer state of the hit area: Idle, Hover, Press or NonInteractable.
++	local guiState = source(Enum.GuiState.Idle)
++
++	local function isPressed(): boolean
++		return guiState() == Enum.GuiState.Press
++	end
++
++	local keyLabel = KEY_LABELS[props.Index]
++
++	return create("Frame")({
+ 		Name = props.BlockType.Name,
+ 		LayoutOrder = props.Index,
+ 		Size = UDim2.fromOffset(SLOT_SIZE, SLOT_SIZE),
+-		BackgroundColor3 = SLOT_COLOR,
+-
+-		Activated = props.Select,
+-
+-		create("UICorner")({ CornerRadius = UDim.new(0, 6) }),
+-		create("UIStroke")({
+-			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+-			Color = SELECTED_COLOR,
+-			Thickness = 2,
+-			Enabled = props.IsSelected,
+-		}),
++		BackgroundTransparency = 1,
+ 
++		-- The visible slot. The Pressed variant is 60x60, so this shrinks inside the fixed 64x64
++		-- layout cell instead of shifting its neighbours.
+ 		create("Frame")({
+-			Name = "Swatch",
++			Name = "Body",
+ 			AnchorPoint = Vector2.new(0.5, 0.5),
+ 			Position = UDim2.fromScale(0.5, 0.5),
+-			Size = UDim2.fromOffset(SWATCH_SIZE, SWATCH_SIZE),
+-			BackgroundColor3 = props.BlockType.Color,
++			Size = function()
++				local size = if isPressed() then SLOT_PRESSED_SIZE else SLOT_SIZE
++				return UDim2.fromOffset(size, size)
++			end,
++			BackgroundColor3 = function()
++				local state = guiState()
++				if state == Enum.GuiState.Press then
++					return SLOT_PRESSED_COLOR
++				elseif state == Enum.GuiState.Hover then
++					return SLOT_HOVER_COLOR
++				end
++				return SLOT_COLOR
++			end,
++
++			create("UICorner")({ CornerRadius = UDim.new(0, SLOT_CORNER) }),
++			create("UIStroke")({
++				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++				Color = Color3.new(1, 1, 1),
++				Thickness = SELECTED_STROKE_THICKNESS,
++				Enabled = props.IsSelected,
+ 
+-			create("UICorner")({ CornerRadius = UDim.new(0, 4) }),
++				create("UIGradient")({ Color = SELECTED_GRADIENT }),
++			}),
++
++			create("Frame")({
++				Name = "Swatch",
++				AnchorPoint = Vector2.new(0.5, 0.5),
++				Position = UDim2.fromScale(0.5, 0.5),
++				Size = function()
++					local size = if isPressed() then SWATCH_PRESSED_SIZE else SWATCH_SIZE
++					return UDim2.fromOffset(size, size)
++				end,
++				BackgroundColor3 = props.BlockType.Color,
++
++				create("UICorner")({ CornerRadius = UDim.new(0, SWATCH_CORNER) }),
++			}),
++
++			if keyLabel
++				then create("Frame")({
++					Name = "KeyBadge",
++					Position = function()
++						local inset = if isPressed() then BADGE_PRESSED_INSET else BADGE_INSET
++						return UDim2.fromOffset(inset, inset)
++					end,
++					Size = UDim2.fromOffset(BADGE_SIZE, BADGE_SIZE),
++					BackgroundColor3 = BADGE_COLOR,
++					BackgroundTransparency = BADGE_TRANSPARENCY,
++					ZIndex = 2,
++
++					create("UICorner")({ CornerRadius = UDim.new(0.5, 0) }),
++
++					create("TextLabel")({
++						Name = "Key",
++						Size = UDim2.fromScale(1, 1),
++						BackgroundTransparency = 1,
++						FontFace = KEY_FONT,
++						TextSize = 12,
++						TextColor3 = TEXT_COLOR,
++						TextXAlignment = Enum.TextXAlignment.Center,
++						TextYAlignment = Enum.TextYAlignment.Center,
++						Text = keyLabel,
++					}),
++				})
++				else nil,
+ 		}),
+ 
+-		create("TextLabel")({
+-			Name = "Key",
+-			Position = UDim2.fromOffset(4, 2),
+-			Size = UDim2.fromOffset(14, 14),
++		-- Invisible hit area on top of the visuals, kept at the full 64x64 so a press that
++		-- shrinks the body can't move the edge out from under the pointer.
++		create("TextButton")({
++			Name = "HitArea",
++			Size = UDim2.fromScale(1, 1),
+ 			BackgroundTransparency = 1,
+-			FontFace = Font.fromName("BuilderSans", Enum.FontWeight.Bold),
+-			TextSize = 14,
+-			TextColor3 = TEXT_COLOR,
+-			Text = KEY_LABELS[props.Index],
++			AutoButtonColor = false,
++			Text = "",
++			ZIndex = 3,
++
++			Activated = props.Select,
++			changed("GuiState", guiState),
+ 		}),
+ 	})
+ end
+@@ -92,48 +194,81 @@ local function hotbar(props: HotbarProps): Frame
+ 	return create("Frame")({
+ 		Name = "Hotbar",
+ 		AnchorPoint = Vector2.new(0.5, 1),
+-		Position = UDim2.new(0.5, 0, 1, -16),
++		Position = UDim2.new(0.5, 0, 1, -BOTTOM_MARGIN),
+ 		AutomaticSize = Enum.AutomaticSize.XY,
+ 		BackgroundTransparency = 1,
+ 
+ 		create("UIListLayout")({
+ 			FillDirection = Enum.FillDirection.Vertical,
+ 			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+-			Padding = UDim.new(0, 8),
++			SortOrder = Enum.SortOrder.LayoutOrder,
++			Padding = UDim.new(0, NAME_GAP),
+ 		}),
+ 
+ 		create("TextLabel")({
+ 			Name = "SelectedName",
+ 			LayoutOrder = 1,
+-			Size = UDim2.fromOffset(240, 28),
++			AutomaticSize = Enum.AutomaticSize.X,
++			Size = UDim2.fromOffset(0, NAME_HEIGHT),
+ 			BackgroundTransparency = 1,
+-			FontFace = Font.fromName("BuilderSans", Enum.FontWeight.Bold),
++			FontFace = NAME_FONT,
+ 			TextSize = 22,
+ 			TextColor3 = TEXT_COLOR,
++			TextXAlignment = Enum.TextXAlignment.Center,
++			TextYAlignment = Enum.TextYAlignment.Center,
+ 			Text = function()
+ 				return BlockTypes.ByName[props.Selected()].DisplayName
+ 			end,
++
++			create("UIStroke")({
++				ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
++				Color = NAME_STROKE_COLOR,
++				Transparency = NAME_STROKE_TRANSPARENCY,
++				Thickness = NAME_STROKE_THICKNESS,
++			}),
+ 		}),
+ 
+-		create("Frame")({
++		-- The Figma bar has layer opacity 0.8, which fades the bar, slots, swatches and badges
++		-- together. A CanvasGroup is the only way to fade a group as one layer; it also clips the
++		-- top highlight to the rounded corners.
++		create("CanvasGroup")({
+ 			Name = "Bar",
+ 			LayoutOrder = 2,
+ 			AutomaticSize = Enum.AutomaticSize.XY,
+ 			BackgroundColor3 = BAR_COLOR,
++			GroupTransparency = BAR_TRANSPARENCY,
+ 
+-			create("UICorner")({ CornerRadius = UDim.new(0, 8) }),
+-			create("UIPadding")({
+-				PaddingLeft = UDim.new(0, 8),
+-				PaddingRight = UDim.new(0, 8),
+-				PaddingTop = UDim.new(0, 8),
+-				PaddingBottom = UDim.new(0, 8),
+-			}),
+-			create("UIListLayout")({
+-				FillDirection = Enum.FillDirection.Horizontal,
+-				Padding = UDim.new(0, SLOT_GAP),
++			create("UICorner")({ CornerRadius = UDim.new(0, BAR_CORNER) }),
++
++			-- Figma: a 2px inside stroke on the top edge only. UIStroke can't do one side.
++			create("Frame")({
++				Name = "TopHighlight",
++				Size = UDim2.new(1, 0, 0, BAR_HIGHLIGHT_THICKNESS),
++				BackgroundColor3 = BAR_HIGHLIGHT_COLOR,
++				BackgroundTransparency = BAR_HIGHLIGHT_TRANSPARENCY,
++				BorderSizePixel = 0,
++				ZIndex = 2,
+ 			}),
+ 
+-			slots,
++			create("Frame")({
++				Name = "Slots",
++				AutomaticSize = Enum.AutomaticSize.XY,
++				BackgroundTransparency = 1,
++
++				create("UIPadding")({
++					PaddingLeft = UDim.new(0, BAR_PADDING),
++					PaddingRight = UDim.new(0, BAR_PADDING),
++					PaddingTop = UDim.new(0, BAR_PADDING),
++					PaddingBottom = UDim.new(0, BAR_PADDING),
++				}),
++				create("UIListLayout")({
++					FillDirection = Enum.FillDirection.Horizontal,
++					SortOrder = Enum.SortOrder.LayoutOrder,
++					Padding = UDim.new(0, SLOT_GAP),
++				}),
++
++				slots,
++			}),
+ 		}),
+ 	})
+ end

@@ -1,0 +1,123 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are architecturally the same and correct: a BlockStock module that owns the signal, clone-and-set updates, a useSignalState bridge, and a placement guard that reads Charm. B wins narrowly because it treats counts as unknown until the server sends them, so tiles don't all show 0 and look grayed out at startup. A validates names and skips no-op updates, but those advantages are smaller.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Single Charm signal owned by a module",
+          "score": 5,
+          "note": "BlockStock.luau holds `Charm.signal({})`, exposes `getStock`/`getCount`, and only `onStockChanged` writes it."
+        },
+        {
+          "criterion": "Immutable updates",
+          "score": 5,
+          "note": "The updater does `table.clone(current)`, sets one entry, and returns it; it also returns `current` when the count is unchanged."
+        },
+        {
+          "criterion": "Shared derived values; guard reads Charm",
+          "score": 3,
+          "note": "`BlockStock.getCount` is a shared getter and the guard reads Charm directly, but the UI works out the selected count again with its own `countOf(props.Selected())`, and there is no computed."
+        },
+        {
+          "criterion": "Vide-tracked bridge",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` runs inside `app`, and the whole table is passed down as the `Stock` source."
+        },
+        {
+          "criterion": "Live updates and initial look",
+          "score": 4,
+          "note": "Tile counts, the gray state, and the label all depend on both sources, so they update live, but before the first StockChanged every tile shows 0 and is grayed out."
+        },
+        {
+          "criterion": "No yields in Charm callbacks / no leaks",
+          "score": 5,
+          "note": "The updater is pure, and the only listener comes from `useSignalState`, which cleans up with the scope."
+        },
+        {
+          "criterion": "Correct, in scope, clean",
+          "score": 5,
+          "note": "Changes stay in the named client files plus BlockStock, names are validated against `BlockTypes.ByName`, and all checks pass."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Single Charm signal owned by a module",
+          "score": 5,
+          "note": "BlockStock.luau owns the signal, exposes `getStock`/`hasAny`, and only `onStockChanged` writes it."
+        },
+        {
+          "criterion": "Immutable updates",
+          "score": 5,
+          "note": "The updater clones the stored table, sets one entry, and returns the copy."
+        },
+        {
+          "criterion": "Shared derived values; guard reads Charm",
+          "score": 3,
+          "note": "The guard calls `BlockStock.hasAny`, which reads Charm directly, but the UI keeps its own `selectedCount` and there is no shared computed."
+        },
+        {
+          "criterion": "Vide-tracked bridge",
+          "score": 5,
+          "note": "`useSignalState(BlockStock.getStock)` runs in `app`, and the table is passed down as a source."
+        },
+        {
+          "criterion": "Live updates and initial look",
+          "score": 5,
+          "note": "Everything updates live, and the `number?` type keeps tiles ungrayed and labels blank until counts are known."
+        },
+        {
+          "criterion": "No yields in Charm callbacks / no leaks",
+          "score": 5,
+          "note": "The updater is pure, and the only listener comes from `useSignalState`, which cleans up with the scope."
+        },
+        {
+          "criterion": "Correct, in scope, clean",
+          "score": 4,
+          "note": "All checks pass and the label offset accounts for the panel's padding; incoming block type names aren't validated, and the story files are neutral."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Clean module that owns the stock, with immutable updates and a no-op when nothing changed",
+        "Validates incoming block type names",
+        "Wraps the panel in a container so the label stays out of the list layout"
+      ],
+      "weaknesses": [
+        "Every tile shows 0 and is grayed out until the server's counts arrive",
+        "The selected block type's count is worked out separately in the UI and in the guard"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Handles the unknown state before the first StockChanged well: blank counts and no false gray-out",
+        "Immutable updates in a clean module that owns the stock",
+        "Includes a UI Labs story covering the empty and unknown states"
+      ],
+      "weaknesses": [
+        "The selected block type's count is defined in two places",
+        "Doesn't check incoming block type names against BlockTypes"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

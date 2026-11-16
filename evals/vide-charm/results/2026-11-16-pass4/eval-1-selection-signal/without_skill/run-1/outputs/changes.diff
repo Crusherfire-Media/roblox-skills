@@ -1,0 +1,147 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index 4599f52..26245b7 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -7,8 +7,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
++local VideCharm = require(ReplicatedStorage.Packages.VideCharm)
+ 
+ local create = Vide.create
++local useSignalState = VideCharm.useSignalState
+ 
+ type BlockType = BlockTypes.BlockType
+ 
+@@ -54,18 +56,22 @@ local function tile(props: TileProps): TextButton
+ end
+ 
+ export type BlockPickerProps = {
++	-- Charm signal (or getter reading Charm signals) with the selected block type's name.
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
+ }
+ 
+ local function blockPicker(props: BlockPickerProps): Frame
++	-- Bridge the Charm signal into a Vide source so the tile strokes update reactively.
++	local selected = useSignalState(props.Selected)
++
+ 	local tiles = {}
+ 	for index, blockType in BlockTypes.List do
+ 		tiles[index] = tile({
+ 			BlockType = blockType,
+ 			LayoutOrder = index,
+ 			IsSelected = function()
+-				return props.Selected() == blockType.Name
++				return selected() == blockType.Name
+ 			end,
+ 			Select = function()
+ 				props.Select(blockType.Name)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+index e8d33eb..e1896f4 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+@@ -9,6 +9,7 @@ local UserInputService = game:GetService("UserInputService")
+ local Workspace = game:GetService("Workspace")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Charm = require(ReplicatedStorage.Packages.Charm)
+ 
+ local RAY_LENGTH = 512
+ local NUMBER_KEYS = {
+@@ -21,28 +22,20 @@ local NUMBER_KEYS = {
+ 
+ local BlockPlacer = {}
+ 
+-local selectedName = BlockTypes.List[1].Name
++local getSelectedName, setSelectedName = Charm.signal(BlockTypes.List[1].Name)
+ local isEnabled = true
+ local hasStarted = false
+ local placeBlock: RemoteEvent? = nil
+-local blockTypeChanged = Instance.new("BindableEvent")
+ 
+ --[[
+-	Fires with the new block type's name whenever the selected block type changes.
++	Charm signal holding the selected block type's name. Read it inside a Charm effect (or with
++	VideCharm.useSignalState in UI) to react to changes. Use setBlockType to change it.
+ ]]
+-BlockPlacer.BlockTypeChanged = blockTypeChanged.Event
+-
+-function BlockPlacer.getBlockType(): string
+-	return selectedName
+-end
++BlockPlacer.selectedBlockType = getSelectedName
+ 
+ function BlockPlacer.setBlockType(name: string)
+ 	assert(BlockTypes.ByName[name], `unknown block type {name}`)
+-	if name == selectedName then
+-		return
+-	end
+-	selectedName = name
+-	blockTypeChanged:Fire(name)
++	setSelectedName(name)
+ end
+ 
+ function BlockPlacer.isEnabled(): boolean
+@@ -77,7 +70,7 @@ local function placeAt(screenPosition: Vector2)
+ 	end
+ 
+ 	local cellPosition = result.Position + result.Normal * (BlockTypes.BlockSize / 2)
+-	placeBlock:FireServer(selectedName, cellPosition)
++	placeBlock:FireServer(getSelectedName(), cellPosition)
+ end
+ 
+ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index bcf8d97..25d7434 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -8,22 +8,15 @@ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
+ local mount = Vide.mount
+-local source = Vide.source
+ 
+ local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+ 
+--- Mirrors BlockPlacer's selection so the hotbar can bind to it.
+-local selected = source(BlockPlacer.getBlockType())
+-BlockPlacer.BlockTypeChanged:Connect(function(name: string)
+-	selected(name)
+-end)
+-
+ local function app()
+ 	return create("ScreenGui")({
+ 		Name = "HotbarGui",
+ 
+ 		BlockPicker({
+-			Selected = selected,
++			Selected = BlockPlacer.selectedBlockType,
+ 			Select = BlockPlacer.setBlockType,
+ 		}),
+ 	})
+diff --git a/src/StarterPlayer/StarterPlayerScripts/PlacementPreview.luau b/src/StarterPlayer/StarterPlayerScripts/PlacementPreview.luau
+index dc341d8..a00b63a 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/PlacementPreview.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/PlacementPreview.luau
+@@ -11,6 +11,7 @@ local Workspace = game:GetService("Workspace")
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Charm = require(ReplicatedStorage.Packages.Charm)
+ 
+ local RAY_LENGTH = 512
+ local GHOST_TRANSPARENCY = 0.7
+@@ -79,8 +80,10 @@ function PlacementPreview.start()
+ 	part.Parent = Workspace
+ 	ghost = part
+ 
+-	applyBlockType(BlockPlacer.getBlockType())
+-	BlockPlacer.BlockTypeChanged:Connect(applyBlockType)
++	-- Runs now and again whenever the selected block type changes.
++	Charm.effect(function()
++		applyBlockType(BlockPlacer.selectedBlockType())
++	end)
+ 	RunService.RenderStepped:Connect(follow)
+ end
+ 

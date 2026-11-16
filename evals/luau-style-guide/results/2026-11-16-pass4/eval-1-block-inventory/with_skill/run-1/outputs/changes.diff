@@ -1,0 +1,168 @@
+diff --git a/src/ServerScriptService/BlockInventory.luau b/src/ServerScriptService/BlockInventory.luau
+new file mode 100644
+index 0000000..6268024
+--- /dev/null
++++ b/src/ServerScriptService/BlockInventory.luau
+@@ -0,0 +1,162 @@
++--!strict
++
++local DataStoreService = game:GetService("DataStoreService")
++local Players = game:GetService("Players")
++
++local BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++local DATA_STORE_NAME = "BlockInventory"
++local STARTING_COUNT = 20
++local MAX_COUNT = 99
++
++type BlockType = BlockTypes.BlockType
++type Counts = { [BlockType]: number }
++
++export type TakeFailure = "NotLoaded" | "OutOfBlocks"
++export type ReturnFailure = "NotLoaded" | "AtLimit"
++export type GrantFailure = "NotLoaded"
++
++local countsByPlayer: { [Player]: Counts? } = {}
++
++local function checkBlockType(blockType: BlockType)
++	if not BlockTypes.isBlockType(blockType) then
++		error(`Unknown block type {tostring(blockType)}`)
++	end
++end
++
++local function isValidCount(value: unknown): boolean
++	-- value == value rejects NaN, which passes every range check
++	return typeof(value) == "number" and value == value and value >= 0 and value < math.huge
++end
++
++local function buildCounts(savedData: unknown): Counts
++	local savedCounts = if type(savedData) == "table"
++		then savedData :: { [string]: unknown }
++		else {}
++	local counts: Counts = {}
++	for _, blockType in BlockTypes.Order do
++		local savedCount = savedCounts[blockType]
++		counts[blockType :: BlockType] = if isValidCount(savedCount)
++			then math.floor(savedCount :: number)
++			else STARTING_COUNT
++	end
++	return counts
++end
++
++local function loadSavedDataAsync(player: Player): unknown
++	-- GetAsync throws on DataStore outages and request throttling, and
++	-- GetDataStore throws in Studio when API access is off.
++	local success, result = pcall(function()
++		local dataStore = DataStoreService:GetDataStore(DATA_STORE_NAME)
++		return dataStore:GetAsync(`player_{player.UserId}`)
++	end)
++	if success then
++		return result
++	end
++
++	warn(`Could not load block inventory for {player.Name}: {result}`)
++	return nil
++end
++
++local function onPlayerAdded(player: Player)
++	local savedData = loadSavedDataAsync(player)
++
++	-- The player may have left while the load was in flight.
++	if player.Parent ~= Players then
++		return
++	end
++
++	countsByPlayer[player] = buildCounts(savedData)
++end
++
++local function onPlayerRemoving(player: Player)
++	countsByPlayer[player] = nil
++end
++
++local Module = {}
++
++--[[
++	Returns how many blocks of the type the player holds, or nil while their
++	counts are not loaded (still loading, or already left).
++]]
++function Module:GetCount(player: Player, blockType: BlockType): number?
++	checkBlockType(blockType)
++
++	local counts = countsByPlayer[player]
++	if not counts then
++		return nil
++	end
++
++	return counts[blockType]
++end
++
++--[[
++	Takes one block for a placement. Returns false and the reason when the
++	player has none left or their counts are not loaded.
++]]
++function Module:TakeBlock(player: Player, blockType: BlockType): (boolean, TakeFailure?)
++	checkBlockType(blockType)
++
++	local counts = countsByPlayer[player]
++	if not counts then
++		return false, "NotLoaded"
++	end
++	if counts[blockType] <= 0 then
++		return false, "OutOfBlocks"
++	end
++
++	counts[blockType] -= 1
++	return true, nil
++end
++
++--[[
++	Gives back one block for a removal. Returns false with "AtLimit" when the
++	player already holds MaxCount or more, and adds nothing in that case.
++]]
++function Module:ReturnBlock(player: Player, blockType: BlockType): (boolean, ReturnFailure?)
++	checkBlockType(blockType)
++
++	local counts = countsByPlayer[player]
++	if not counts then
++		return false, "NotLoaded"
++	end
++	if counts[blockType] >= MAX_COUNT then
++		return false, "AtLimit"
++	end
++
++	counts[blockType] += 1
++	return true, nil
++end
++
++--[[
++	Gives blocks from rewards and admin commands. These skip the MaxCount
++	limit. The amount must be a positive whole number.
++]]
++function Module:GrantBlocks(
++	player: Player,
++	blockType: BlockType,
++	amount: number
++): (boolean, GrantFailure?)
++	checkBlockType(blockType)
++	if amount ~= amount or amount < 1 or amount ~= math.floor(amount) or amount == math.huge then
++		error(`Grant amount must be a positive whole number, got {amount}`)
++	end
++
++	local counts = countsByPlayer[player]
++	if not counts then
++		return false, "NotLoaded"
++	end
++
++	counts[blockType] += amount
++	return true, nil
++end
++
++Module.MaxCount = MAX_COUNT
++
++Players.PlayerAdded:Connect(onPlayerAdded)
++Players.PlayerRemoving:Connect(onPlayerRemoving)
++for _, player in Players:GetPlayers() do
++	task.spawn(onPlayerAdded, player)
++end
++
++return Module

@@ -1,0 +1,207 @@
+diff --git a/src/ServerScriptService/Modules/Catalogs/BlockTypes.luau b/src/ServerScriptService/Modules/Catalogs/BlockTypes.luau
+index 7fce00d..16e22d1 100644
+--- a/src/ServerScriptService/Modules/Catalogs/BlockTypes.luau
++++ b/src/ServerScriptService/Modules/Catalogs/BlockTypes.luau
+@@ -8,6 +8,8 @@ export type BlockType = {
+ 	Color: Color3,
+ 	Material: Enum.Material,
+ 	Transparency: number,
++	-- Coins it costs to place one block.
++	Price: number,
+ }
+ 
+ -- Edge length of every block, in studs. Blocks snap to a grid of this size.
+@@ -20,6 +22,7 @@ local LIST: { BlockType } = table.freeze({
+ 		Color = Color3.fromRGB(163, 75, 60),
+ 		Material = Enum.Material.Brick,
+ 		Transparency = 0,
++		Price = 5,
+ 	}),
+ 	table.freeze({
+ 		Name = "Dirt",
+@@ -27,6 +30,7 @@ local LIST: { BlockType } = table.freeze({
+ 		Color = Color3.fromRGB(110, 78, 52),
+ 		Material = Enum.Material.Ground,
+ 		Transparency = 0,
++		Price = 1,
+ 	}),
+ 	table.freeze({
+ 		Name = "Grass",
+@@ -34,6 +38,7 @@ local LIST: { BlockType } = table.freeze({
+ 		Color = Color3.fromRGB(88, 145, 62),
+ 		Material = Enum.Material.Grass,
+ 		Transparency = 0,
++		Price = 2,
+ 	}),
+ 	table.freeze({
+ 		Name = "Window",
+@@ -41,6 +46,7 @@ local LIST: { BlockType } = table.freeze({
+ 		Color = Color3.fromRGB(170, 210, 230),
+ 		Material = Enum.Material.Glass,
+ 		Transparency = 0.6,
++		Price = 8,
+ 	}),
+ 	table.freeze({
+ 		Name = "Wood",
+@@ -48,6 +54,7 @@ local LIST: { BlockType } = table.freeze({
+ 		Color = Color3.fromRGB(150, 110, 70),
+ 		Material = Enum.Material.WoodPlanks,
+ 		Transparency = 0,
++		Price = 3,
+ 	}),
+ })
+ 
+diff --git a/src/ServerScriptService/Modules/Systems/Economy/CurrencySystem/SystemPackage/CurrencyServerService.luau b/src/ServerScriptService/Modules/Systems/Economy/CurrencySystem/SystemPackage/CurrencyServerService.luau
+index 88abaf5..350d5b6 100644
+--- a/src/ServerScriptService/Modules/Systems/Economy/CurrencySystem/SystemPackage/CurrencyServerService.luau
++++ b/src/ServerScriptService/Modules/Systems/Economy/CurrencySystem/SystemPackage/CurrencyServerService.luau
+@@ -1,14 +1,10 @@
+ --[[
+ 	Coins. Each player's coins show in their leaderstats. Players also earn passive income: every
+-	INCOME_INTERVAL seconds, one coin for each block they have placed.
++	INCOME_INTERVAL seconds, the amount the income source set with SetIncomeSource returns.
+ ]]
+ 
+ local Players = game:GetService("Players")
+ 
+-local PlacementServerService = require(
+-	"@game/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService"
+-)
+-
+ local STARTING_COINS = 50
+ -- Seconds between passive income payouts.
+ local INCOME_INTERVAL = 10
+@@ -16,6 +12,7 @@ local INCOME_INTERVAL = 10
+ local CurrencyServerService = {}
+ 
+ local coinValues: { [Player]: IntValue } = {}
++local incomeSource: ((player: Player) -> number)? = nil
+ 
+ local function onPlayerAdded(player: Player)
+ 	local leaderstats = Instance.new("Folder")
+@@ -31,11 +28,21 @@ local function onPlayerAdded(player: Player)
+ end
+ 
+ local function payIncome()
++	if not incomeSource then
++		return
++	end
+ 	for player, coins in coinValues do
+-		coins.Value += PlacementServerService:GetBlockCount(player)
++		coins.Value += incomeSource(player)
+ 	end
+ end
+ 
++--[[
++	Sets the function that returns how many coins a player earns each income payout.
++]]
++function CurrencyServerService:SetIncomeSource(source: (player: Player) -> number)
++	incomeSource = source
++end
++
+ function CurrencyServerService:GetCoins(player: Player): number
+ 	local coins = coinValues[player]
+ 	return if coins then coins.Value else 0
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.luau
+new file mode 100644
+index 0000000..f980f28
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.luau
+@@ -0,0 +1,28 @@
++--!strict
++--[[
++	Charges coins for each block placed, and pays passive income of one coin per placed block.
++]]
++
++local CurrencyServerService = require(
++	"@game/ServerScriptService/Modules/Systems/Economy/CurrencySystem/SystemPackage/CurrencyServerService"
++)
++local PlacementServerService = require("../SystemPackage/PlacementServerService")
++
++local PlacementCurrencyMediator = {}
++
++function PlacementCurrencyMediator:Init()
++	PlacementServerService:SetChargeHandler(function(player, blockType)
++		if CurrencyServerService:TrySpend(player, blockType.Price) then
++			return true, nil
++		end
++		local shortfall = blockType.Price - CurrencyServerService:GetCoins(player)
++		local coinWord = if shortfall == 1 then "coin" else "coins"
++		return false, `You need {shortfall} more {coinWord} to place {blockType.DisplayName}.`
++	end)
++
++	CurrencyServerService:SetIncomeSource(function(player)
++		return PlacementServerService:GetBlockCount(player)
++	end)
++end
++
++return PlacementCurrencyMediator
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementCurrencyMediator.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau
+index a35605d..737380b 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau
+@@ -16,6 +16,8 @@ local MAX_REACH = 64
+ -- Shortest time between two placements by one player, in seconds.
+ local MIN_INTERVAL = 0.1
+ 
++type ChargeHandler = (player: Player, blockType: BlockTypes.BlockType) -> (boolean, string?)
++
+ local PlacementServerService = {}
+ 
+ local blockPlaced = Instance.new("BindableEvent")
+@@ -35,6 +37,7 @@ local blocksFolder: Folder? = nil
+ local lastPlacedAt: { [Player]: number } = {}
+ local occupied: { [Vector3]: boolean } = {}
+ local blockCounts: { [Player]: number } = {}
++local chargeHandler: ChargeHandler? = nil
+ 
+ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+ 	if typeof(blockTypeName) ~= "string" or typeof(position) ~= "Vector3" then
+@@ -70,7 +73,20 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 		return
+ 	end
+ 
++	-- Set before charging so a player who can't afford a block can't spam rejections.
+ 	lastPlacedAt[player] = now
++
++	-- Charge last, once every other check has passed, so a refused request costs nothing.
++	if chargeHandler then
++		local isCharged, reason = chargeHandler(player, blockType)
++		if not isCharged then
++			if reason then
++				placementRejected:Fire(player, reason)
++			end
++			return
++		end
++	end
++
+ 	occupied[cell] = true
+ 	blockCounts[player] = (blockCounts[player] or 0) + 1
+ 
+@@ -94,6 +110,15 @@ function PlacementServerService:GetBlockCount(player: Player): number
+ 	return blockCounts[player] or 0
+ end
+ 
++--[[
++	Sets the function that pays for each placement. It runs after every other check passes and
++	returns whether the player paid; when it returns false the block is not placed, and a reason,
++	if given, fires PlacementRejected. Without a handler, placing is free.
++]]
++function PlacementServerService:SetChargeHandler(handler: ChargeHandler)
++	chargeHandler = handler
++end
++
+ function PlacementServerService:Init()
+ 	local folder = Instance.new("Folder")
+ 	folder.Name = "Blocks"

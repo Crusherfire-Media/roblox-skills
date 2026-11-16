@@ -1,0 +1,114 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both work correctly and pass luau-lsp, selene and StyLua. A's failed disconnect check is a false alarm, because UnbindFromRenderStep tears down just as cleanly. A is slightly more defensive (a _destroyed guard, the check reason, a size inset), but B follows the project's conventions (const services, a Module table, PascalCase methods), which A breaks. With the functional quality about equal, B is the more merge-ready attempt.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "BindToRenderStep runs _update every frame; it raycasts from the mouse excluding {character, self._part}, steps out by Normal*BlockSize/2 before PlacementRules.snap, hides by setting Transparency to 1 on a miss, and tints with BLOCKED_COLOR when PlacementRules.check fails against PlacedBlocks."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "destroy() calls UnbindFromRenderStep(self._bindingName) and self._part:Destroy() behind a _destroyed guard. The failed 'disconnect' check is a false alarm, because unbinding is equivalent."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 4,
+          "note": "A Fields type with typeof(setmetatable({} :: Fields, GhostPreview)), all fields set in the constructor, and the part has CanCollide/CanQuery = false. It does not use the project's convention of naming the class table Module."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "new(blockType: BlockType, options: Options?): GhostPreview; getPlacement returns (boolean, Vector3?, string?) and returns nil when hidden."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "A named Options table with Transparency and RaycastDistance; DEFAULT_TRANSPARENCY and DEFAULT_RAYCAST_DISTANCE are named constants."
+        },
+        {
+          "criterion": "Scope and merge readiness",
+          "score": 4,
+          "note": "One class, nothing out of scope, and lint passes, but it breaks the repo conventions (local services instead of const, class table not named Module)."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "PreRender runs _Update; _RaycastFromMouse excludes the character and the part, steps half a block along the normal before snap, unparents the part on a miss, and tints red when check fails."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "Destroy disconnects _Connection, sets it to nil, and destroys _Part; calling it twice is harmless."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 5,
+          "note": "The inline typeof(setmetatable({...}, Module)) type declares every field, all set in new; the part is non-colliding with CanQuery = false; it follows the Module convention."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "Typed constructor and methods with () returns; GetPlacement returns (boolean, Vector3?)."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "An Options table with named DEFAULT_ constants, plus asserts on the values."
+        },
+        {
+          "criterion": "Scope and merge readiness",
+          "score": 5,
+          "note": "One class at the given path, nothing out of scope, and it passes every check, including the convention checks."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Robust _destroyed guard and an idempotent destroy",
+        "Returns check's reason as an extra value",
+        "Slight size inset avoids z-fighting",
+        "Runs right after the camera at render priority"
+      ],
+      "weaknesses": [
+        "Doesn't follow project conventions (const, Module table)",
+        "lowerCamel method names differ from the repo style"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Matches repo conventions (const, Module, PascalCase)",
+        "Clean helper split (createGhostPart, _RaycastFromMouse)",
+        "Only rebuilds the raycast filter when the character changes"
+      ],
+      "weaknesses": [
+        "No guard against calling SetBlockType after Destroy",
+        "Doesn't check the block type"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

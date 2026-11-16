@@ -1,0 +1,328 @@
+diff --git a/README.md b/README.md
+index 9e549e3..be46ce1 100644
+--- a/README.md
++++ b/README.md
+@@ -11,6 +11,7 @@ A small Roblox game kept as files and synced into Studio with Rojo. The place is
+ | `src/ServerScriptService` | `ServerScriptService` |
+ | `src/ServerScriptService/Tests/Specs` | `ServerScriptService.Tests.Specs` (Jest specs and `jest.config`) |
+ | `src/ReplicatedStorage/Shared` | `ReplicatedStorage.Shared` (code for server and client) |
++| `src/ReplicatedStorage/Rules` | `ReplicatedStorage.Rules` (game rules the server enforces and the client previews) |
+ | `src/StarterPlayer/StarterPlayerScripts` | `StarterPlayer.StarterPlayerScripts` |
+ | `src/StarterGui` | `StarterGui` |
+ | `roblox_packages` (installed by pesde) | `ReplicatedStorage.Packages` |
+diff --git a/default.project.json b/default.project.json
+index 1269977..8742d5b 100644
+--- a/default.project.json
++++ b/default.project.json
+@@ -10,6 +10,9 @@
+       "Shared": {
+         "$path": "src/ReplicatedStorage/Shared"
+       },
++      "Rules": {
++        "$path": "src/ReplicatedStorage/Rules"
++      },
+       "Packages": {
+         "$path": "roblox_packages"
+       }
+diff --git a/docs/placement.md b/docs/placement.md
+index ab8539b..62ec3b6 100644
+--- a/docs/placement.md
++++ b/docs/placement.md
+@@ -1,7 +1,8 @@
+ # Block placement
+ 
+ - `ServerScriptService.BlockPlacement` owns the `PlaceBlock` remote and places the parts.
+-- `ServerScriptService.Placement.PlacementRules` decides whether a placement is allowed. Tune
+-  `MaxReach` and `MaxHeight` in its attributes.
++- `ReplicatedStorage.Rules.BlockRules` decides whether a placement is allowed. It lives in
++  ReplicatedStorage so the client can read the same rules. Tune `MaxReach` and `MaxHeight` in its
++  attributes (`src/ReplicatedStorage/Rules/BlockRules.meta.json`).
+ - `ServerScriptService.ClearBlocks` adds the `/clearblocks` admin command.
+-- Specs: `ServerScriptService.Tests.Specs.Placement.PlacementRules.spec`.
++- Specs: `ServerScriptService.Tests.Specs.Rules.BlockRules.spec`.
+diff --git a/src/ReplicatedStorage/Rules/BlockRules.luau b/src/ReplicatedStorage/Rules/BlockRules.luau
+new file mode 100644
+index 0000000..4ab60c3
+--- /dev/null
++++ b/src/ReplicatedStorage/Rules/BlockRules.luau
+@@ -0,0 +1,60 @@
++--[[
++	Decides whether a block may be placed. MaxReach and MaxHeight are attributes on this
++	ModuleScript so designers can tune them in Studio's Properties window.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++local MAX_REACH: number = script:GetAttribute("MaxReach")
++local MAX_HEIGHT: number = script:GetAttribute("MaxHeight")
++assert(typeof(MAX_REACH) == "number", "BlockRules needs a MaxReach attribute")
++assert(typeof(MAX_HEIGHT) == "number", "BlockRules needs a MaxHeight attribute")
++
++local BlockRules = {}
++
++local function snapAxis(value: number): number
++	local size = BlockTypes.BlockSize
++	return (math.floor(value / size) + 0.5) * size
++end
++
++--[[
++	Returns the center of the grid cell that contains position.
++]]
++function BlockRules.snap(position: Vector3): Vector3
++	return Vector3.new(snapAxis(position.X), snapAxis(position.Y), snapAxis(position.Z))
++end
++
++--[[
++	Checks a placement request. Returns true and the cell's center, or false and a reason for the
++	server log.
++]]
++function BlockRules.validate(
++	blockTypeName: unknown,
++	position: unknown,
++	rootPosition: Vector3?,
++	occupied: { [Vector3]: boolean }
++): (boolean, Vector3 | string)
++	if typeof(blockTypeName) ~= "string" or not BlockTypes.ByName[blockTypeName] then
++		return false, "unknown block type"
++	end
++	if typeof(position) ~= "Vector3" or position ~= position then
++		return false, "bad position"
++	end
++
++	local center = BlockRules.snap(position)
++	if center.Y < 0 or center.Y > MAX_HEIGHT then
++		return false, "out of height range"
++	end
++	if rootPosition == nil or (rootPosition - center).Magnitude > MAX_REACH then
++		return false, "out of reach"
++	end
++	if occupied[center] then
++		return false, "cell is occupied"
++	end
++
++	return true, center
++end
++
++return BlockRules
+diff --git a/src/ReplicatedStorage/Rules/BlockRules.meta.json b/src/ReplicatedStorage/Rules/BlockRules.meta.json
+new file mode 100644
+index 0000000..89c017b
+--- /dev/null
++++ b/src/ReplicatedStorage/Rules/BlockRules.meta.json
+@@ -0,0 +1,6 @@
++{
++	"attributes": {
++		"MaxReach": 24,
++		"MaxHeight": 200
++	}
++}
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index 683fb3a..3283d3e 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -1,13 +1,13 @@
+ --[[
+ 	Places blocks for players. Clients fire PlaceBlock with a block type name and a position;
+-	PlacementRules decides whether the placement is allowed.
++	BlockRules decides whether the placement is allowed.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local Workspace = game:GetService("Workspace")
+ 
++local BlockRules = require(ReplicatedStorage.Rules.BlockRules)
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+-local PlacementRules = require(script.Parent.Placement.PlacementRules)
+ 
+ local placeBlock = Instance.new("RemoteEvent")
+ placeBlock.Name = "PlaceBlock"
+@@ -24,7 +24,7 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 	local rootPart = if character then character:FindFirstChild("HumanoidRootPart") else nil
+ 	local rootPosition = if rootPart and rootPart:IsA("BasePart") then rootPart.Position else nil
+ 
+-	local ok, result = PlacementRules.validate(blockTypeName, position, rootPosition, occupied)
++	local ok, result = BlockRules.validate(blockTypeName, position, rootPosition, occupied)
+ 	if not ok or typeof(result) ~= "Vector3" or typeof(blockTypeName) ~= "string" then
+ 		return
+ 	end
+diff --git a/src/ServerScriptService/ClearBlocks.server.luau b/src/ServerScriptService/ClearBlocks.server.luau
+index 03f2c15..052d48e 100644
+--- a/src/ServerScriptService/ClearBlocks.server.luau
++++ b/src/ServerScriptService/ClearBlocks.server.luau
+@@ -4,10 +4,11 @@
+ ]]
+ 
+ local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local TextChatService = game:GetService("TextChatService")
+ local Workspace = game:GetService("Workspace")
+ 
+-local PlacementRules = require("@game/ServerScriptService/Placement/PlacementRules")
++local BlockRules = require("@game/ReplicatedStorage/Rules/BlockRules")
+ 
+ local REACH_SCALE = 2
+ 
+@@ -28,8 +29,8 @@ command.Triggered:Connect(function(textSource: TextSource)
+ 		return
+ 	end
+ 
+-	local center = PlacementRules.snap(rootPart.Position)
+-	local radius = (script.Parent.Placement.PlacementRules:GetAttribute("MaxReach") :: number)
++	local center = BlockRules.snap(rootPart.Position)
++	local radius = (ReplicatedStorage.Rules.BlockRules:GetAttribute("MaxReach") :: number)
+ 		* REACH_SCALE
+ 	for _, part in blocks:GetChildren() do
+ 		if part:IsA("BasePart") and (part.Position - center).Magnitude <= radius then
+diff --git a/src/ServerScriptService/Placement/PlacementRules.luau b/src/ServerScriptService/Placement/PlacementRules.luau
+deleted file mode 100644
+index 2b515e3..0000000
+--- a/src/ServerScriptService/Placement/PlacementRules.luau
++++ /dev/null
+@@ -1,60 +0,0 @@
+---[[
+-	Decides whether a block may be placed. MaxReach and MaxHeight are attributes on this
+-	ModuleScript so designers can tune them in Studio's Properties window.
+-]]
+-
+-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-
+-local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+-
+-local MAX_REACH: number = script:GetAttribute("MaxReach")
+-local MAX_HEIGHT: number = script:GetAttribute("MaxHeight")
+-assert(typeof(MAX_REACH) == "number", "PlacementRules needs a MaxReach attribute")
+-assert(typeof(MAX_HEIGHT) == "number", "PlacementRules needs a MaxHeight attribute")
+-
+-local PlacementRules = {}
+-
+-local function snapAxis(value: number): number
+-	local size = BlockTypes.BlockSize
+-	return (math.floor(value / size) + 0.5) * size
+-end
+-
+---[[
+-	Returns the center of the grid cell that contains position.
+-]]
+-function PlacementRules.snap(position: Vector3): Vector3
+-	return Vector3.new(snapAxis(position.X), snapAxis(position.Y), snapAxis(position.Z))
+-end
+-
+---[[
+-	Checks a placement request. Returns true and the cell's center, or false and a reason for the
+-	server log.
+-]]
+-function PlacementRules.validate(
+-	blockTypeName: unknown,
+-	position: unknown,
+-	rootPosition: Vector3?,
+-	occupied: { [Vector3]: boolean }
+-): (boolean, Vector3 | string)
+-	if typeof(blockTypeName) ~= "string" or not BlockTypes.ByName[blockTypeName] then
+-		return false, "unknown block type"
+-	end
+-	if typeof(position) ~= "Vector3" or position ~= position then
+-		return false, "bad position"
+-	end
+-
+-	local center = PlacementRules.snap(position)
+-	if center.Y < 0 or center.Y > MAX_HEIGHT then
+-		return false, "out of height range"
+-	end
+-	if rootPosition == nil or (rootPosition - center).Magnitude > MAX_REACH then
+-		return false, "out of reach"
+-	end
+-	if occupied[center] then
+-		return false, "cell is occupied"
+-	end
+-
+-	return true, center
+-end
+-
+-return PlacementRules
+diff --git a/src/ServerScriptService/Placement/PlacementRules.meta.json b/src/ServerScriptService/Placement/PlacementRules.meta.json
+deleted file mode 100644
+index 89c017b..0000000
+--- a/src/ServerScriptService/Placement/PlacementRules.meta.json
++++ /dev/null
+@@ -1,6 +0,0 @@
+-{
+-	"attributes": {
+-		"MaxReach": 24,
+-		"MaxHeight": 200
+-	}
+-}
+diff --git a/src/ServerScriptService/Tests/Specs/Placement/PlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/Placement/PlacementRules.spec.luau
+deleted file mode 100644
+index d95e7fc..0000000
+--- a/src/ServerScriptService/Tests/Specs/Placement/PlacementRules.spec.luau
++++ /dev/null
+@@ -1,30 +0,0 @@
+-local ServerScriptService = game:GetService("ServerScriptService")
+-
+-local JestGlobals = require(ServerScriptService.Tests.Packages.JestGlobals)
+-local describe = JestGlobals.describe
+-local expect = JestGlobals.expect
+-local it = JestGlobals.it
+-
+-local PlacementRules = require(ServerScriptService.Placement.PlacementRules)
+-
+-describe("PlacementRules", function()
+-	it("refuses an unknown block type", function()
+-		local ok = PlacementRules.validate("Lava", Vector3.new(1, 1, 1), Vector3.new(2, 2, 2), {})
+-
+-		expect(ok).toBe(false)
+-	end)
+-
+-	it("refuses a cell beyond the player's reach", function()
+-		local ok = PlacementRules.validate("Brick", Vector3.new(2, 2, 61), Vector3.new(2, 2, 2), {})
+-
+-		expect(ok).toBe(false)
+-	end)
+-
+-	it("accepts a free cell in reach and returns its center", function()
+-		local ok, center =
+-			PlacementRules.validate("Brick", Vector3.new(5, 1, -3), Vector3.new(2, 2, 2), {})
+-
+-		expect(ok).toBe(true)
+-		expect(center).toBe(Vector3.new(6, 2, -2))
+-	end)
+-end)
+diff --git a/src/ServerScriptService/Tests/Specs/Rules/BlockRules.spec.luau b/src/ServerScriptService/Tests/Specs/Rules/BlockRules.spec.luau
+new file mode 100644
+index 0000000..d7398c7
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/Rules/BlockRules.spec.luau
+@@ -0,0 +1,31 @@
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local ServerScriptService = game:GetService("ServerScriptService")
++
++local JestGlobals = require(ServerScriptService.Tests.Packages.JestGlobals)
++local describe = JestGlobals.describe
++local expect = JestGlobals.expect
++local it = JestGlobals.it
++
++local BlockRules = require(ReplicatedStorage.Rules.BlockRules)
++
++describe("BlockRules", function()
++	it("refuses an unknown block type", function()
++		local ok = BlockRules.validate("Lava", Vector3.new(1, 1, 1), Vector3.new(2, 2, 2), {})
++
++		expect(ok).toBe(false)
++	end)
++
++	it("refuses a cell beyond the player's reach", function()
++		local ok = BlockRules.validate("Brick", Vector3.new(2, 2, 61), Vector3.new(2, 2, 2), {})
++
++		expect(ok).toBe(false)
++	end)
++
++	it("accepts a free cell in reach and returns its center", function()
++		local ok, center =
++			BlockRules.validate("Brick", Vector3.new(5, 1, -3), Vector3.new(2, 2, 2), {})
++
++		expect(ok).toBe(true)
++		expect(center).toBe(Vector3.new(6, 2, -2))
++	end)
++end)

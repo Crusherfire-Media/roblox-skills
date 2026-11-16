@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Builds the eval sandbox: a minimal Rojo + pesde game on a Baseplate, with Vide
-// installed, Roblox type definitions, and a sourcemap, committed to a fresh git repo
-// so the runner can diff each trial against it. Trials copy this folder.
+// Builds the eval sandbox: a minimal Rojo + pesde game on a Baseplate, with the
+// packages the skills use (Vide, Charm, vide-charm, CharmSync, UI Labs utilities,
+// Module Loader, Jest Roblox), Roblox type definitions, and a sourcemap, committed to a
+// fresh git repo so the runner can diff each trial against it. Trials copy this folder.
 //
 //   node evals/harness/build-sandbox.mjs <dest> [--defs <globalTypes.d.luau>] [--force]
 //
@@ -20,6 +21,18 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATE = path.join(HERE, "sandbox-template");
 const REPO_ROOT = path.resolve(HERE, "..", "..");
 export const DEFINITIONS_URL = "https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau";
+// The link modules pesde writes for each alias, relative to the sandbox root. The sandbox
+// README tells trials to require these paths, so a missing one fails the build.
+export const PACKAGE_LINKS = [
+	"roblox_packages/Vide.luau",
+	"roblox_packages/Charm.luau",
+	"roblox_packages/VideCharm.luau",
+	"roblox_packages/CharmSync.luau",
+	"roblox_packages/UILabs.luau",
+	"roblox_packages/ModuleLoader.luau",
+	"test_packages/roblox_packages/Jest.luau",
+	"test_packages/roblox_packages/JestGlobals.luau",
+];
 
 function step(label, cmd, args, cwd) {
 	process.stdout.write(`- ${label}\n`);
@@ -60,6 +73,8 @@ async function main() {
 	process.stdout.write(`Building sandbox in ${dest}\n`);
 	cpSync(TEMPLATE, dest, { recursive: true });
 	step("pesde install", "pesde", ["install"], dest);
+	const missing = PACKAGE_LINKS.filter((link) => !existsSync(path.join(dest, link)));
+	if (missing.length > 0) throw new Error(`pesde install left out package links: ${missing.join(", ")}`);
 
 	const defs = path.join(dest, "globalTypes.d.luau");
 	if (flags.defs) copyFileSync(path.resolve(flags.defs), defs);

@@ -1,0 +1,242 @@
+diff --git a/tools/profiling/memory.luau b/tools/profiling/memory.luau
+new file mode 100644
+index 0000000..64e1eeb
+--- /dev/null
++++ b/tools/profiling/memory.luau
+@@ -0,0 +1,236 @@
++--!strict
++-- Usage: lute memory.luau <file.gprx> [topN]
++-- Values are in each counter's own units, as the MicroProfiler reports them.
++-- Frames print as id/abs: the LibMP frame ID, then the absolute ID that the
++-- MicroProfiler UI shows.
++local process = require("@lute/process")
++local LibMP = require("./LibMP")
++
++local DEFAULT_TOP_N = 10
++
++type Series = {
++	Values: { [number]: number },
++	FrameIds: { number },
++}
++
++type Row = {
++	Path: string,
++	First: number,
++	Last: number,
++	Peak: number,
++	PeakFrame: number,
++	Growth: number,
++	IsSummed: boolean,
++}
++
++local path = process.args[2]
++local topN = tonumber(process.args[3]) or DEFAULT_TOP_N
++
++local session = LibMP.Session.OpenFromFile(path)
++if not session then
++	error(`could not open {path}`)
++end
++
++local minId: number = session:GetFrameIdMin()
++local maxId: number = session:GetFrameIdMax()
++print(("frames %d..%d (%d)"):format(minId, maxId, maxId - minId + 1))
++
++local memoryId: number = session:FindCounterId("/memory")
++if memoryId == 0 then
++	memoryId = session:FindCounterId("memory")
++end
++if memoryId == 0 then
++	session:Dispose()
++	error(`no memory counter in {path}`)
++end
++
++local descs: { [number]: any } = {}
++local absIds: { [number]: string } = {}
++
++local function getDesc(counterId: number): any
++	local desc = descs[counterId]
++	if not desc then
++		desc = session:FetchCounterDesc(counterId)
++		descs[counterId] = desc
++	end
++	return desc
++end
++
++local function getChildren(counterId: number): { number }
++	local children = {}
++	local childId: number = getDesc(counterId).FirstChild
++	while childId ~= 0 do
++		table.insert(children, childId)
++		childId = getDesc(childId).Sibling
++	end
++	return children
++end
++
++local function getPath(counterId: number): string
++	local parts = {}
++	local id = counterId
++	while id ~= 0 do
++		local desc = getDesc(id)
++		table.insert(parts, 1, desc.CounterName)
++		id = desc.Parent
++	end
++	return table.concat(parts, "/")
++end
++
++local function formatFrame(frameId: number): string
++	local absId = absIds[frameId]
++	if absId == nil then
++		absId = "?"
++		if frameId >= minId and frameId <= maxId then
++			local desc = session:FetchFrameDesc(frameId)
++			if desc then
++				absId = tostring(desc.FrameAbsoluteId)
++			end
++		end
++		absIds[frameId] = absId
++	end
++	return ("%d/%s"):format(frameId, absId)
++end
++
++local function readSeries(counterId: number): Series?
++	local samples = session:FetchCounterSamples(counterId)
++	if #samples == 0 then
++		return nil
++	end
++	local series: Series = { Values = {}, FrameIds = {} }
++	for _, sample in samples do
++		local frameId: number = sample.FrameId
++		if series.Values[frameId] == nil then
++			table.insert(series.FrameIds, frameId)
++		end
++		series.Values[frameId] = sample.Value
++	end
++	table.sort(series.FrameIds)
++	return series
++end
++
++local function collectLeaves(counterId: number, leaves: { number }): { number }
++	local children = getChildren(counterId)
++	if #children == 0 then
++		table.insert(leaves, counterId)
++	end
++	for _, childId in children do
++		collectLeaves(childId, leaves)
++	end
++	return leaves
++end
++
++-- A container counter has no samples of its own, so its value is the sum of
++-- its leaves in each frame.
++local function readSummedSeries(counterId: number): Series?
++	local summed: Series = { Values = {}, FrameIds = {} }
++	for _, leafId in collectLeaves(counterId, {}) do
++		local leaf = readSeries(leafId)
++		if leaf then
++			for _, frameId in leaf.FrameIds do
++				local total = summed.Values[frameId]
++				if total == nil then
++					total = 0
++					table.insert(summed.FrameIds, frameId)
++				end
++				summed.Values[frameId] = total + leaf.Values[frameId]
++			end
++		end
++	end
++	if #summed.FrameIds == 0 then
++		return nil
++	end
++	table.sort(summed.FrameIds)
++	return summed
++end
++
++local function summarize(counterId: number, series: Series, isSummed: boolean): Row
++	local values = series.Values
++	local firstFrame = series.FrameIds[1]
++	local lastFrame = series.FrameIds[#series.FrameIds]
++	local peakFrame = firstFrame
++	for _, frameId in series.FrameIds do
++		if values[frameId] > values[peakFrame] then
++			peakFrame = frameId
++		end
++	end
++	return {
++		Path = getPath(counterId),
++		First = values[firstFrame],
++		Last = values[lastFrame],
++		Peak = values[peakFrame],
++		PeakFrame = peakFrame,
++		Growth = values[lastFrame] - values[firstFrame],
++		IsSummed = isSummed,
++	}
++end
++
++local function byGrowth(a: Row, b: Row): boolean
++	return a.Growth > b.Growth
++end
++
++local subsystems: { Row } = {}
++for _, childId in getChildren(memoryId) do
++	local series = readSeries(childId)
++	if series then
++		table.insert(subsystems, summarize(childId, series, false))
++	else
++		local summed = readSummedSeries(childId)
++		if summed then
++			table.insert(subsystems, summarize(childId, summed, true))
++		end
++	end
++end
++table.sort(subsystems, byGrowth)
++
++print(("\nmemory subsystems by growth (%d):"):format(#subsystems))
++print(
++	("  %-32s %14s %14s %14s %14s  %s"):format(
++		"subsystem",
++		"first",
++		"last",
++		"peak",
++		"growth",
++		"peak frame"
++	)
++)
++for _, row in subsystems do
++	print(
++		("  %-32s %14.2f %14.2f %14.2f %+14.2f  %s%s"):format(
++			row.Path,
++			row.First,
++			row.Last,
++			row.Peak,
++			row.Growth,
++			formatFrame(row.PeakFrame),
++			if row.IsSummed then "  (sum of leaves)" else ""
++		)
++	)
++end
++
++local leaves: { Row } = {}
++for _, leafId in collectLeaves(memoryId, {}) do
++	local series = readSeries(leafId)
++	if series then
++		table.insert(leaves, summarize(leafId, series, false))
++	end
++end
++table.sort(leaves, byGrowth)
++
++local shownCount = math.min(topN, #leaves)
++print(("\ntop %d counters under memory by growth (of %d):"):format(shownCount, #leaves))
++for i = 1, shownCount do
++	local row = leaves[i]
++	print(
++		("  %+14.2f  %s  (first %.2f, last %.2f, peak %.2f at %s)"):format(
++			row.Growth,
++			row.Path,
++			row.First,
++			row.Last,
++			row.Peak,
++			formatFrame(row.PeakFrame)
++		)
++	)
++end
++
++session:Dispose()

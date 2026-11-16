@@ -76,6 +76,29 @@ export function fillTemplate(template, values) {
 	return template.replace(/\{\{([A-Z_]+)\}\}/g, (match, key) => (key in values ? values[key] : match));
 }
 
+// Appends a task's own `judge_facts` (library ground truth, checked against the package source)
+// under the global facts from judge-facts.md, one bullet per fact.
+export function renderFacts(globalFacts, taskFacts) {
+	const facts = Array.isArray(taskFacts) ? taskFacts.filter((f) => typeof f === "string" && f.trim()) : [];
+	if (facts.length === 0) return globalFacts;
+	const bullets = facts.map((f) => `- ${f.trim().replace(/\s*\n\s*/g, " ")}`).join("\n");
+	return `${globalFacts}\n\nFacts for this task, verified against the same source:\n\n${bullets}`;
+}
+
+// Builds one pair's judge prompt. Filling every placeholder in one pass keeps text inside a
+// value (a diff, a fact) from being read as a placeholder.
+export function buildJudgePrompt(template, globalFacts, meta, a, b) {
+	return fillTemplate(template, {
+		FACTS: renderFacts(globalFacts, meta.judge_facts),
+		TASK_PROMPT: meta.prompt,
+		RUBRIC: meta.rubric.map((c, i) => `${i + 1}. ${c}`).join("\n"),
+		CHECKS_A: a.checks,
+		OUTPUT_A: a.diff,
+		CHECKS_B: b.checks,
+		OUTPUT_B: b.diff,
+	});
+}
+
 // Picks which run is A with a cryptographic coin flip.
 export function assignLabels(withRun, baseRun, flip = randomInt(2)) {
 	return flip === 0 ? { A: withRun, B: baseRun } : { A: baseRun, B: withRun };
@@ -95,20 +118,13 @@ function runsOf(evalDir, config) {
 	return runs;
 }
 
-async function judgePair({ evalDir, meta, pairIndex, withRun, baseRun, opts, template }) {
+async function judgePair({ evalDir, meta, pairIndex, withRun, baseRun, opts, template, facts }) {
 	const pairDir = path.join(evalDir, "judge", `pair-${pairIndex}`);
 	mkdirSync(pairDir, { recursive: true });
 	const labels = assignLabels(withRun, baseRun);
 	const a = attemptText(labels.A.dir);
 	const b = attemptText(labels.B.dir);
-	const prompt = fillTemplate(template, {
-		TASK_PROMPT: meta.prompt,
-		RUBRIC: meta.rubric.map((c, i) => `${i + 1}. ${c}`).join("\n"),
-		CHECKS_A: a.checks,
-		OUTPUT_A: a.diff,
-		CHECKS_B: b.checks,
-		OUTPUT_B: b.diff,
-	});
+	const prompt = buildJudgePrompt(template, facts, meta, a, b);
 	writeFileSync(path.join(pairDir, "prompt.md"), prompt);
 	writeJson(path.join(pairDir, "mapping.json"), { A: labels.A.id, B: labels.B.id });
 
@@ -218,9 +234,10 @@ async function main() {
 	const maxPairs = intFlag(flags.pairs, "pairs", { max: 100, fallback: 100 });
 	const concurrency = intFlag(flags.concurrency, "concurrency", { max: 20, fallback: 5 });
 	// Library facts are verified against the sandbox's package source, so the judge doesn't
-	// mark code wrong for relying on a library default it doesn't know.
+	// mark code wrong for relying on a library default it doesn't know. Each task's own
+	// judge_facts are appended per pair (see buildJudgePrompt).
 	const facts = readFileSync(path.join(HERE, "judge-facts.md"), "utf8").trim();
-	const template = readFileSync(path.join(HERE, "judge-prompt.md"), "utf8").replace("{{FACTS}}", () => facts);
+	const template = readFileSync(path.join(HERE, "judge-prompt.md"), "utf8");
 
 	const jobs = [];
 	const owners = [];
@@ -239,7 +256,7 @@ async function main() {
 				continue;
 			}
 			owners.push(name);
-			jobs.push(() => judgePair({ evalDir, meta, pairIndex: n, withRun: w, baseRun: b, opts, template }));
+			jobs.push(() => judgePair({ evalDir, meta, pairIndex: n, withRun: w, baseRun: b, opts, template, facts }));
 		}
 	}
 	process.stdout.write(`Judging ${jobs.length} pairs, ${concurrency} at a time\n`);

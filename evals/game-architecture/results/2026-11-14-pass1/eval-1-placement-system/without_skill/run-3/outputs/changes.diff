@@ -1,0 +1,633 @@
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/Implementation/init.meta.json b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/Implementation/init.meta.json
+new file mode 100644
+index 0000000..1aecc9c
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/Implementation/init.meta.json
+@@ -0,0 +1,5 @@
++{
++  "properties": {
++    "IconTint": [1, 0, 0]
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementClientService.luau b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementClientService.luau
+new file mode 100644
+index 0000000..3b206aa
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementClientService.luau
+@@ -0,0 +1,152 @@
++--[[
++	Block placement input for the local player. Number keys 1 to 5 pick the block type, in the
++	order of the BlockTypes catalog. A click, or a tap on a phone, on the baseplate or a block asks
++	the server to place the selected type in the cell next to that spot. The server decides
++	whether it happens.
++]]
++
++local UserInputService = game:GetService("UserInputService")
++local Workspace = game:GetService("Workspace")
++
++local BlockTypes = require("../../../../Catalogs/BlockTypes")
++local Grid = require("../../../../Utilities/Grid")
++local PlacementNetwork = require("./PlacementNetwork")
++
++-- How far the click ray reaches, in studs. Longer than the server's reach on purpose, so the
++-- server can tell the player when a spot is too far away.
++local RAY_LENGTH = 1024
++-- A touch counts as a tap, not a camera drag, when it is this short and moves this little.
++local TAP_MAX_SECONDS = 0.3
++local TAP_MAX_MOVEMENT = 10
++
++local HOTBAR_KEYS: { Enum.KeyCode } = {
++	Enum.KeyCode.One,
++	Enum.KeyCode.Two,
++	Enum.KeyCode.Three,
++	Enum.KeyCode.Four,
++	Enum.KeyCode.Five,
++}
++
++local BLOCK_SIZE = BlockTypes.BlockSize
++
++type TouchStart = {
++	Time: number,
++	Position: Vector2,
++}
++
++local PlacementClientService = {}
++
++local selectedIndex = 1
++local touchStarts: { [InputObject]: TouchStart } = {}
++local raycastParams = RaycastParams.new()
++raycastParams.FilterType = Enum.RaycastFilterType.Include
++
++--[[
++	Rounds a surface normal to the nearest world axis. Blocks are never rotated, so their face
++	normals already are axes; this only removes floating point noise.
++]]
++local function toAxis(normal: Vector3): Vector3
++	local x, y, z = math.abs(normal.X), math.abs(normal.Y), math.abs(normal.Z)
++	if x >= y and x >= z then
++		return Vector3.new(math.sign(normal.X), 0, 0)
++	elseif y >= z then
++		return Vector3.new(0, math.sign(normal.Y), 0)
++	end
++	return Vector3.new(0, 0, math.sign(normal.Z))
++end
++
++--[[
++	The center of the cell next to the baseplate or block under the screen position, or nil when
++	the position isn't over either.
++]]
++local function getTargetCell(screenPosition: Vector2): Vector3?
++	local camera = Workspace.CurrentCamera
++	if not camera then
++		return nil
++	end
++
++	local blocksFolder = Workspace:FindFirstChild(PlacementNetwork.BlocksFolderName)
++	local filter: { Instance } = {}
++	local baseplate = Workspace:FindFirstChild("Baseplate")
++	if baseplate then
++		table.insert(filter, baseplate)
++	end
++	if blocksFolder then
++		table.insert(filter, blocksFolder)
++	end
++	if #filter == 0 then
++		return nil
++	end
++	raycastParams.FilterDescendantsInstances = filter
++
++	local ray = camera:ScreenPointToRay(screenPosition.X, screenPosition.Y)
++	local result = Workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, raycastParams)
++	if not result then
++		return nil
++	end
++
++	local hit = result.Instance
++	if blocksFolder and hit:IsDescendantOf(blocksFolder) then
++		-- Step one whole cell out of the face that was clicked.
++		return Grid.snapToCell(hit.Position + toAxis(result.Normal) * BLOCK_SIZE, BLOCK_SIZE)
++	end
++	-- Step half a cell off the surface so the point lands inside the neighboring cell.
++	return Grid.snapToCell(result.Position + result.Normal * (BLOCK_SIZE / 2), BLOCK_SIZE)
++end
++
++local function requestPlacement(screenPosition: Vector2)
++	local blockType = BlockTypes.List[selectedIndex]
++	if not blockType then
++		return
++	end
++	local cellCenter = getTargetCell(screenPosition)
++	if not cellCenter then
++		return
++	end
++	PlacementNetwork.PlaceBlock:FireServer(blockType.Name, cellCenter)
++end
++
++local function onInputBegan(input: InputObject, gameProcessed: boolean)
++	if gameProcessed then
++		return
++	end
++
++	if input.UserInputType == Enum.UserInputType.Keyboard then
++		local index = table.find(HOTBAR_KEYS, input.KeyCode)
++		if index and BlockTypes.List[index] then
++			selectedIndex = index
++		end
++	elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
++		requestPlacement(Vector2.new(input.Position.X, input.Position.Y))
++	elseif input.UserInputType == Enum.UserInputType.Touch then
++		touchStarts[input] = {
++			Time = os.clock(),
++			Position = Vector2.new(input.Position.X, input.Position.Y),
++		}
++	end
++end
++
++local function onInputEnded(input: InputObject)
++	if input.UserInputType ~= Enum.UserInputType.Touch then
++		return
++	end
++	local touchStart = touchStarts[input]
++	if not touchStart then
++		return
++	end
++	touchStarts[input] = nil
++
++	local position = Vector2.new(input.Position.X, input.Position.Y)
++	local isTap = os.clock() - touchStart.Time <= TAP_MAX_SECONDS
++		and (position - touchStart.Position).Magnitude <= TAP_MAX_MOVEMENT
++	if isTap then
++		requestPlacement(position)
++	end
++end
++
++function PlacementClientService:Start()
++	UserInputService.InputBegan:Connect(onInputBegan)
++	UserInputService.InputEnded:Connect(onInputEnded)
++end
++
++return PlacementClientService
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementClientService.meta.json b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementClientService.meta.json
+new file mode 100644
+index 0000000..966c67f
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementClientService.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "ClientOnly": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementNetwork/PlaceBlock.model.json b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementNetwork/PlaceBlock.model.json
+new file mode 100644
+index 0000000..dc005af
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementNetwork/PlaceBlock.model.json
+@@ -0,0 +1,3 @@
++{
++  "className": "RemoteEvent"
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementNetwork/init.luau b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementNetwork/init.luau
+new file mode 100644
+index 0000000..7e536c5
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementNetwork/init.luau
+@@ -0,0 +1,14 @@
++--[[
++	Remotes and shared names for block placement. Each remote is a child of this module, so it
++	reaches clients together with the module.
++]]
++
++local PlacementNetwork = {
++	-- Client to server: (blockTypeName: string, cellCenter: Vector3)
++	PlaceBlock = script:WaitForChild("PlaceBlock") :: RemoteEvent,
++
++	-- Name of the Workspace folder that holds every placed block.
++	BlocksFolderName = "Blocks",
++}
++
++return table.freeze(PlacementNetwork)
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementRules.luau b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementRules.luau
+new file mode 100644
+index 0000000..02d9c26
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementRules.luau
+@@ -0,0 +1,100 @@
++--[[
++	The checks the server runs on placement requests. Plain functions with no side effects, so specs
++	can cover them without a running game.
++]]
++
++-- The area blocks may be placed in. Cell centers outside it are rejected.
++export type WorldBounds = {
++	MinX: number,
++	MaxX: number,
++	MinZ: number,
++	MaxZ: number,
++	-- Top of the baseplate. No part of a block may sit below it.
++	FloorY: number,
++	-- Highest allowed cell center.
++	MaxY: number,
++}
++
++-- Slack for floating point error when comparing positions, in studs.
++local EPSILON = 1e-3
++
++local PlacementRules = {}
++
++local function isFiniteNumber(value: number): boolean
++	-- NaN is the only value not equal to itself.
++	return value == value and value > -math.huge and value < math.huge
++end
++
++--[[
++	Whether the value is a Vector3 with finite components inside the world bounds. Use it on
++	anything a client sends before treating it as a position.
++]]
++function PlacementRules.isSanePosition(value: unknown, bounds: WorldBounds): boolean
++	if typeof(value) ~= "Vector3" then
++		return false
++	end
++	local position = value :: Vector3
++	if
++		not isFiniteNumber(position.X)
++		or not isFiniteNumber(position.Y)
++		or not isFiniteNumber(position.Z)
++	then
++		return false
++	end
++	return position.X >= bounds.MinX
++		and position.X <= bounds.MaxX
++		and position.Z >= bounds.MinZ
++		and position.Z <= bounds.MaxZ
++		and position.Y <= bounds.MaxY
++end
++
++--[[
++	Whether a block centered on the cell would sit entirely on or above the floor.
++]]
++function PlacementRules.isAboveFloor(cellCenter: Vector3, cellSize: number, floorY: number): boolean
++	return cellCenter.Y - cellSize / 2 >= floorY - EPSILON
++end
++
++function PlacementRules.isWithinReach(
++	origin: Vector3,
++	cellCenter: Vector3,
++	maxDistance: number
++): boolean
++	return (cellCenter - origin).Magnitude <= maxDistance
++end
++
++--[[
++	A string that names the cell containing the position, for keying occupancy maps.
++]]
++function PlacementRules.getCellKey(position: Vector3, cellSize: number): string
++	return string.format(
++		"%d,%d,%d",
++		math.floor(position.X / cellSize),
++		math.floor(position.Y / cellSize),
++		math.floor(position.Z / cellSize)
++	)
++end
++
++--[[
++	Sliding-window rate limit. <code>history</code> holds the times of recent allowed requests and
++	is updated in place. Returns true and records <code>now</code> when fewer than
++	<code>limit</code> requests were allowed in the last <code>window</code> seconds; otherwise
++	returns false and records nothing.
++]]
++function PlacementRules.tryRecordRequest(
++	history: { number },
++	now: number,
++	limit: number,
++	window: number
++): boolean
++	if #history >= limit and now - history[#history - limit + 1] < window then
++		return false
++	end
++	table.insert(history, now)
++	while #history > limit do
++		table.remove(history, 1)
++	end
++	return true
++end
++
++return table.freeze(PlacementRules)
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementRules.meta.json b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementRules.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementRules.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementServerService.luau b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementServerService.luau
+new file mode 100644
+index 0000000..ef9196f
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementServerService.luau
+@@ -0,0 +1,172 @@
++--[[
++	Places blocks for players. Clients only ask; every request is checked here before a block
++	appears.
++]]
++
++local Players = game:GetService("Players")
++local Workspace = game:GetService("Workspace")
++
++local BlockTypes = require("../../../../Catalogs/BlockTypes")
++local Grid = require("../../../../Utilities/Grid")
++local NotificationServerService =
++	require("../../../Core/NotificationSystem/SystemPackage/NotificationServerService")
++local PlacementNetwork = require("./PlacementNetwork")
++local PlacementRules = require("./PlacementRules")
++
++-- Farthest a cell center may be from the player's character, in studs.
++local MAX_REACH = 64
++local MAX_PLACEMENTS_PER_SECOND = 10
++-- Highest a block may go above the baseplate, in studs.
++local MAX_BUILD_HEIGHT = 1024
++-- At most one "too far" message per player per this many seconds, so a spammed click
++-- doesn't flood the screen.
++local TOO_FAR_NOTIFY_COOLDOWN = 1
++local TOO_FAR_MESSAGE = "That spot is too far away. Move closer to place a block."
++
++local BLOCK_SIZE = BlockTypes.BlockSize
++
++local PlacementServerService = {}
++
++local blocksFolder: Folder
++local worldBounds: PlacementRules.WorldBounds
++-- Cell key -> the block filling that cell.
++local occupiedCells: { [string]: BasePart } = {}
++local requestHistories: { [Player]: { number } } = {}
++local tooFarNotifyHistories: { [Player]: { number } } = {}
++
++local function getWorldBounds(baseplate: BasePart): PlacementRules.WorldBounds
++	local center = baseplate.Position
++	local halfSize = baseplate.Size / 2
++	local floorY = center.Y + halfSize.Y
++	return table.freeze({
++		MinX = center.X - halfSize.X,
++		MaxX = center.X + halfSize.X,
++		MinZ = center.Z - halfSize.Z,
++		MaxZ = center.Z + halfSize.Z,
++		FloorY = floorY,
++		MaxY = floorY + MAX_BUILD_HEIGHT,
++	})
++end
++
++local function getHistory(histories: { [Player]: { number } }, player: Player): { number }
++	local history = histories[player]
++	if not history then
++		history = {}
++		histories[player] = history
++	end
++	return history
++end
++
++local function getRootPart(player: Player): BasePart?
++	local character = player.Character
++	if not character then
++		return nil
++	end
++	local rootPart = character:FindFirstChild("HumanoidRootPart")
++	if rootPart and rootPart:IsA("BasePart") then
++		return rootPart
++	end
++	return nil
++end
++
++local function notifyTooFar(player: Player)
++	local history = getHistory(tooFarNotifyHistories, player)
++	if PlacementRules.tryRecordRequest(history, os.clock(), 1, TOO_FAR_NOTIFY_COOLDOWN) then
++		NotificationServerService:Notify(player, TOO_FAR_MESSAGE)
++	end
++end
++
++local function createBlock(
++	blockType: BlockTypes.BlockType,
++	cellCenter: Vector3,
++	cellKey: string,
++	player: Player
++)
++	local block = Instance.new("Part")
++	block.Name = blockType.Name
++	block.Anchored = true
++	block.Size = Vector3.one * BLOCK_SIZE
++	block.CFrame = CFrame.new(cellCenter)
++	block.Color = blockType.Color
++	block.Material = blockType.Material
++	block.Transparency = blockType.Transparency
++	block.TopSurface = Enum.SurfaceType.Smooth
++	block.BottomSurface = Enum.SurfaceType.Smooth
++	block:SetAttribute("BlockType", blockType.Name)
++	block:SetAttribute("PlacedByUserId", player.UserId)
++
++	occupiedCells[cellKey] = block
++	-- Free the cell if anything removes the block later.
++	block.Destroying:Once(function()
++		if occupiedCells[cellKey] == block then
++			occupiedCells[cellKey] = nil
++		end
++	end)
++	block.Parent = blocksFolder
++end
++
++local function onPlaceBlockRequested(player: Player, blockTypeName: unknown, position: unknown)
++	-- Every request counts toward the limit, valid or not, so spam stays cheap to reject.
++	local history = getHistory(requestHistories, player)
++	if not PlacementRules.tryRecordRequest(history, os.clock(), MAX_PLACEMENTS_PER_SECOND, 1) then
++		return
++	end
++
++	if typeof(blockTypeName) ~= "string" then
++		return
++	end
++	local blockType = BlockTypes.ByName[blockTypeName]
++	if not blockType then
++		return
++	end
++
++	if not PlacementRules.isSanePosition(position, worldBounds) then
++		return
++	end
++	-- Never trust the client's cell math; snap to the cell the position falls in.
++	local cellCenter = Grid.snapToCell(position :: Vector3, BLOCK_SIZE)
++	if not PlacementRules.isAboveFloor(cellCenter, BLOCK_SIZE, worldBounds.FloorY) then
++		return
++	end
++
++	local rootPart = getRootPart(player)
++	if not rootPart then
++		return
++	end
++	if not PlacementRules.isWithinReach(rootPart.Position, cellCenter, MAX_REACH) then
++		notifyTooFar(player)
++		return
++	end
++
++	local cellKey = PlacementRules.getCellKey(cellCenter, BLOCK_SIZE)
++	if occupiedCells[cellKey] then
++		return
++	end
++
++	createBlock(blockType, cellCenter, cellKey, player)
++end
++
++function PlacementServerService:Init()
++	local baseplate = Workspace:FindFirstChild("Baseplate")
++	assert(
++		baseplate and baseplate:IsA("BasePart"),
++		"PlacementServerService needs Workspace.Baseplate"
++	)
++	worldBounds = getWorldBounds(baseplate)
++
++	local folder = Instance.new("Folder")
++	folder.Name = PlacementNetwork.BlocksFolderName
++	folder.Parent = Workspace
++	blocksFolder = folder
++end
++
++function PlacementServerService:Start()
++	PlacementNetwork.PlaceBlock.OnServerEvent:Connect(onPlaceBlockRequested)
++
++	Players.PlayerRemoving:Connect(function(player)
++		requestHistories[player] = nil
++		tooFarNotifyHistories[player] = nil
++	end)
++end
++
++return PlacementServerService
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementServerService.meta.json b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementServerService.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementServerService.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/init.meta.json b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/init.meta.json
+new file mode 100644
+index 0000000..3117f37
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Building/PlacementSystem/SystemPackage/init.meta.json
+@@ -0,0 +1,5 @@
++{
++  "properties": {
++    "IconTint": [0, 0.6666666865348816, 1]
++  }
++}
+diff --git a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+new file mode 100644
+index 0000000..4f590aa
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+@@ -0,0 +1,101 @@
++local JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
++local PlacementRules =
++	require("../../Modules/Systems/Building/PlacementSystem/SystemPackage/PlacementRules")
++
++local describe = JestGlobals.describe
++local expect = JestGlobals.expect
++local it = JestGlobals.it
++
++local BOUNDS: PlacementRules.WorldBounds = {
++	MinX = -1024,
++	MaxX = 1024,
++	MinZ = -1024,
++	MaxZ = 1024,
++	FloorY = 0,
++	MaxY = 1024,
++}
++
++describe("isSanePosition", function()
++	it("accepts a finite position inside the bounds", function()
++		expect(PlacementRules.isSanePosition(Vector3.new(2, 2, 2), BOUNDS)).toBe(true)
++	end)
++
++	it("rejects values that aren't Vector3s", function()
++		expect(PlacementRules.isSanePosition(nil, BOUNDS)).toBe(false)
++		expect(PlacementRules.isSanePosition("2,2,2", BOUNDS)).toBe(false)
++		expect(PlacementRules.isSanePosition({ X = 2, Y = 2, Z = 2 }, BOUNDS)).toBe(false)
++		expect(PlacementRules.isSanePosition(CFrame.new(2, 2, 2), BOUNDS)).toBe(false)
++	end)
++
++	it("rejects NaN and infinite components", function()
++		expect(PlacementRules.isSanePosition(Vector3.new(0 / 0, 2, 2), BOUNDS)).toBe(false)
++		expect(PlacementRules.isSanePosition(Vector3.new(2, math.huge, 2), BOUNDS)).toBe(false)
++		expect(PlacementRules.isSanePosition(Vector3.new(2, 2, -math.huge), BOUNDS)).toBe(false)
++	end)
++
++	it("rejects positions outside the bounds", function()
++		expect(PlacementRules.isSanePosition(Vector3.new(2000, 2, 2), BOUNDS)).toBe(false)
++		expect(PlacementRules.isSanePosition(Vector3.new(2, 2, -2000), BOUNDS)).toBe(false)
++		expect(PlacementRules.isSanePosition(Vector3.new(2, 5000, 2), BOUNDS)).toBe(false)
++	end)
++end)
++
++describe("isAboveFloor", function()
++	it("accepts a cell resting on the floor", function()
++		expect(PlacementRules.isAboveFloor(Vector3.new(2, 2, 2), 4, 0)).toBe(true)
++	end)
++
++	it("rejects a cell that dips below the floor", function()
++		expect(PlacementRules.isAboveFloor(Vector3.new(2, -2, 2), 4, 0)).toBe(false)
++	end)
++end)
++
++describe("isWithinReach", function()
++	it("accepts exactly the maximum distance", function()
++		expect(PlacementRules.isWithinReach(Vector3.zero, Vector3.new(64, 0, 0), 64)).toBe(true)
++	end)
++
++	it("rejects anything farther", function()
++		expect(PlacementRules.isWithinReach(Vector3.zero, Vector3.new(64.1, 0, 0), 64)).toBe(false)
++	end)
++end)
++
++describe("getCellKey", function()
++	it("gives every point in a cell the same key", function()
++		local key = PlacementRules.getCellKey(Vector3.new(2, 2, 2), 4)
++		expect(PlacementRules.getCellKey(Vector3.new(0.1, 3.9, 1), 4)).toBe(key)
++	end)
++
++	it("gives neighboring cells different keys, including across the origin", function()
++		expect(PlacementRules.getCellKey(Vector3.new(-2, 2, 2), 4)).never.toBe(
++			PlacementRules.getCellKey(Vector3.new(2, 2, 2), 4)
++		)
++	end)
++end)
++
++describe("tryRecordRequest", function()
++	it("allows up to the limit within the window, then refuses", function()
++		local history = {}
++		for i = 1, 10 do
++			expect(PlacementRules.tryRecordRequest(history, i * 0.01, 10, 1)).toBe(true)
++		end
++		expect(PlacementRules.tryRecordRequest(history, 0.5, 10, 1)).toBe(false)
++	end)
++
++	it("allows again once the oldest request leaves the window", function()
++		local history = {}
++		PlacementRules.tryRecordRequest(history, 0, 2, 1)
++		PlacementRules.tryRecordRequest(history, 0.5, 2, 1)
++		expect(PlacementRules.tryRecordRequest(history, 0.9, 2, 1)).toBe(false)
++		-- The request at 0 has left the window; the one at 0.5 has not.
++		expect(PlacementRules.tryRecordRequest(history, 1.1, 2, 1)).toBe(true)
++		expect(PlacementRules.tryRecordRequest(history, 1.2, 2, 1)).toBe(false)
++	end)
++
++	it("does not record refused requests", function()
++		local history = {}
++		PlacementRules.tryRecordRequest(history, 0, 1, 1)
++		expect(PlacementRules.tryRecordRequest(history, 0.5, 1, 1)).toBe(false)
++		expect(#history).toBe(1)
++	end)
++end)

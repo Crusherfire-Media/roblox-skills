@@ -1,0 +1,47 @@
+{
+  "id": 2,
+  "name": "block-stock",
+  "skill": "vide-charm",
+  "prompt": "Players now get a limited stock of each block type. The server side is done: BlockPlacement.server.luau gives everyone 20 of each and fires the StockChanged remote (in ReplicatedStorage) with (blockTypeName, count) whenever one of the player's counts changes, including once per block type when they join. Nothing on the client uses it yet.\n\nOn the client, keep the stock in Charm, like the selected block type in BlockPlacer already is. Then:\n- show each block type's count on its hotbar tile, and gray out a tile when its count is 0;\n- show \"<n> left\" for the selected block type just above the hotbar;\n- make BlockPlacer stop asking the server to place a block type the player has none of.\n\nThe client code is in src/StarterPlayer/StarterPlayerScripts (BlockPlacer.luau, BlockPicker.luau, Main.client.luau). Add a module there for the stock if you need one.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/block-stock/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/block-stock/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/block-stock/BlockPicker.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau" },
+    { "from": "fixtures/block-stock/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "any_file_matches",
+      "dir": "src/StarterPlayer",
+      "ext": ".luau",
+      "pattern": "StockChanged",
+      "text": "Client code listens to the StockChanged remote"
+    },
+    {
+      "type": "file_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau",
+      "pattern": "[Ss]tock",
+      "text": "BlockPlacer consults the stock before placing"
+    }
+  ],
+  "rubric": [
+    "The client's stock lives in one Charm signal in a module that owns it: other code reads it through a getter, and only that module writes it, from the StockChanged handler.",
+    "Each StockChanged update builds a new table (copy, change one entry, set) instead of changing the stored table in place and setting it again. In-place changes error in Studio, where Charm freezes stored tables, and notify nobody in a live game.",
+    "Values both game code and UI need, such as the selected block type's count or whether it can be placed, are defined once (for example a `Charm.computed` or a getter in the owning module over both signals), and BlockPlacer's guard reads Charm directly rather than through Vide.",
+    "The UI reads stock through a Vide-tracked bridge created inside the mounted Vide scope (vide-charm's `useSignalState`, with a selector per tile or the whole table passed down as a source), never by calling a Charm getter inside a Vide binding, which would show the first value forever.",
+    "Tile counts, the grayed-out state at 0, and the \"<n> left\" label all update live, both when stock changes and when the selection changes (number keys or tile clicks), and look reasonable before the first StockChanged arrives.",
+    "No yields inside Charm callbacks (computed getters, updater functions, listeners), and no Charm effect or listener created in a component is left running after the UI's scope is destroyed.",
+    "Correct and in scope: selection, placement, and the server keep working, the changes stay in the client files named in the prompt plus any new stock module, the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files, such as a preview story or a spec, count neither for nor against."
+  ],
+  "judge_facts": [
+    "Charm 0.11.1 (charm/src/init.luau): `flags.strict` and `flags.frozen` both default to `RunService:IsStudio()`. With `frozen` on, every table stored in a signal is deep-frozen (tables with a metatable are skipped), so changing it in place errors.",
+    "Charm 0.11.1 (charm/src/init.luau): a signal setter takes a value or an updater function and does nothing when the new value `==` the pending one (or a custom `equals` matches). So changing a stored table in place and setting the same table again notifies nobody.",
+    "Charm 0.11.1 (charm/src/init.luau): `listen`/`subscribe` wrap a getter that is not itself a signal or computed in `computed`, which reports a change only when `old ~= new`. `computed` recomputes lazily after a signal it read changes.",
+    "Vide 0.4.1 (vide/src/source.luau) registers the running Vide scope only when a Vide source is read. A Charm 0.11.1 getter (charm/src/init.luau, signalGetter) registers only with Charm's own running effect or computed. So reading a Charm getter inside a Vide binding never makes that binding rerun.",
+    "vide-charm 0.4.1 (vide-charm/src/init.luau): `useSignalState(getter)` is `Vide.source(getter())` plus `Vide.cleanup(Charm.listen(getter, state))`; it must run inside a Vide scope (Vide's `cleanup` errors otherwise), and a plain-function getter acts as a selector.",
+    "Charm 0.11.1 (charm/src/init.luau): in strict mode (Studio by default) a yield inside an effect, computed getter, updater function, or `listen` callback errors with \"Attempted to yield in an effect or scope\"."
+  ],
+  "timeout_minutes": 25
+}

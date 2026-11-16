@@ -1,0 +1,206 @@
+diff --git a/docs/perf/block-catalog.md b/docs/perf/block-catalog.md
+new file mode 100644
+index 0000000..2e59f53
+--- /dev/null
++++ b/docs/perf/block-catalog.md
+@@ -0,0 +1,56 @@
++# Block catalog: CanvasGroup count
++
++## Problem
++
++With the catalog open, PlayerGui held 41 CanvasGroups: one for the panel and one per card. Each
++CanvasGroup renders its subtree into its own texture. Phones at low graphics quality have a small
++budget for these textures, and when it runs out, CanvasGroups flicker or draw blank. Most of the 41
++were idle: the cards only needed one to clip the hover shine, and the panel only needed one while
++fading.
++
++## What changed (`src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau`)
++
++- **Cards are plain `Frame`s.** The shine is now a card-sized `Shine` frame with the same
++  `UICorner` as the card. A `UIGradient` draws the stripe on it: transparent, then a band
++  `SHINE_WIDTH` wide, then transparent, rotated `SHINE_ANGLE` (20°). Hovering animates the
++  gradient's `Offset` (same `sweep` spring and range as before) and the frame's transparency (same
++  `shine` spring). The `UICorner` clips the stripe to the rounded corners, so no CanvasGroup is
++  needed. `Shine` is hidden (`Visible = false`) when it isn't shining.
++- **The panel only uses a CanvasGroup while it fades.** `BlockCatalog` is now a transparent
++  `Frame`. Its content lives in a `Panel` frame. While the fade spring is anywhere below 1 (opening
++  or closing), `Panel` sits inside a `Fade` CanvasGroup that does the `GroupTransparency` fade. Once
++  the fade settles fully open, `Panel` moves directly under `BlockCatalog` and `Fade` is detached
++  (`Parent = nil`). When closing starts, it goes back into `Fade`. Vide's spring settles to exactly 1,
++  so the switch happens once, at the end of the fade-in.
++
++Result: **0 CanvasGroups while the catalog is open and idle**, and 1 during the 0.25 s fade
++(was 41 the whole time).
++
++## How to check
++
++1. Play in Studio and open the catalog (C or the Catalog button).
++2. After the fade-in, run this in the command bar (client side):
++   ```lua
++   local n = 0
++   for _, d in game.Players.LocalPlayer.PlayerGui:GetDescendants() do
++   	if d:IsA("CanvasGroup") then n += 1 end
++   end
++   print(n)
++   ```
++   Expect `0` (was `41`). If you run it during a fade, expect `1`.
++3. In the Explorer, `PlayerGui > CatalogGui > BlockCatalog > Panel` should be a direct child once
++   the panel is open. While it fades, it sits under `BlockCatalog > Fade`.
++4. Visual check: open and close a few times and confirm the fade looks the same. Hover a few cards,
++   including the ones at the scroll edges, and confirm the shine sweeps left to right, leans the same
++   way, and is clipped to the rounded corners.
++5. On device: set Graphics Quality to 1 on a phone (or use Studio's device emulator with low
++   quality). Open the catalog, scroll through every card, and confirm none flicker or draw blank.
++
++## Known differences to watch for
++
++- The stripe used to be a separate rotated frame. Now it's a rotated gradient, and Roblox works out
++  gradient rotation over the card's bounds. On a 140×72 card, the lean and width can look slightly
++  different from the old stripe. If so, tune `SHINE_ANGLE` or `SHINE_WIDTH`.
++- When the fade-in finishes, the panel switches from the CanvasGroup's texture to drawing directly.
++  On low quality, CanvasGroups can render at reduced resolution, so text may get slightly *sharper*
++  at that moment.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau b/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
+index f07bd2d..d8c8d4b 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
+@@ -9,7 +9,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local cleanup = Vide.cleanup
+ local create = Vide.create
++local effect = Vide.effect
+ local source = Vide.source
+ local spring = Vide.spring
+ 
+@@ -24,6 +26,12 @@ local CARD_GAP = 8
+ local CARD_RADIUS = 10
+ local SWATCH_SIZE = 48
+ local SHINE_WIDTH = 28
++-- How far the shine stripe leans from vertical, in degrees.
++local SHINE_ANGLE = 20
++-- Half the stripe's horizontal width as a fraction of the card width. The gradient runs across
++-- the card, so a stripe SHINE_WIDTH pixels wide at SHINE_ANGLE covers SHINE_WIDTH / cos(angle)
++-- pixels horizontally.
++local SHINE_HALF_BAND = SHINE_WIDTH / math.cos(math.rad(SHINE_ANGLE)) / 2 / CARD_SIZE.X
+ -- How long the panel takes to fade in or out, in seconds.
+ local FADE_SECONDS = 0.25
+ -- How long the shine takes to sweep across a card, in seconds.
+@@ -56,7 +64,10 @@ local function card(
+ 		return if isHovered() then 1 else -1
+ 	end, SWEEP_SECONDS)
+ 
+-	return create("CanvasGroup")({
++	-- The card is a plain Frame, not a CanvasGroup. The shine is a card-sized overlay with the
++	-- same UICorner, and a UIGradient draws the stripe on it. The rounded corners clip the stripe,
++	-- so no per-card render texture is needed.
++	return create("Frame")({
+ 		Name = `{blockType.Name}{shapeName}`,
+ 		LayoutOrder = layoutOrder,
+ 		BackgroundColor3 = CARD_COLOR,
+@@ -113,30 +124,35 @@ local function card(
+ 		}),
+ 		create("Frame")({
+ 			Name = "Shine",
+-			AnchorPoint = Vector2.new(0.5, 0.5),
+-			Position = function()
+-				return UDim2.fromScale(0.5 + sweep() * 0.75, 0.5)
+-			end,
+-			Size = UDim2.new(0, SHINE_WIDTH, 2, 0),
+-			Rotation = 20,
++			Size = UDim2.fromScale(1, 1),
+ 			BackgroundColor3 = SHINE_COLOR,
+ 			BackgroundTransparency = function()
+ 				return 1 - shine() * 0.5
+ 			end,
++			Visible = function()
++				return shine() > 0
++			end,
+ 			ZIndex = 2,
+ 
++			create("UICorner")({ CornerRadius = UDim.new(0, CARD_RADIUS) }),
+ 			create("UIGradient")({
++				Rotation = SHINE_ANGLE,
+ 				Transparency = NumberSequence.new({
+ 					NumberSequenceKeypoint.new(0, 1),
++					NumberSequenceKeypoint.new(0.5 - SHINE_HALF_BAND, 1),
+ 					NumberSequenceKeypoint.new(0.5, 0),
++					NumberSequenceKeypoint.new(0.5 + SHINE_HALF_BAND, 1),
+ 					NumberSequenceKeypoint.new(1, 1),
+ 				}),
++				Offset = function()
++					return Vector2.new(sweep() * 0.75, 0)
++				end,
+ 			}),
+ 		}),
+ 	})
+ end
+ 
+-local function blockCatalog(props: BlockCatalogProps): CanvasGroup
++local function blockCatalog(props: BlockCatalogProps): Frame
+ 	-- 0 is hidden; 1 is fully shown.
+ 	local fade = spring(function(): number
+ 		return if props.Present() then 1 else 0
+@@ -150,15 +166,10 @@ local function blockCatalog(props: BlockCatalogProps): CanvasGroup
+ 		end
+ 	end
+ 
+-	return create("CanvasGroup")({
+-		Name = "BlockCatalog",
+-		AnchorPoint = Vector2.new(0.5, 0.5),
+-		Position = UDim2.fromScale(0.5, 0.5),
+-		Size = UDim2.fromOffset(PANEL_SIZE.X, PANEL_SIZE.Y),
++	local panel = create("Frame")({
++		Name = "Panel",
++		Size = UDim2.fromScale(1, 1),
+ 		BackgroundColor3 = PANEL_COLOR,
+-		GroupTransparency = function()
+-			return 1 - fade()
+-		end,
+ 
+ 		create("UICorner")({ CornerRadius = UDim.new(0, 14) }),
+ 		create("UIPadding")({
+@@ -196,6 +207,42 @@ local function blockCatalog(props: BlockCatalogProps): CanvasGroup
+ 			cards,
+ 		}),
+ 	})
++
++	-- A CanvasGroup re-renders its whole subtree into a texture, so it's only worth having while
++	-- the panel is actually fading. Once the fade settles fully open, the panel moves straight
++	-- under the root and the CanvasGroup is detached. Fully shown looks the same either way.
++	local fader = create("CanvasGroup")({
++		Name = "Fade",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundTransparency = 1,
++		GroupTransparency = function()
++			return 1 - fade()
++		end,
++	})
++
++	local root = create("Frame")({
++		Name = "BlockCatalog",
++		AnchorPoint = Vector2.new(0.5, 0.5),
++		Position = UDim2.fromScale(0.5, 0.5),
++		Size = UDim2.fromOffset(PANEL_SIZE.X, PANEL_SIZE.Y),
++		BackgroundTransparency = 1,
++	})
++
++	effect(function()
++		if fade() == 1 then
++			panel.Parent = root
++			fader.Parent = nil
++		else
++			fader.Parent = root
++			panel.Parent = fader
++		end
++	end)
++
++	cleanup(function()
++		fader:Destroy()
++	end)
++
++	return root
+ end
+ 
+ return {

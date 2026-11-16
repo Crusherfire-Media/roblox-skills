@@ -1,0 +1,707 @@
+diff --git a/docs/perf/ghost-network.md b/docs/perf/ghost-network.md
+new file mode 100644
+index 0000000..402cc46
+--- /dev/null
++++ b/docs/perf/ghost-network.md
+@@ -0,0 +1,127 @@
++# Ghost preview network traffic
++
++Covers `GhostPreview.server.luau`, `GhostPreview.client.luau` and `Shared/GhostProtocol.luau`.
++Block placement (`PlaceBlock`, `BlockPlacer`, `BlockPlacement.server.luau`) is unchanged.
++
++## What changed
++
++| | Before | After |
++|---|---|---|
++| Client sends | `MoveGhost(name, cell)` every `RenderStepped`, even when nothing changed or placing is off (`nil, nil`) | `MoveGhost(state)` only when the cell or block type changes, at most 20 times a second |
++| Payload | a string and a `Vector3` | a 7-byte buffer: block type index (u8) and grid cell (3 × i16) |
++| Server does | moves a replicated ghost `Part` per message, which Roblox replicates to every client | keeps the latest state per player; every 1/20 s sends the ones that changed to all clients in **one** batched `GhostUpdates` event (15 bytes per ghost) |
++| Your own ghost | the server's part, so it lags your cursor by a full round trip | drawn locally every frame, so no network delay |
++| Other ghosts | jump cell to cell whenever a property update arrives | client parts that glide toward the latest cell (exponential smoothing, 40 ms time constant) |
++| Late joiners | see parts already in Workspace | call `GetGhosts` once to get every current ghost |
++
++## Assumptions
++
++Roblox doesn't publish its exact wire format, so these are round numbers. The conclusions hold
++across a wide range of values because the big change is in message *counts*.
++
++- **H ≈ 20 bytes**: overhead per remote event call (remote reference, framing, packet headers
++  shared across calls).
++- Argument sizes: a short string ≈ 2 + length bytes, a `Vector3` ≈ 13 bytes, a buffer ≈ 2 + length
++  bytes, `nil` ≈ 1 byte.
++- **R ≈ 25 bytes**: one replicated `CFrame` change on an anchored part (instance reference,
++  property id, position, compressed rotation). Setting a property to the value it already has
++  sends nothing, so before the change the server→client cost only came from *cell changes*, not
++  from every message.
++- **C** = how many times a second a builder's cursor moves into a different cell. Slow aiming is
++  0–5; sweeping across the ground or turning the camera is 15–30+. It is capped by frame rate.
++- **N** = players, **F** = client frame rate.
++
++## Per-message sizes
++
++- Before, client → server: H + (2 + 5 for `"Brick"`) + 13 ≈ **40 B** (≈ 22 B for `nil, nil`).
++- Before, server → each client: R ≈ **25 B** per cell change per builder.
++- After, client → server: H + 2 + 7 ≈ **29 B**.
++- After, server → each client: H + ~4 (buffer length + u16 count) + 15 × D ≈ **24 + 15·D B**, where
++  D is how many ghosts changed during that 1/20 s.
++
++## Formulas
++
++| | Before | After |
++|---|---|---|
++| Upload per player | F × 40 B/s, all the time | min(C, 20) × 29 B/s, 0 when idle |
++| Messages into server | N × F per second | Σ min(C, 20) ≤ 20·N per second |
++| Download per player | Σ over builders of C × 25 B/s | ≤ 20 × (24 + 15·D) B/s, 0 when no ghost changes |
++
++## Scenario 1: the playtest (12 players, 4 building at C ≈ 15, average 144 FPS)
++
++**Before**
++
++- Upload per player: 144 × 40 = **5,760 B/s ≈ 5.8 KB/s** (46 kbit/s), all 12 players, including the
++  8 who aren't building, because the loop fires every frame no matter what.
++- Into the server: 12 × 144 = **1,728 messages/s**, 1,728 × 40 ≈ **69 KB/s**, each one running the
++  handler and writing four part properties.
++- Download per player: 4 × 15 × 25 = **1.5 KB/s** across 60 property updates/s.
++
++**After**
++
++- Upload per builder: 15 × 29 = **435 B/s**; the 8 others send **0**.
++- Into the server: 4 × 15 = **60 messages/s**, ≈ **1.7 KB/s**.
++- Download per player: 60 changes/s spread over 20 batches gives D ≈ 3, so
++  20 × (24 + 45) ≈ **1.4 KB/s** across **20** messages/s.
++
++## Scenario 2: worst case (12 players all sweeping at C ≈ 30, 240 FPS)
++
++**Before**
++
++- Upload per player: 240 × 40 = **9.6 KB/s** (77 kbit/s).
++- Into the server: 12 × 240 = **2,880 messages/s**, ≈ **115 KB/s**.
++- Download per player: 12 × 30 × 25 = **9 KB/s**, 360 property updates/s.
++
++**After**
++
++- Upload per player: 20 × 29 = **580 B/s** (sends are capped at 20/s).
++- Into the server: 12 × 20 = **240 messages/s**, ≈ **7 KB/s**.
++- Download per player: 20 × (24 + 12 × 15) = **4.1 KB/s**, 20 messages/s.
++
++## Scenario 3: everyone in the game, nobody moving their cursor between cells
++
++- Before: still N × F messages a second, about 1,728/s at 12 players and 144 FPS.
++- After: **0**.
++
++## Summary
++
++| 12 players | Before (S1 / S2) | After (S1 / S2) |
++|---|---|---|
++| Upload per player | 5.8 / 9.6 KB/s | 0–0.44 / 0.58 KB/s |
++| Messages into server | 1,728 / 2,880 per s | 60 / 240 per s |
++| Bytes into server | 69 / 115 KB/s | 1.7 / 7 KB/s |
++| Download per player | 1.5 / 9 KB/s | 1.4 / 4.1 KB/s |
++| Messages to each player | 60 / 360 per s | 20 / 20 per s |
++
++Server inbound load drops by roughly 12–30×, and client upload by 13–17× while building (to zero
++otherwise). Download goes down less in the light case. It already only cost cell changes, but it
++now has a hard ceiling of 20 messages a second however many people build, and it grows by 15 B
++per extra active builder per batch. At 24 players all sweeping it would be about
++20 × (24 + 360) ≈ 7.7 KB/s.
++
++Why the ping went to 300–400 ms: the most likely cause is the per-frame upload. Remote events
++are reliable and ordered, so at 144–240 events a second each client's outgoing queue and the
++server's ~2,000–3,000 handler calls a second delay everything that shares those channels,
++character movement included. Ghosts jumped because replicated property updates for an anchored
++part arrive in uneven bursts and nothing smooths them. Both causes are gone now. These figures are
++estimates. Check them with the network stats in the Developer Console (F9) on a real server with
++12 players.
++
++## What players will notice
++
++- **Your own ghost is snappier.** It follows the cursor on the same frame instead of a round trip
++  later.
++- **Other players' ghosts glide instead of teleporting.** They slide between cells over ~100 ms
++  rather than snapping, so a ghost briefly sits between two cells while it moves.
++- **Other players' ghosts trail a little further behind.** Added delay on top of normal latency:
++  up to 50 ms waiting for the client's send slot, up to 50 ms for the server's batch, and ~40 ms of
++  smoothing, so 50–150 ms in total. In the old setup the ping spikes caused far more delay than
++  this, but on a quiet server the new one is slightly behind.
++- **Fast sweeps skip cells.** When a builder crosses more than 20 cells a second, others see the
++  ghost glide straight toward the latest cell instead of touching every one in between. Jumps of
++  more than 48 studs snap instead of gliding.
++- **Ghosts no longer exist on the server.** `Workspace.Ghosts` is now a client-only folder, so the
++  server view in Studio doesn't show ghosts and server code can't read them. Nothing in the
++  project did.
++- **Very far cells aren't shared.** Cells more than about ±131,000 studs from the origin show for
++  their builder but are sent as hidden (the i16 grid limit). The baseplate is 2,048 studs wide.
+diff --git a/src/ReplicatedStorage/Shared/GhostProtocol.luau b/src/ReplicatedStorage/Shared/GhostProtocol.luau
+new file mode 100644
+index 0000000..250678d
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/GhostProtocol.luau
+@@ -0,0 +1,139 @@
++--[[
++	Wire format and rates for ghost previews, shared by the server and client ghost scripts.
++
++	A ghost state is a 7-byte buffer: the block type's index in BlockTypes.List (u8, 0 means
++	hidden), then the cell's grid coordinates as three i16s. Grid coordinate k is the cell whose
++	centre is k * BlockSize + BlockSize / 2 on that axis, which covers about +-131,000 studs.
++
++	A batch is a u16 count followed by that many entries of UserId (f64) + ghost state.
++]]
++
++local BlockTypes = require(script.Parent.BlockTypes)
++
++local BLOCK_SIZE = BlockTypes.BlockSize
++local STATE_SIZE = 7
++local HEADER_SIZE = 2
++local ENTRY_SIZE = 8 + STATE_SIZE
++local MAX_BATCH_COUNT = 65535
++local GRID_MIN = -32768
++local GRID_MAX = 32767
++
++local indexByName: { [string]: number } = {}
++for index, blockType in BlockTypes.List do
++	indexByName[blockType.Name] = index
++end
++
++export type BatchEntry = {
++	userId: number,
++	state: buffer,
++}
++
++local GhostProtocol = {
++	-- Shortest time between two ghost updates from one client, in seconds.
++	SEND_INTERVAL = 1 / 20,
++	-- How often the server forwards the ghost updates it has collected, in seconds.
++	BROADCAST_INTERVAL = 1 / 20,
++	STATE_SIZE = STATE_SIZE,
++}
++
++local function toGrid(value: number): number
++	return math.round((value - BLOCK_SIZE / 2) / BLOCK_SIZE)
++end
++
++local function fromGrid(k: number): number
++	return k * BLOCK_SIZE + BLOCK_SIZE / 2
++end
++
++local function inGridRange(k: number): boolean
++	return k >= GRID_MIN and k <= GRID_MAX
++end
++
++--[[
++	Encodes a ghost state. Pass nil for blockTypeName or cell to hide the ghost. Cells too far out
++	to fit the format are encoded as hidden.
++]]
++function GhostProtocol.encodeState(blockTypeName: string?, cell: Vector3?): buffer
++	local state = buffer.create(STATE_SIZE) -- zero-filled, which reads as hidden
++	local typeIndex = if blockTypeName then indexByName[blockTypeName] else nil
++	if not typeIndex or not cell then
++		return state
++	end
++
++	local x, y, z = toGrid(cell.X), toGrid(cell.Y), toGrid(cell.Z)
++	if not (inGridRange(x) and inGridRange(y) and inGridRange(z)) then
++		return state
++	end
++
++	buffer.writeu8(state, 0, typeIndex)
++	buffer.writei16(state, 1, x)
++	buffer.writei16(state, 3, y)
++	buffer.writei16(state, 5, z)
++	return state
++end
++
++--[[
++	Reads the ghost state at offset. Returns nil, nil if the ghost is hidden.
++]]
++function GhostProtocol.decodeState(data: buffer, offset: number?): (BlockTypes.BlockType?, Vector3?)
++	local at = offset or 0
++	local blockType = BlockTypes.List[buffer.readu8(data, at)]
++	if not blockType then
++		return nil, nil
++	end
++	local cell = Vector3.new(
++		fromGrid(buffer.readi16(data, at + 1)),
++		fromGrid(buffer.readi16(data, at + 3)),
++		fromGrid(buffer.readi16(data, at + 5))
++	)
++	return blockType, cell
++end
++
++--[[
++	Whether a value sent by a client is a well-formed ghost state.
++]]
++function GhostProtocol.isValidState(value: unknown): boolean
++	if typeof(value) ~= "buffer" or buffer.len(value) ~= STATE_SIZE then
++		return false
++	end
++	return buffer.readu8(value, 0) <= #BlockTypes.List
++end
++
++function GhostProtocol.encodeBatch(entries: { BatchEntry }): buffer
++	local count = math.min(#entries, MAX_BATCH_COUNT)
++	local data = buffer.create(HEADER_SIZE + count * ENTRY_SIZE)
++	buffer.writeu16(data, 0, count)
++	for i = 1, count do
++		local entry = entries[i]
++		local offset = HEADER_SIZE + (i - 1) * ENTRY_SIZE
++		buffer.writef64(data, offset, entry.userId)
++		buffer.copy(data, offset + 8, entry.state, 0, STATE_SIZE)
++	end
++	return data
++end
++
++--[[
++	Calls callback with each entry of a batch. Does nothing if data isn't a well-formed batch.
++]]
++function GhostProtocol.forEachInBatch(
++	data: unknown,
++	callback: (
++		userId: number,
++		blockType: BlockTypes.BlockType?,
++		cell: Vector3?
++	) -> ()
++)
++	if typeof(data) ~= "buffer" or buffer.len(data) < HEADER_SIZE then
++		return
++	end
++	local count = buffer.readu16(data, 0)
++	if buffer.len(data) ~= HEADER_SIZE + count * ENTRY_SIZE then
++		return
++	end
++	for i = 1, count do
++		local offset = HEADER_SIZE + (i - 1) * ENTRY_SIZE
++		local blockType, cell = GhostProtocol.decodeState(data, offset + 8)
++		callback(buffer.readf64(data, offset), blockType, cell)
++	end
++end
++
++return table.freeze(GhostProtocol)
+diff --git a/src/ServerScriptService/GhostPreview.server.luau b/src/ServerScriptService/GhostPreview.server.luau
+index 26d8a7e..c23cf84 100644
+--- a/src/ServerScriptService/GhostPreview.server.luau
++++ b/src/ServerScriptService/GhostPreview.server.luau
+@@ -1,74 +1,81 @@
+ --[[
+ 	Ghost previews: every player sees a see-through copy of the block each builder is about to
+-	place, in the cell under that builder's mouse. Clients report their cursor cell through
+-	MoveGhost; the server keeps one ghost part per player in Workspace.Ghosts.
++	place, in the cell under that builder's mouse.
++
++	The server doesn't own any ghost parts. Clients send MoveGhost (a GhostProtocol state buffer)
++	only when their cursor cell or block type changes, at most every SEND_INTERVAL. The server keeps
++	the latest state per player and, every BROADCAST_INTERVAL, sends all states that changed since
++	the last broadcast to every client in one GhostUpdates batch. Clients draw and smooth the
++	ghosts themselves. GetGhosts returns every current state, for clients that just joined.
+ ]]
+ 
+ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-local Workspace = game:GetService("Workspace")
+-
+-local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local RunService = game:GetService("RunService")
+ 
+-local GHOST_TRANSPARENCY = 0.6
++local GhostProtocol = require(ReplicatedStorage.Shared.GhostProtocol)
+ 
+ local moveGhost = Instance.new("RemoteEvent")
+ moveGhost.Name = "MoveGhost"
+ moveGhost.Parent = ReplicatedStorage
+ 
+-local ghostsFolder = Instance.new("Folder")
+-ghostsFolder.Name = "Ghosts"
+-ghostsFolder.Parent = Workspace
++local ghostUpdates = Instance.new("RemoteEvent")
++ghostUpdates.Name = "GhostUpdates"
++ghostUpdates.Parent = ReplicatedStorage
+ 
+-local ghosts: { [Player]: Part } = {}
++local getGhosts = Instance.new("RemoteFunction")
++getGhosts.Name = "GetGhosts"
++getGhosts.Parent = ReplicatedStorage
+ 
+-local function getGhost(player: Player): Part
+-	local ghost = ghosts[player]
+-	if ghost then
+-		return ghost
++local states: { [Player]: buffer } = {}
++local changed: { [Player]: true } = {}
++
++moveGhost.OnServerEvent:Connect(function(player: Player, state: unknown)
++	if not GhostProtocol.isValidState(state) then
++		return
+ 	end
++	-- Later messages overwrite earlier ones, so a client sending too fast only costs its own upload.
++	states[player] = state :: buffer
++	changed[player] = true
++end)
+ 
+-	ghost = Instance.new("Part")
+-	ghost.Name = player.Name
+-	ghost.Anchored = true
+-	ghost.CanCollide = false
+-	ghost.CanQuery = false
+-	ghost.CanTouch = false
+-	ghost.CastShadow = false
+-	ghost.Size = Vector3.one * BlockTypes.BlockSize
+-	ghost.Parent = ghostsFolder
+-	ghosts[player] = ghost
+-	return ghost
++getGhosts.OnServerInvoke = function(requester: Player): buffer
++	local entries: { GhostProtocol.BatchEntry } = {}
++	for player, state in states do
++		if player ~= requester then
++			table.insert(entries, { userId = player.UserId, state = state })
++		end
++	end
++	return GhostProtocol.encodeBatch(entries)
+ end
+ 
+-local function onMoveGhost(player: Player, blockTypeName: unknown, cellPosition: unknown)
+-	local ghost = getGhost(player)
+-
+-	-- The client sends nil when its mouse isn't over anything it could build on.
+-	if cellPosition == nil then
+-		ghost.Transparency = 1
++local sinceBroadcast = 0
++RunService.Heartbeat:Connect(function(deltaTime: number)
++	sinceBroadcast += deltaTime
++	if sinceBroadcast < GhostProtocol.BROADCAST_INTERVAL then
+ 		return
+ 	end
+-	if typeof(blockTypeName) ~= "string" or typeof(cellPosition) ~= "Vector3" then
++	sinceBroadcast = 0
++
++	if next(changed) == nil then
+ 		return
+ 	end
+-	local blockType = BlockTypes.ByName[blockTypeName]
+-	if not blockType then
+-		return
++	local entries: { GhostProtocol.BatchEntry } = {}
++	for player in changed do
++		local state = states[player]
++		if state then
++			table.insert(entries, { userId = player.UserId, state = state })
++		end
+ 	end
++	table.clear(changed)
+ 
+-	ghost.CFrame = CFrame.new(cellPosition)
+-	ghost.Color = blockType.Color
+-	ghost.Material = blockType.Material
+-	ghost.Transparency = GHOST_TRANSPARENCY
+-end
+-
+-moveGhost.OnServerEvent:Connect(onMoveGhost)
++	if #entries > 0 then
++		ghostUpdates:FireAllClients(GhostProtocol.encodeBatch(entries))
++	end
++end)
+ 
++-- Clients remove a leaving player's ghost themselves when the Player leaves.
+ Players.PlayerRemoving:Connect(function(player: Player)
+-	local ghost = ghosts[player]
+-	if ghost then
+-		ghost:Destroy()
+-		ghosts[player] = nil
+-	end
++	states[player] = nil
++	changed[player] = nil
+ end)
+diff --git a/src/ServerScriptService/Tests/Specs/GhostProtocol.spec.luau b/src/ServerScriptService/Tests/Specs/GhostProtocol.spec.luau
+new file mode 100644
+index 0000000..0e83bf3
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/GhostProtocol.spec.luau
+@@ -0,0 +1,79 @@
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local ServerScriptService = game:GetService("ServerScriptService")
++
++local JestGlobals = require(ServerScriptService.Tests.Packages.JestGlobals)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local GhostProtocol = require(ReplicatedStorage.Shared.GhostProtocol)
++
++local describe = JestGlobals.describe
++local expect = JestGlobals.expect
++local it = JestGlobals.it
++
++describe("ghost states", function()
++	it("round-trips a block type and cell", function()
++		local cell = Vector3.new(-6, 2, 130)
++		local blockType, decodedCell =
++			GhostProtocol.decodeState(GhostProtocol.encodeState("Wood", cell))
++		expect(blockType).toBe(BlockTypes.ByName.Wood)
++		expect(decodedCell).toEqual(cell)
++	end)
++
++	it("encodes a missing cell or block type as hidden", function()
++		local blockType, cell = GhostProtocol.decodeState(GhostProtocol.encodeState("Brick", nil))
++		expect(blockType).toBeNil()
++		expect(cell).toBeNil()
++		blockType, cell =
++			GhostProtocol.decodeState(GhostProtocol.encodeState(nil, Vector3.new(2, 2, 2)))
++		expect(blockType).toBeNil()
++		expect(cell).toBeNil()
++	end)
++
++	it("encodes cells outside the grid range as hidden", function()
++		local blockType =
++			GhostProtocol.decodeState(GhostProtocol.encodeState("Brick", Vector3.new(1e6, 2, 2)))
++		expect(blockType).toBeNil()
++	end)
++
++	it("rejects malformed client states", function()
++		expect(GhostProtocol.isValidState(GhostProtocol.encodeState("Dirt", Vector3.new(2, 2, 2)))).toBe(
++			true
++		)
++		expect(GhostProtocol.isValidState("Dirt")).toBe(false)
++		expect(GhostProtocol.isValidState(buffer.create(GhostProtocol.STATE_SIZE + 1))).toBe(false)
++		local badType = buffer.create(GhostProtocol.STATE_SIZE)
++		buffer.writeu8(badType, 0, #BlockTypes.List + 1)
++		expect(GhostProtocol.isValidState(badType)).toBe(false)
++	end)
++end)
++
++describe("batches", function()
++	it("round-trips entries", function()
++		local data = GhostProtocol.encodeBatch({
++			{ userId = 1, state = GhostProtocol.encodeState("Grass", Vector3.new(2, 6, 2)) },
++			{ userId = -2, state = GhostProtocol.encodeState(nil, nil) },
++		})
++		local seen = {}
++		GhostProtocol.forEachInBatch(data, function(userId, blockType, cell)
++			table.insert(seen, { userId = userId, blockType = blockType, cell = cell })
++		end)
++		expect(#seen).toBe(2)
++		expect(seen[1].userId).toBe(1)
++		expect(seen[1].blockType).toBe(BlockTypes.ByName.Grass)
++		expect(seen[1].cell).toEqual(Vector3.new(2, 6, 2))
++		expect(seen[2].userId).toBe(-2)
++		expect(seen[2].blockType).toBeNil()
++	end)
++
++	it("ignores malformed batches", function()
++		local calls = 0
++		local function count()
++			calls += 1
++		end
++		GhostProtocol.forEachInBatch("nope", count)
++		GhostProtocol.forEachInBatch(buffer.create(1), count)
++		local truncated = buffer.create(3)
++		buffer.writeu16(truncated, 0, 1)
++		GhostProtocol.forEachInBatch(truncated, count)
++		expect(calls).toBe(0)
++	end)
++end)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/GhostPreview.client.luau b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.client.luau
+index 6f0536c..acbecc5 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/GhostPreview.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.client.luau
+@@ -1,6 +1,12 @@
+ --[[
+-	Reports the cell under the mouse and the selected block type to the server every frame, so
+-	everyone's ghost preview follows the builder's cursor.
++	Ghost previews on the client.
++
++	Your own ghost is drawn here every frame from your cursor, with no network round trip. The
++	cell and block type are sent to the server only when they change, at most every
++	GhostProtocol.SEND_INTERVAL. Other players' ghosts arrive in GhostUpdates batches and glide
++	toward the latest cell each builder reported, so they move smoothly between updates.
++
++	All ghost parts are local to this client, in Workspace.Ghosts.
+ ]]
+ 
+ local Players = game:GetService("Players")
+@@ -11,12 +17,56 @@ local Workspace = game:GetService("Workspace")
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local GhostProtocol = require(ReplicatedStorage.Shared.GhostProtocol)
+ 
+ local RAY_LENGTH = 512
+ local BLOCK_SIZE = BlockTypes.BlockSize
++local GHOST_TRANSPARENCY = 0.6
++-- How fast other players' ghosts close the gap to their latest cell: the gap shrinks by a factor
++-- of e every 1 / FOLLOW_RATE seconds (40 ms).
++local FOLLOW_RATE = 25
++-- Other players' ghosts jump instead of gliding when the new cell is farther than this, in studs.
++local SNAP_DISTANCE = 48
++
++type RemoteGhost = {
++	part: Part,
++	target: Vector3?,
++}
+ 
+ local localPlayer = Players.LocalPlayer
+ local moveGhost = ReplicatedStorage:WaitForChild("MoveGhost") :: RemoteEvent
++local ghostUpdates = ReplicatedStorage:WaitForChild("GhostUpdates") :: RemoteEvent
++local getGhosts = ReplicatedStorage:WaitForChild("GetGhosts") :: RemoteFunction
++
++local ghostsFolder = Instance.new("Folder")
++ghostsFolder.Name = "Ghosts"
++ghostsFolder.Parent = Workspace
++
++local function createGhostPart(name: string): Part
++	local part = Instance.new("Part")
++	part.Name = name
++	part.Anchored = true
++	part.CanCollide = false
++	part.CanQuery = false
++	part.CanTouch = false
++	part.CastShadow = false
++	part.Size = Vector3.one * BLOCK_SIZE
++	part.Transparency = 1
++	part.Parent = ghostsFolder
++	return part
++end
++
++local function showAs(part: Part, blockType: BlockTypes.BlockType)
++	part.Color = blockType.Color
++	part.Material = blockType.Material
++	part.Transparency = GHOST_TRANSPARENCY
++end
++
++-- Your own ghost
++
++local ownGhost = createGhostPart(localPlayer.Name)
++local raycastParams = RaycastParams.new()
++raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+ 
+ local function snapAxis(value: number): number
+ 	return math.floor(value / BLOCK_SIZE) * BLOCK_SIZE + BLOCK_SIZE / 2
+@@ -30,10 +80,8 @@ local function getCursorCell(): Vector3?
+ 
+ 	local mousePosition = UserInputService:GetMouseLocation()
+ 	local ray = camera:ViewportPointToRay(mousePosition.X, mousePosition.Y)
+-	local params = RaycastParams.new()
+-	params.FilterType = Enum.RaycastFilterType.Exclude
+-	params.FilterDescendantsInstances = { Workspace:WaitForChild("Ghosts"), localPlayer.Character }
+-	local result = Workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
++	raycastParams.FilterDescendantsInstances = { ghostsFolder, localPlayer.Character }
++	local result = Workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, raycastParams)
+ 	if not result then
+ 		return nil
+ 	end
+@@ -42,10 +90,117 @@ local function getCursorCell(): Vector3?
+ 	return Vector3.new(snapAxis(point.X), snapAxis(point.Y), snapAxis(point.Z))
+ end
+ 
+-RunService.RenderStepped:Connect(function()
+-	if not BlockPlacer.isEnabled() then
+-		moveGhost:FireServer(nil, nil)
++-- What the server last heard from us. It starts out with no ghost, which reads as hidden.
++local sentBlockTypeName: string? = nil
++local sentCell: Vector3? = nil
++local lastSentAt = -math.huge
++
++local function updateOwnGhost()
++	local cell = if BlockPlacer.isEnabled() then getCursorCell() else nil
++	local blockTypeName = if cell then BlockPlacer.getBlockType() else nil
++
++	if cell and blockTypeName then
++		ownGhost.CFrame = CFrame.new(cell)
++		showAs(ownGhost, BlockTypes.ByName[blockTypeName])
++	else
++		ownGhost.Transparency = 1
++	end
++
++	if blockTypeName == sentBlockTypeName and cell == sentCell then
++		return
++	end
++	-- If we sent too recently, try again next frame; whatever is current then gets sent.
++	local now = os.clock()
++	if now - lastSentAt < GhostProtocol.SEND_INTERVAL then
+ 		return
+ 	end
+-	moveGhost:FireServer(BlockPlacer.getBlockType(), getCursorCell())
++	moveGhost:FireServer(GhostProtocol.encodeState(blockTypeName, cell))
++	sentBlockTypeName = blockTypeName
++	sentCell = cell
++	lastSentAt = now
++end
++
++-- Other players' ghosts
++
++local remoteGhosts: { [Player]: RemoteGhost } = {}
++
++local function applyRemoteState(player: Player, blockType: BlockTypes.BlockType?, cell: Vector3?)
++	local ghost = remoteGhosts[player]
++	if not ghost then
++		ghost = { part = createGhostPart(player.Name), target = nil }
++		remoteGhosts[player] = ghost
++	end
++	local part = ghost.part
++
++	if not blockType or not cell then
++		ghost.target = nil
++		part.Transparency = 1
++		return
++	end
++
++	-- Appear in place rather than gliding in from wherever the ghost was last hidden.
++	if ghost.target == nil or (cell - part.Position).Magnitude > SNAP_DISTANCE then
++		part.CFrame = CFrame.new(cell)
++	end
++	ghost.target = cell
++	showAs(part, blockType)
++end
++
++local function applyBatch(data: unknown, onlyNew: boolean)
++	GhostProtocol.forEachInBatch(data, function(userId, blockType, cell)
++		local player = Players:GetPlayerByUserId(userId)
++		if not player or player == localPlayer then
++			return
++		end
++		-- A snapshot may be older than updates that arrived while it was in flight.
++		if onlyNew and remoteGhosts[player] then
++			return
++		end
++		applyRemoteState(player, blockType, cell)
++	end)
++end
++
++local function moveRemoteGhosts(deltaTime: number)
++	local alpha = 1 - math.exp(-FOLLOW_RATE * deltaTime)
++	for _, ghost in remoteGhosts do
++		local target = ghost.target
++		if not target then
++			continue
++		end
++		local position = ghost.part.Position
++		if position == target then
++			continue
++		end
++		if (target - position).Magnitude < 0.01 then
++			ghost.part.CFrame = CFrame.new(target)
++		else
++			ghost.part.CFrame = CFrame.new(position:Lerp(target, alpha))
++		end
++	end
++end
++
++ghostUpdates.OnClientEvent:Connect(function(data: unknown)
++	applyBatch(data, false)
++end)
++
++Players.PlayerRemoving:Connect(function(player: Player)
++	local ghost = remoteGhosts[player]
++	if ghost then
++		ghost.part:Destroy()
++		remoteGhosts[player] = nil
++	end
++end)
++
++RunService.RenderStepped:Connect(function(deltaTime: number)
++	updateOwnGhost()
++	moveRemoteGhosts(deltaTime)
++end)
++
++task.spawn(function()
++	local ok, snapshot = pcall(getGhosts.InvokeServer, getGhosts)
++	if ok then
++		applyBatch(snapshot, true)
++	else
++		warn(`couldn't fetch ghost previews: {snapshot}`)
++	end
+ end)

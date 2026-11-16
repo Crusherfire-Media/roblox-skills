@@ -1,0 +1,111 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "The two code diffs are byte-for-byte the same: both drop VALID_NAMES in favor of the BlockTypes.ByName lookup and change nothing else. Both write-ups reject items 1–4 and 6 with sound reasons, and both treat item 3 as a correctness bug. A wins narrowly for two reasons. Its profiling advice covers both server time and network traffic (MicroProfiler plus the Script Performance and Network tabs). B states a performance measurement for part reuse ('about a third of the cost') with no source behind it. B's richer discussion of pool reset costs almost closes the gap, but not quite.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Grounded in scale",
+          "score": 5,
+          "note": "Works out the cap of 80 placements a second, says each costs a few microseconds and is 'well under 1% of a frame', and estimates the payload at 'a couple dozen bytes'."
+        },
+        {
+          "criterion": "Item 3 rejected as a correctness problem",
+          "score": 5,
+          "note": "Says 'packets can be dropped or arrive out of order', so a player could click and get no block with no error; PlaceBlock stays reliable."
+        },
+        {
+          "criterion": "No pooling, buffers or native code, with concrete reasons",
+          "score": 5,
+          "note": "Gives a concrete reason for each rejection: blocks are never destroyed, so a pool has nothing to reuse; a buffer saves about ten bytes and adds decoding on the trust boundary; native code does nothing for time spent in engine calls."
+        },
+        {
+          "criterion": "Small code changes, behavior kept",
+          "score": 5,
+          "note": "Removes VALID_NAMES and uses BlockTypes.ByName[blockTypeName] as the check, after the existing typeof check; all other validation is untouched."
+        },
+        {
+          "criterion": "How to measure",
+          "score": 5,
+          "note": "Recommends the MicroProfiler plus the Developer Console's Script Performance and Network tabs, and flags total part count as the likely long-term cost."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Only the server script and the doc change; all checks pass."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Grounded in scale",
+          "score": 5,
+          "note": "Caps placements at 80 a second, puts payload at about 9 bytes of overhead plus 20 bytes of arguments (under 1 KB/s per client), and says part creation takes 'a small fraction of a millisecond' per second."
+        },
+        {
+          "criterion": "Item 3 rejected as a correctness problem",
+          "score": 5,
+          "note": "Says unreliable events 'drop packets and deliver out of order', so a click 'would sometimes place nothing', and that excess calls are dropped rather than delayed."
+        },
+        {
+          "criterion": "No pooling, buffers or native code, with concrete reasons",
+          "score": 5,
+          "note": "Gives detailed rejections: a pool needs reset code for Color, Material, Transparency and PlacedBy and leaves idle parts that replicate to clients; a buffer makes server validation harder to secure; native code costs memory and only runs on some client platforms."
+        },
+        {
+          "criterion": "Small code changes, behavior kept",
+          "score": 5,
+          "note": "Same diff as A: the ByName lookup replaces VALID_NAMES and table.find, and validation is unchanged."
+        },
+        {
+          "criterion": "How to measure",
+          "score": 4,
+          "note": "Recommends a server MicroProfiler capture while players build and lists what would change the verdicts, but doesn't mention watching the server's network rates."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Only the server script and the doc change; all checks pass."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Scale analysis is clear, with numbers for both CPU time and network traffic",
+        "Covers both script profiling and network measurement",
+        "Spots the respawn bug that a cached RaycastParams would cause"
+      ],
+      "weaknesses": [
+        "Says less than B about the reset code a pool would need"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Most concrete account of what a pool would cost to maintain",
+        "Lists the conditions that would change each verdict"
+      ],
+      "weaknesses": [
+        "The claim that reusing a Part 'measured at about a third of the cost' of re-creating it has no source",
+        "Profiling advice leaves out network measurement"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 9,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

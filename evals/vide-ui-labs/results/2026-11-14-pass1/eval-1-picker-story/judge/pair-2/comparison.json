@@ -1,0 +1,113 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts widen Title the same way and pass every check, and neither adds a long-title preset. A shares the selection between the control and tile clicks with a source and an effect, so the picker stays in place. B tears the picker down and rebuilds it through `indexes` on each control change, leaves a debug print in, and depends on newer `const` syntax and `@game` string-require aliases. B is better typed, but A is the simpler, sturdier change that a developer is more likely to merge.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story",
+          "score": 5,
+          "note": "`BlockPicker.story.luau` returns `UILabs.CreateVideStory({vide = Vide, controls = controls}, function(props) ... return BlockPicker(...) end)` with Vide from ReplicatedStorage.Packages.Vide."
+        },
+        {
+          "criterion": "Controls from BlockTypes.List, title text, long title easy",
+          "score": 3,
+          "note": "`Choose(blockNames, 1)` is built from `BlockTypes.List` and Title is `UILabs.String(\"Blocks\")`, but there is no long-title default, preset or second control; the comment only says to type one."
+        },
+        {
+          "criterion": "Title updates live, game caller still works",
+          "score": 4,
+          "note": "Widening the type to `string | () -> string` and passing `props.controls.Title` works because Vide properties accept sources, assuming the label binds `Text = props.Title` directly; the game caller still passes a string."
+        },
+        {
+          "criterion": "Control and tile clicks both move highlight",
+          "score": 5,
+          "note": "A local `selected` source is driven by a `Vide.effect` on the Selected control, and `Select = selected` lets tile clicks write to it."
+        },
+        {
+          "criterion": "Safe in edit mode",
+          "score": 5,
+          "note": "It requires only the picker, BlockTypes, Vide and UILabs, never yields, and creates nothing outside the preview."
+        },
+        {
+          "criterion": "Correct, in scope, typed and clean",
+          "score": 4,
+          "note": "The change is minimal and all checks pass, but the story's props have no type annotations and the file has no `--!strict`."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story",
+          "score": 5,
+          "note": "Returns a plain table with `vide = Vide` and a `story` function that returns the picker through `indexes`."
+        },
+        {
+          "criterion": "Controls from BlockTypes.List, title text, long title easy",
+          "score": 3,
+          "note": "`Choose(blockNames, 1)` is built from `BlockTypes.List` and the controls are ordered with `Ordered`, but there is no long-title preset."
+        },
+        {
+          "criterion": "Title updates live, game caller still works",
+          "score": 4,
+          "note": "Same type widening as A; `Title = controls.Title` is passed as a source."
+        },
+        {
+          "criterion": "Control and tile clicks both move highlight",
+          "score": 4,
+          "note": "Works, but `indexes` keyed on `controls.Selected()` destroys and rebuilds the whole picker each time the control changes, and every click prints."
+        },
+        {
+          "criterion": "Safe in edit mode",
+          "score": 5,
+          "note": "It requires only the allowed modules, never yields, and creates nothing outside the preview."
+        },
+        {
+          "criterion": "Correct, in scope, typed and clean",
+          "score": 4,
+          "note": "Uses `--!strict` and a `StoryProps` type, but depends on `const` and `@game/` string requires that need runtime and tooling support, and leaves a debug `print` in."
+        }
+      ],
+      "overall_score": 7.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Simple, idiomatic way to share state between the control and tile clicks",
+        "Picker instance stays in place when the control changes",
+        "Minimal one-line change to BlockPicker"
+      ],
+      "weaknesses": [
+        "No ready long-title preset",
+        "Story is untyped"
+      ]
+    },
+    "B": {
+      "score": 7.5,
+      "strengths": [
+        "Typed story props and --!strict",
+        "Ordered controls and a summary"
+      ],
+      "weaknesses": [
+        "Rebuilds the picker on every control change",
+        "Debug print on each click",
+        "Depends on newer `const` syntax and `@game` string-require aliases"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8,
+    "with_skill": 7.5
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

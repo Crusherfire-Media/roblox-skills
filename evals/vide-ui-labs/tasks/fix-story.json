@@ -1,0 +1,50 @@
+{
+  "id": 2,
+  "name": "fix-story",
+  "skill": "vide-ui-labs",
+  "prompt": "My block picker story stopped working. UI Labs says \"Story module errored when required\", and the output shows \"attempt to index nil with 'DisplayName'\". Even before that, two things were off: the Show Names control did nothing until I hit reload, and SoundService in my place has slowly filled up with dozens of TileClick sounds since I started using UI Labs.\n\nFix the story and whatever it depends on, so it opens, its controls work, and opening or reloading it stops changing my place. Keep the picker looking and working the same in game. The story is src/ServerScriptService/Stories/BlockPicker.story.luau and the picker is src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau; Main.client.luau mounts the picker in game.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/shared/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/fix-story/BlockPicker.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau" },
+    { "from": "fixtures/fix-story/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" },
+    { "from": "fixtures/fix-story/BlockPicker.story.luau", "to": "src/ServerScriptService/Stories/BlockPicker.story.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau",
+      "pattern": "^local\\s+\\w+\\s*=\\s*Players\\.LocalPlayer",
+      "text": "BlockPicker no longer reads Players.LocalPlayer at module top level (the reported error is gone)"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau",
+      "pattern": "^\\w+\\.Parent\\s*=\\s*SoundService",
+      "text": "BlockPicker no longer parents a Sound into SoundService at module top level"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Stories/BlockPicker.story.luau",
+      "pattern": "props\\.controls\\.Selected\\b",
+      "text": "The story reads the Selected control through its Block group"
+    }
+  ],
+  "rubric": [
+    "Fixes the require error: BlockPicker read `Players.LocalPlayer.DisplayName` at module top level, and `LocalPlayer` is nil when UI Labs loads the module in edit mode. The name now reaches the picker through a prop (the game passes the local player's name, the story passes sample text), or the read moves to code that runs only in game.",
+    "Fixes the TileClick pile-up: BlockPicker created a Sound and parented it to SoundService when required, so every story load and reload added one more that saves with the place. After the fix nothing is created in the DataModel at require time: the sound is made inside the component's Vide scope and cleaned up with it, passed in by the game, or only created while the game runs. Tile clicks still sound in game.",
+    "Fixes Show Names: both the story (`props.controls.Look.ShowNames()` read once) and the picker (`if props.ShowName then` at build time) read the value once. The fix passes the control's source through and binds the name labels to it (for example `Visible` bound to the source, or `show`), so toggling the control updates the preview live.",
+    "Fixes the story's own error that the require error was hiding: it read `props.controls.Selected`, but that control sits in the `Block` group, so the read was nil and calling it errors. The fix reads `props.controls.Block.Selected`.",
+    "In game the picker looks and works as before: the title shows the local player's display name, tiles select and click, and names show.",
+    "Changes stay in the story, BlockPicker, and Main.client.luau (for new props), the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files."
+  ],
+  "judge_facts": [
+    "UI Labs utilities 2.4.2 typings (ui-labs/src/Typing/Vide.d.ts): a Vide story's `props.controls` holds one Vide source per control; a `ControlGroup` becomes a nested table of sources under the group's key, so a control in group `Block` is read as `props.controls.Block.Selected()`.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Controls/ControlUtils.luau, ControlConversion.luau): `ControlGroup(controls)` returns `{ EntryType = \"ControlGroup\", Controls = controls }`; `Ordered(control, n)` sets `Order` on a control or group and also accepts plain string, number, boolean, and Color3 values.",
+    "UI Labs utilities 2.4.2 (ui-labs/src/Environment.luau): every `Environment` member has a harmless fallback outside UI Labs: `IsStory()` returns false, `Unmount` and `Reload` do nothing, `UserInput` falls back to `UserInputService`, and `PluginWidget` is nil.",
+    "Vide 0.4.1 `cleanup(value)` (vide/src/cleanup.luau) registers a cleanup on the running scope; given an Instance it calls `Destroy` when the scope is destroyed."
+  ],
+  "timeout_minutes": 20
+}

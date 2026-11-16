@@ -1,0 +1,117 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts implement the rules and handle timing well. A is better on types: it uses the closed BlockType set and the { [Player]: Counts? } table. It also names its yielding loader with Async and follows the string-require convention. B takes blockType as unknown with string keys, uses a non-optional per-player table, and requires BlockTypes by instance path.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Implements the rules",
+          "score": 5,
+          "note": "Loads player_{UserId} from the BlockInventory store and falls back to 20 of each type. TakeBlock stops at 0, ReturnBlock stops at MAX_COUNT, GrantBlocks has no cap, GetCount reads a count, and onPlayerRemoving drops the counts."
+        },
+        {
+          "criterion": "Handles timing",
+          "score": 5,
+          "note": "The loadingPlayers flag is checked after the yielding load, so a player who left mid-load gets no counts stored. Players already in the server are spawned through onPlayerAdded. Requiring never yields. Calls for unloaded players return NotLoaded or nil."
+        },
+        {
+          "criterion": "Reports expected failures",
+          "score": 5,
+          "note": "Failures come back as typed reasons (TakeFailure NotLoaded or OutOfBlocks, ReturnFailure AtMaximum). It asserts only on a bad amount or an invalid type. GetAsync is wrapped in pcall."
+        },
+        {
+          "criterion": "Types catch mistakes",
+          "score": 5,
+          "note": "Parameters are typed blockType: BlockType, returns are typed, and countsByPlayer is { [Player]: Counts? }."
+        },
+        {
+          "criterion": "Call sites read clearly",
+          "score": 5,
+          "note": "The uncapped path is its own function, GrantBlocks, rather than a boolean flag. Names are spelled out, and the yielding helper is called loadSavedDataAsync."
+        },
+        {
+          "criterion": "Scope and merge readiness",
+          "score": 5,
+          "note": "It is a single module that reuses BlockTypes through a string require, and all three checks pass."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Implements the rules",
+          "score": 5,
+          "note": "Uses DATA_STORE_NAME BlockInventory with key player_{UserId}, falls back to defaults of 20, caps take and returnBlock correctly, leaves grant uncapped, and has getCount and drop-on-leave."
+        },
+        {
+          "criterion": "Handles timing",
+          "score": 5,
+          "note": "Uses a loadingPlayers flag plus a player.Parent check, guards against a double load, picks up players already in the server, and never yields on require."
+        },
+        {
+          "criterion": "Reports expected failures",
+          "score": 5,
+          "note": "The Failure union covers NotLoaded, InvalidBlockType, OutOfBlocks, and AtLimit. It asserts only on the grant amount, and both GetDataStore and GetAsync are wrapped in pcall."
+        },
+        {
+          "criterion": "Types catch mistakes",
+          "score": 2,
+          "note": "blockType is typed unknown and Counts is { [string]: number }, so a misspelled type is not a type error. countsByPlayer is { [Player]: Counts } with a non-optional value."
+        },
+        {
+          "criterion": "Call sites read clearly",
+          "score": 4,
+          "note": "grant is a separate named function, but loadCounts yields and its name has no Async suffix."
+        },
+        {
+          "criterion": "Scope and merge readiness",
+          "score": 4,
+          "note": "Checks pass, but it requires BlockTypes by instance path, which breaks the string-require convention, and it exposes mutable StartingCount and MaxCount fields."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Uses the closed BlockType type and an optional per-player table",
+        "Returns typed failure reasons",
+        "Handles a player leaving mid-load and players already in the server",
+        "Has a separate GrantBlocks function for the uncapped path"
+      ],
+      "weaknesses": [
+        "assertBlockType throws on an invalid type, so placement has to validate remote input first",
+        "Module methods are called with a colon, a small style difference"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Thorough timing guards, including a double-load check",
+        "Treats an invalid block type as a return value, which suits remote input",
+        "Clear comments"
+      ],
+      "weaknesses": [
+        "blockType: unknown gives up type checking of block types",
+        "The per-player table value is not optional",
+        "Requires BlockTypes by instance path instead of string path",
+        "The yielding loader is not named Async",
+        "Exposes constants as mutable public fields"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 7
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

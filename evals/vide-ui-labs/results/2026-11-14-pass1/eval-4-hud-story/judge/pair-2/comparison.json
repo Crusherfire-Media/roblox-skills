@@ -1,0 +1,114 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "A wins narrowly. Both attempts split the HUD the same way: a pure view module, with BuildModeHud kept as the in-game wrapper. Both keep the effects out of the story, and both leave the BlockPlaced wait inside the in-game component body. B's view has a nicer props API that takes either values or sources. A wins on two points. First, its PlacedCount control has a usable drag sensitivity, while B's sensitivity defaults to 0. Second, A sticks to conventional instance requires and plain `local`. B relies on `const` and `@game/` string requires, which are less portable in a typical Roblox setup.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story with live controls",
+          "score": 4,
+          "note": "`UILabs.CreateVideStory({vide = Vide, controls = controls}, ...)` builds the selected-block Choose control from `BlockTypes.List`; PlayerName is a String and PlacedCount is `Number(0, 0, nil, 1, true, 1)` with a usable dragger. To try a long name you type one into the String field; there is no preset."
+        },
+        {
+          "criterion": "Data arrives through props",
+          "score": 4,
+          "note": "BuildModeHudView takes `playerName`, `selectedBlock` and `placedCount` sources and reads no game state; BuildModeHud stays the game wrapper that passes `localPlayer.DisplayName`, `selected` and `placedCount`."
+        },
+        {
+          "criterion": "No yield inside a Vide scope",
+          "score": 3,
+          "note": "The story never reaches the wait because it doesn't use BuildModeHud, but the unchanged BuildModeHud body still contains `WaitForChild(\"BlockPlaced\")` inside the component."
+        },
+        {
+          "criterion": "Side effects kept out of the story",
+          "score": 5,
+          "note": "Blur, FOV and sound stay only in BuildModeHud, which the story never requires, and their existing cleanups are untouched."
+        },
+        {
+          "criterion": "In-game behavior unchanged",
+          "score": 5,
+          "note": "BuildModeHud keeps every effect and feeds the same sources into a view with the same markup."
+        },
+        {
+          "criterion": "Story hygiene, typing, checks",
+          "score": 5,
+          "note": "Uses plain instance-path requires, no yields or LocalPlayer, a typed `Props`, and all checks pass."
+        }
+      ],
+      "overall_score": 7
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story with live controls",
+          "score": 4,
+          "note": "A plain story table with `vide = Vide`, controls built with `Ordered(Choose(blockNames))`, and a `story` function, which is a valid layout. But `Number(0, 0, 99999, 1)` leaves the dragger sensitivity at `default*10 = 0`, so dragging does nothing."
+        },
+        {
+          "criterion": "Data arrives through props",
+          "score": 5,
+          "note": "The view's `Props` accepts `string | () -> string` and the like through `read`, so the story passes sources and the game passes the static DisplayName."
+        },
+        {
+          "criterion": "No yield inside a Vide scope",
+          "score": 3,
+          "note": "Like A, it leaves `WaitForChild(\"BlockPlaced\")` inside the BuildModeHud body; only the story avoids it."
+        },
+        {
+          "criterion": "Side effects kept out of the story",
+          "score": 5,
+          "note": "The effects stay in BuildModeHud, which the story never loads."
+        },
+        {
+          "criterion": "In-game behavior unchanged",
+          "score": 5,
+          "note": "The wrapper passes `selected` and `placedCount` sources and keeps the blur, zoom and sound."
+        },
+        {
+          "criterion": "Story hygiene, typing, checks",
+          "score": 4,
+          "note": "`--!strict` and typed story props, and the checks pass, but it relies on `const` and `require(\"@game/...\")` string requires, which are newer syntax that is riskier in a typical Roblox setup than instance requires."
+        }
+      ],
+      "overall_score": 6.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7,
+      "strengths": [
+        "A clean split between a pure view and game wiring",
+        "Conventional requires and the CreateVideStory helper",
+        "The Number control has a working drag sensitivity"
+      ],
+      "weaknesses": [
+        "The WaitForChild yield still sits inside the in-game component body",
+        "No quick preset for testing a long name"
+      ]
+    },
+    "B": {
+      "score": 6.5,
+      "strengths": [
+        "A flexible view whose props take static values or sources",
+        "Ordered controls and a summary",
+        "Strict typing throughout"
+      ],
+      "weaknesses": [
+        "The Number control's dragger has zero sensitivity",
+        "Uses `const` and `@game` string requires",
+        "The WaitForChild yield is still inside the in-game component body"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 7,
+    "with_skill": 6.5
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

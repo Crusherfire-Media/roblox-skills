@@ -1,0 +1,6 @@
+I fixed the two type errors the checker found in `SpikeReport.luau`. Both loops read `selfTicksByFrame[frame.Id] or {}`, and the type checker couldn't treat that mix as one table type. They now use a small helper, `getFrameTicks`, which always returns a table of timer IDs to times, so the report itself doesn't change. I haven't rerun the analyzer since the fix, so its next check will confirm it.
+
+The rest of my earlier summary still stands. In short:
+- **Not tested yet:** the module hasn't run against a real snapshot. Your first `print(require(game.ReplicatedStorage.Shared.Dev.SpikeReport).run(2))` in Edit mode is the real test.
+- **`const` syntax:** the new file uses `const`, as the style guide asks. If your Studio's Luau rejects it, change those lines to `local`.
+- **Frame limit:** `HitchSnapshot` never sets one, so slot 2 can hold only a few frames if a game script set a low limit. Setting 256 in `HitchSnapshot.start()` would fix that. I didn't change it, because the limit stays in effect for later readers and setting it clears counter history.

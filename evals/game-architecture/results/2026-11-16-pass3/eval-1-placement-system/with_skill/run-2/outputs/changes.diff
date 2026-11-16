@@ -1,0 +1,524 @@
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementNotificationMediator.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementNotificationMediator.luau
+new file mode 100644
+index 0000000..da56572
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementNotificationMediator.luau
+@@ -0,0 +1,23 @@
++--!strict
++--[[
++	Tells players through notifications why a placement was turned down.
++]]
++
++const NotificationServerService = require(
++	"@game/ServerScriptService/Modules/Systems/Core/NotificationSystem/SystemPackage/NotificationServerService"
++)
++const PlacementServerService = require("../SystemPackage/PlacementServerService")
++
++const TOO_FAR_MESSAGE = "That spot is too far away. Move closer to place a block."
++
++local Module = {}
++
++function Module:Init()
++	PlacementServerService:OnPlacementRejected(function(player, reason)
++		if reason == "TooFar" then
++			NotificationServerService:Notify(player, TOO_FAR_MESSAGE)
++		end
++	end)
++end
++
++return Module
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementNotificationMediator.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementNotificationMediator.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementNotificationMediator.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementServerSetup.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementServerSetup.luau
+new file mode 100644
+index 0000000..1c55ec2
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementServerSetup.luau
+@@ -0,0 +1,20 @@
++--!strict
++--[[
++	Gives the placement system this game's ground: the baseplate.
++]]
++
++const PlacementServerService = require("../SystemPackage/PlacementServerService")
++
++local Module = {}
++
++function Module:Init()
++	const baseplate = workspace:FindFirstChild("Baseplate")
++	if not baseplate or not baseplate:IsA("BasePart") then
++		warn("PlacementSystem: Workspace.Baseplate is missing, so blocks have no ground")
++		return
++	end
++
++	PlacementServerService:SetGround(baseplate)
++end
++
++return Module
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementServerSetup.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementServerSetup.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/_PlacementServerSetup.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/init.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/init.meta.json
+new file mode 100644
+index 0000000..5590ae4
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/Implementation/init.meta.json
+@@ -0,0 +1,5 @@
++{
++  "properties": {
++    "IconTint": { "Color3": [0, 0.6666666865348816, 1] }
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementClientService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementClientService.luau
+new file mode 100644
+index 0000000..41df8bd
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementClientService.luau
+@@ -0,0 +1,93 @@
++--!strict
++--[[
++	Turns clicks and taps on placement surfaces into placement requests, and
++	picks the block type from the number keys in catalog order.
++]]
++
++const Players = game:GetService("Players")
++const UserInputService = game:GetService("UserInputService")
++
++const BlockTypes = require("@game/ServerScriptService/Modules/Catalogs/BlockTypes")
++const PlacementNetwork = require("./PlacementNetwork")
++const PlacementSharedService = require("./PlacementSharedService")
++
++const MAX_RAY_DISTANCE = 1000
++const HOTBAR_KEYS = {
++	Enum.KeyCode.One,
++	Enum.KeyCode.Two,
++	Enum.KeyCode.Three,
++	Enum.KeyCode.Four,
++	Enum.KeyCode.Five,
++	Enum.KeyCode.Six,
++	Enum.KeyCode.Seven,
++	Enum.KeyCode.Eight,
++	Enum.KeyCode.Nine,
++}
++
++const catalogIndexByKey: { [Enum.KeyCode]: number? } = {}
++for index = 1, math.min(#BlockTypes.List, #HOTBAR_KEYS) do
++	catalogIndexByKey[HOTBAR_KEYS[index]] = index
++end
++
++local Module = setmetatable({}, PlacementSharedService)
++
++local selectedBlockType = BlockTypes.List[1]
++
++local function requestPlacementAt(viewportPosition: Vector2)
++	const camera = workspace.CurrentCamera
++	if not camera then
++		return
++	end
++
++	const characters = {}
++	for _, player in Players:GetPlayers() do
++		if player.Character then
++			table.insert(characters, player.Character)
++		end
++	end
++
++	const raycastParams = RaycastParams.new()
++	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
++	raycastParams.FilterDescendantsInstances = characters
++
++	const ray = camera:ViewportPointToRay(viewportPosition.X, viewportPosition.Y)
++	const result = workspace:Raycast(ray.Origin, ray.Direction * MAX_RAY_DISTANCE, raycastParams)
++	if not result or not result.Instance:HasTag(Module.SurfaceTag) then
++		return
++	end
++
++	const cellCenter = Module:GetAdjacentCell(result.Position, result.Normal)
++	PlacementNetwork.PlaceBlock:FireServer(selectedBlockType.Name, cellCenter)
++end
++
++local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
++	if gameProcessedEvent then
++		return
++	end
++
++	if input.UserInputType == Enum.UserInputType.MouseButton1 then
++		requestPlacementAt(UserInputService:GetMouseLocation())
++		return
++	end
++
++	const catalogIndex = catalogIndexByKey[input.KeyCode]
++	if catalogIndex then
++		selectedBlockType = BlockTypes.List[catalogIndex]
++	end
++end
++
++-- TouchTapInWorld fires only for taps, not for the drags that turn the camera.
++local function onTouchTapInWorld(viewportPosition: Vector2, processedByUi: boolean)
++	if processedByUi then
++		return
++	end
++
++	requestPlacementAt(viewportPosition)
++end
++
++function Module:Init()
++	UserInputService.InputBegan:Connect(onInputBegan)
++	UserInputService.TouchTapInWorld:Connect(onTouchTapInWorld)
++end
++
++return Module
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementClientService.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementClientService.meta.json
+new file mode 100644
+index 0000000..966c67f
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementClientService.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "ClientOnly": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementNetwork/PlaceBlock.model.json b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementNetwork/PlaceBlock.model.json
+new file mode 100644
+index 0000000..dc005af
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementNetwork/PlaceBlock.model.json
+@@ -0,0 +1,3 @@
++{
++  "className": "RemoteEvent"
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementNetwork/init.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementNetwork/init.luau
+new file mode 100644
+index 0000000..1bb841a
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementNetwork/init.luau
+@@ -0,0 +1,12 @@
++--!strict
++--[[
++	Remotes for block placement. Each remote is a child of this module, so it
++	reaches clients together with the module.
++]]
++
++local Module = {
++	-- Client to server: (blockTypeName: string, cellCenter: Vector3)
++	PlaceBlock = script:WaitForChild("PlaceBlock") :: RemoteEvent,
++}
++
++return table.freeze(Module)
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau
+new file mode 100644
+index 0000000..73d4902
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.luau
+@@ -0,0 +1,242 @@
++--!strict
++--[[
++	Places blocks for players. Every request a client sends is checked here
++	before a block appears.
++]]
++
++const Players = game:GetService("Players")
++
++const BlockTypes = require("@game/ServerScriptService/Modules/Catalogs/BlockTypes")
++const Grid = require("@game/ServerScriptService/Modules/Utilities/Grid")
++const PlacementNetwork = require("./PlacementNetwork")
++const PlacementSharedService = require("./PlacementSharedService")
++
++const MAX_PLACE_DISTANCE = 64
++const MAX_REQUESTS_PER_WINDOW = 10
++const RATE_WINDOW_SECONDS = 1
++-- Far beyond any reachable cell. Written as an upper bound on math.abs so NaN
++-- and infinity fail it too.
++const MAX_COORDINATE = 100_000
++const POSITION_TOLERANCE = 0.01
++const NEIGHBOR_OFFSETS = {
++	Vector3.xAxis,
++	-Vector3.xAxis,
++	Vector3.yAxis,
++	-Vector3.yAxis,
++	Vector3.zAxis,
++	-Vector3.zAxis,
++}
++
++export type RejectReason =
++	"RateLimited"
++	| "UnknownBlockType"
++	| "InvalidPosition"
++	| "BelowGround"
++	| "NoCharacter"
++	| "TooFar"
++	| "Occupied"
++	| "Unsupported"
++
++type RejectedCallback = (player: Player, reason: RejectReason) -> ()
++
++local Module = setmetatable({}, PlacementSharedService)
++
++local ground: BasePart? = nil
++local blocksFolder: Folder? = nil
++-- Keyed by integer cell index, so equal cells always share a key.
++local blocksByCell: { [Vector3]: BasePart? } = {}
++local recentRequestTimes: { [Player]: { number }? } = {}
++local rejectedCallbacks: { RejectedCallback } = {}
++
++local function isRateLimited(player: Player): boolean
++	const now = os.clock()
++	local times = recentRequestTimes[player]
++	if not times then
++		times = {}
++		recentRequestTimes[player] = times
++	end
++	assert(times, "Request times were just created")
++
++	while times[1] and now - times[1] >= RATE_WINDOW_SECONDS do
++		table.remove(times, 1)
++	end
++
++	if #times >= MAX_REQUESTS_PER_WINDOW then
++		return true
++	end
++
++	table.insert(times, now)
++	return false
++end
++
++local function isSaneCoordinate(value: number): boolean
++	return math.abs(value) <= MAX_COORDINATE
++end
++
++local function getCellIndex(cellCenter: Vector3): Vector3
++	const blockSize = BlockTypes.BlockSize
++	return Vector3.new(
++		math.floor(cellCenter.X / blockSize),
++		math.floor(cellCenter.Y / blockSize),
++		math.floor(cellCenter.Z / blockSize)
++	)
++end
++
++local function getGroundTop(groundPart: BasePart): number
++	return groundPart.Position.Y + groundPart.Size.Y / 2
++end
++
++--[[
++	A cell is supported when it rests on the ground or shares a face with a
++	placed block, which keeps clients from placing blocks in midair.
++]]
++local function isSupported(cellCenter: Vector3, cellIndex: Vector3): boolean
++	if ground then
++		const cellBottom = cellCenter.Y - BlockTypes.BlockSize / 2
++		if math.abs(cellBottom - getGroundTop(ground)) <= POSITION_TOLERANCE then
++			return true
++		end
++	end
++
++	for _, offset in NEIGHBOR_OFFSETS do
++		if blocksByCell[cellIndex + offset] then
++			return true
++		end
++	end
++
++	return false
++end
++
++local function reject(player: Player, reason: RejectReason)
++	-- Cloned so a callback that disconnects itself cannot skip the next one.
++	for _, callback in table.clone(rejectedCallbacks) do
++		task.spawn(callback, player, reason)
++	end
++end
++
++local function createBlock(blockType: BlockTypes.BlockType, cellCenter: Vector3, cellIndex: Vector3)
++	const block = Instance.new("Part")
++	block.Name = blockType.Name
++	block.Anchored = true
++	block.Size = Vector3.one * BlockTypes.BlockSize
++	block.CFrame = CFrame.new(cellCenter)
++	block.Color = blockType.Color
++	block.Material = blockType.Material
++	block.Transparency = blockType.Transparency
++	block:SetAttribute("BlockType", blockType.Name)
++	block:AddTag(Module.SurfaceTag)
++
++	block.AncestryChanged:Connect(function()
++		if not block:IsDescendantOf(workspace) and blocksByCell[cellIndex] == block then
++			blocksByCell[cellIndex] = nil
++		end
++	end)
++
++	blocksByCell[cellIndex] = block
++	block.Parent = blocksFolder
++end
++
++local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
++	if isRateLimited(player) then
++		reject(player, "RateLimited")
++		return
++	end
++
++	if typeof(blockTypeName) ~= "string" then
++		reject(player, "UnknownBlockType")
++		return
++	end
++
++	const blockType: BlockTypes.BlockType? = BlockTypes.ByName[blockTypeName]
++	if not blockType then
++		reject(player, "UnknownBlockType")
++		return
++	end
++
++	if
++		typeof(position) ~= "Vector3"
++		or not isSaneCoordinate(position.X)
++		or not isSaneCoordinate(position.Y)
++		or not isSaneCoordinate(position.Z)
++	then
++		reject(player, "InvalidPosition")
++		return
++	end
++
++	const blockSize = BlockTypes.BlockSize
++	const cellCenter = Grid.snapToCell(position, blockSize)
++	if (cellCenter - position).Magnitude > POSITION_TOLERANCE then
++		reject(player, "InvalidPosition")
++		return
++	end
++
++	if ground then
++		if cellCenter.Y - blockSize / 2 < getGroundTop(ground) - POSITION_TOLERANCE then
++			reject(player, "BelowGround")
++			return
++		end
++	end
++
++	const character = player.Character
++	const rootPart = if character then character:FindFirstChild("HumanoidRootPart") else nil
++	if not rootPart or not rootPart:IsA("BasePart") then
++		reject(player, "NoCharacter")
++		return
++	end
++
++	if (rootPart.Position - cellCenter).Magnitude > MAX_PLACE_DISTANCE then
++		reject(player, "TooFar")
++		return
++	end
++
++	const cellIndex = getCellIndex(cellCenter)
++	if blocksByCell[cellIndex] then
++		reject(player, "Occupied")
++		return
++	end
++
++	if not isSupported(cellCenter, cellIndex) then
++		reject(player, "Unsupported")
++		return
++	end
++
++	createBlock(blockType, cellCenter, cellIndex)
++end
++
++--[[
++	Sets the part blocks rest on. No block may sit below its top face, and
++	clicks on it place blocks.
++]]
++function Module:SetGround(part: BasePart)
++	ground = part
++	part:AddTag(Module.SurfaceTag)
++end
++
++--[[
++	Calls the callback whenever the server turns down a placement request.
++	Returns a function that disconnects it.
++]]
++function Module:OnPlacementRejected(callback: RejectedCallback): () -> ()
++	table.insert(rejectedCallbacks, callback)
++
++	return function()
++		const index = table.find(rejectedCallbacks, callback)
++		if index then
++			table.remove(rejectedCallbacks, index)
++		end
++	end
++end
++
++function Module:Init()
++	const folder = Instance.new("Folder")
++	folder.Name = "PlacedBlocks"
++	folder.Parent = workspace
++	blocksFolder = folder
++
++	PlacementNetwork.PlaceBlock.OnServerEvent:Connect(onPlaceBlock)
++	Players.PlayerRemoving:Connect(function(player)
++		recentRequestTimes[player] = nil
++	end)
++end
++
++return Module
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementServerService.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementSharedService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementSharedService.luau
+new file mode 100644
+index 0000000..08fe9fa
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/PlacementSharedService.luau
+@@ -0,0 +1,23 @@
++--!strict
++--[[
++	Placement constants and grid math both realms need.
++]]
++
++const BlockTypes = require("@game/ServerScriptService/Modules/Catalogs/BlockTypes")
++const Grid = require("@game/ServerScriptService/Modules/Utilities/Grid")
++
++local Module = {}
++Module.__index = Module
++
++-- Parts with this tag accept clicks: the ground and every placed block.
++Module.SurfaceTag = "PlacementSurface"
++
++--[[
++	Returns the center of the grid cell that a clicked face opens onto.
++]]
++function Module:GetAdjacentCell(hitPosition: Vector3, normal: Vector3): Vector3
++	const blockSize = BlockTypes.BlockSize
++	return Grid.snapToCell(hitPosition + normal * (blockSize / 2), blockSize)
++end
++
++return Module
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/init.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/init.meta.json
+new file mode 100644
+index 0000000..2b32553
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlacementSystem/SystemPackage/init.meta.json
+@@ -0,0 +1,5 @@
++{
++  "properties": {
++    "IconTint": { "Color3": [1, 0, 0] }
++  }
++}

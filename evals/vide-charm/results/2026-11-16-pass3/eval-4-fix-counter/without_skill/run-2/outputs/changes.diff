@@ -1,0 +1,77 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BuildHud.luau b/src/StarterPlayer/StarterPlayerScripts/BuildHud.luau
+index 128e406..66df94e 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BuildHud.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BuildHud.luau
+@@ -29,13 +29,18 @@ clickSound.SoundId = CLICK_SOUND_ID
+ clickSound.Volume = 0.5
+ 
+ local function buildHud(): Frame
++	-- Vide can't track Charm signals directly, so bridge them into Vide sources.
+ 	local count = VideCharm.useSignalState(PlacedBlocks.getCount)
++	local lastPlaced = VideCharm.useSignalState(PlacedBlocks.getLastPlaced)
+ 
+-	Charm.subscribe(PlacedBlocks.getLastPlaced, function(blockTypeName: string?)
+-		if blockTypeName then
++	-- Click whenever the count goes up (not on Clear). Watching the count rather than the last
++	-- block type means placing the same type twice in a row still clicks. The subscription is
++	-- tied to this HUD's Vide scope so hiding the HUD disposes it instead of leaking it.
++	Vide.cleanup(Charm.subscribe(PlacedBlocks.getCount, function(newCount: number, oldCount: number)
++		if newCount > oldCount then
+ 			SoundService:PlayLocalSound(clickSound)
+ 		end
+-	end)
++	end))
+ 
+ 	return create("Frame")({
+ 		Name = "BuildHud",
+@@ -79,8 +84,7 @@ local function buildHud(): Frame
+ 			TextColor3 = MUTED_TEXT_COLOR,
+ 			TextXAlignment = Enum.TextXAlignment.Left,
+ 			Text = function()
+-				local last = PlacedBlocks.getLastPlaced()
+-				return `Last: {last or "none"}`
++				return `Last: {lastPlaced() or "none"}`
+ 			end,
+ 		}),
+ 		create("TextButton")({
+diff --git a/src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau b/src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau
+index 8378be3..c8f9df6 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau
+@@ -21,22 +21,27 @@ PlacedBlocks.getCount = Charm.computed(function(): number
+ 	return #getHistory()
+ end)
+ 
++-- Charm state is immutable: always store a new table instead of mutating the current one. Charm
++-- only notifies when the reference changes, and in Studio it freezes stored tables.
+ local function onBlockPlaced(blockTypeName: string)
+-	setLastPlaced(blockTypeName)
+-
+-	local history = getHistory()
+-	table.insert(history, blockTypeName)
+-	setHistory(history)
++	Charm.batch(function()
++		setHistory(function(history)
++			local nextHistory = table.clone(history)
++			table.insert(nextHistory, blockTypeName)
++			return nextHistory
++		end)
++		setLastPlaced(blockTypeName)
++	end)
+ end
+ 
+ --[[
+ 	Forgets every placed block. The HUD's Clear button calls it.
+ ]]
+ function PlacedBlocks.clear()
+-	local history = getHistory()
+-	table.clear(history)
+-	setHistory(history)
+-	setLastPlaced(nil)
++	Charm.batch(function()
++		setHistory({})
++		setLastPlaced(nil)
++	end)
+ end
+ 
+ --[[

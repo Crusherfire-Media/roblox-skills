@@ -1,0 +1,116 @@
+diff --git a/src/ReplicatedStorage/Shared/StarterKit.model.json b/src/ReplicatedStorage/Shared/StarterKit.model.json
+new file mode 100644
+index 0000000..ffb152d
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/StarterKit.model.json
+@@ -0,0 +1,10 @@
++{
++  "className": "Configuration",
++  "attributes": {
++    "Brick": 20,
++    "Dirt": 20,
++    "Grass": 10,
++    "Window": 0,
++    "Wood": 10
++  }
++}
+diff --git a/src/ServerScriptService/Main.server.luau b/src/ServerScriptService/Main.server.luau
+index 291404f..ea75ce4 100644
+--- a/src/ServerScriptService/Main.server.luau
++++ b/src/ServerScriptService/Main.server.luau
+@@ -1,5 +1,27 @@
+ local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+-Players.PlayerAdded:Connect(function(player: Player)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++
++local starterKit = ReplicatedStorage.Shared:WaitForChild("StarterKit") :: Configuration
++
++local function giveStarterKit(player: Player)
++	for _, blockType in BlockTypes.List do
++		local count = starterKit:GetAttribute(blockType.Name)
++		if typeof(count) ~= "number" then
++			warn(`StarterKit has no number attribute for {blockType.Name}; giving 0`)
++			count = 0
++		end
++		player:SetAttribute(blockType.Name, count)
++	end
++end
++
++local function onPlayerAdded(player: Player)
+ 	print(`{player.Name} joined`)
+-end)
++	giveStarterKit(player)
++end
++
++Players.PlayerAdded:Connect(onPlayerAdded)
++for _, player in Players:GetPlayers() do
++	task.spawn(onPlayerAdded, player)
++end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 19820e1..d74fc5e 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,4 +1,61 @@
+ local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local StarterGui = game:GetService("StarterGui")
++
++local BlockTypes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("BlockTypes"))
++
++local NOTIFICATION_RETRY_SECONDS = 0.5
++local NOTIFICATION_MAX_ATTEMPTS = 20
+ 
+ local localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
++
++local function waitForBlockCountsAsync(): { [string]: number }
++	local counts = {}
++	for _, blockType in BlockTypes.List do
++		local count = localPlayer:GetAttribute(blockType.Name)
++		while typeof(count) ~= "number" do
++			localPlayer:GetAttributeChangedSignal(blockType.Name):Wait()
++			count = localPlayer:GetAttribute(blockType.Name)
++		end
++		counts[blockType.Name] = count
++	end
++	return counts
++end
++
++local function formatStarterKit(counts: { [string]: number }): string
++	local lines = {}
++	for _, blockType in BlockTypes.List do
++		local count = counts[blockType.Name]
++		if count > 0 then
++			table.insert(lines, `{blockType.DisplayName} x{count}`)
++		end
++	end
++	return table.concat(lines, "\n")
++end
++
++local function showStarterKitAsync()
++	local text = formatStarterKit(waitForBlockCountsAsync())
++	if text == "" then
++		return
++	end
++
++	-- SetCore errors until the CoreScripts register SendNotification, which
++	-- can be after this script starts.
++	for _ = 1, NOTIFICATION_MAX_ATTEMPTS do
++		local success = pcall(function()
++			StarterGui:SetCore("SendNotification", {
++				Title = "Starter kit",
++				Text = text,
++				Duration = 8,
++			})
++		end)
++		if success then
++			return
++		end
++		task.wait(NOTIFICATION_RETRY_SECONDS)
++	end
++	warn("Could not show the starter kit notification")
++end
++
++task.spawn(showStarterKitAsync)

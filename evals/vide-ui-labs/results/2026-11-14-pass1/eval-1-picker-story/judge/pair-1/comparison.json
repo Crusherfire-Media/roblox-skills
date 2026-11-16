@@ -1,0 +1,114 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "Both stories are valid, safe to open in edit mode, and handle a live title and two-way selection correctly. Attempt A meets the user's explicit request to try a really long title with a `LongTitle` toggle. Attempt B gives no easy way to do that. A's only defect is a StyLua line-wrap failure, which is trivial to fix. B's misses are about what the user asked for: no long-title preset, plus a stray print. I pick A, by a narrow margin.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story",
+          "score": 5,
+          "note": "BlockPicker.story.luau returns `{ vide = Vide, controls = controls, story = ... }` with Vide from ReplicatedStorage.Packages.Vide, and `story` returns the picker."
+        },
+        {
+          "criterion": "Controls built from BlockTypes.List, with a text title and an easy long title",
+          "score": 5,
+          "note": "`UILabs.Choose(blockNames)` is built from `BlockTypes.List`, `Title = \"Blocks\"` is a text control, and the `LongTitle` boolean swaps in `LONG_TITLE` with one click."
+        },
+        {
+          "criterion": "Title updates live",
+          "score": 5,
+          "note": "The `Title` prop is widened to `string | () -> string`, and the story passes a derived function that reads `controlValues.Title()` or `LongTitle()`, so the label updates live; the game caller's plain string still type-checks."
+        },
+        {
+          "criterion": "Selection driven by both the control and tile clicks",
+          "score": 5,
+          "note": "A local `source` is passed as both `Selected` and `Select`, and an `effect` copies the `Selected` control into it, so both the control and a tile click move the highlight."
+        },
+        {
+          "criterion": "Safe in edit mode",
+          "score": 5,
+          "note": "It requires only BlockTypes, UILabs, Vide, and BlockPicker, never yields, and creates nothing outside the returned picker."
+        },
+        {
+          "criterion": "Correct, in scope, and checks pass",
+          "score": 3,
+          "note": "The code is small and readable, but StyLua fails on the long `LONG_TITLE` line and the story function has no type annotations."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story",
+          "score": 5,
+          "note": "It returns `{ summary, vide = Vide, controls, story }`, and `story` returns a Frame that wraps the picker."
+        },
+        {
+          "criterion": "Controls built from BlockTypes.List, with a text title and an easy long title",
+          "score": 3,
+          "note": "`Choose(BLOCK_NAMES, 1)` is built from `BlockTypes.List` and Title is a text control, but there is no long-title default or preset, so the user has to type one in."
+        },
+        {
+          "criterion": "Title updates live",
+          "score": 5,
+          "note": "`Title = controls.Title` passes the source straight through, and the prop type is widened to `string | () -> string`."
+        },
+        {
+          "criterion": "Selection driven by both the control and tile clicks",
+          "score": 5,
+          "note": "`indexes` over `{ [controls.Selected()] = true }` rebuilds the picker with a fresh `source(initialName)`, and `Select` updates that source, so both inputs work, though changing the control rebuilds the whole picker."
+        },
+        {
+          "criterion": "Safe in edit mode",
+          "score": 5,
+          "note": "It requires only the allowed modules, never yields, and creates nothing outside the preview."
+        },
+        {
+          "criterion": "Correct, in scope, and checks pass",
+          "score": 4,
+          "note": "All checks pass and StoryProps is typed, but the Select callback leaves a stray debug `print`."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Has a one-click long-title toggle, which the user asked for explicitly",
+        "Simple, correct selection state using source plus effect",
+        "Minimal change to BlockPicker"
+      ],
+      "weaknesses": [
+        "StyLua check fails (formatting only)",
+        "The story's props are untyped"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "All automated checks pass",
+        "StoryProps is typed and the controls are ordered",
+        "Clean selection handling with indexes"
+      ],
+      "weaknesses": [
+        "Doesn't make it easy to try a really long title, which the user asked for",
+        "Rebuilds the whole picker whenever the Selected control changes",
+        "Leftover debug print"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8,
+    "with_skill": 7
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

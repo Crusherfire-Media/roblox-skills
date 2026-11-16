@@ -1,0 +1,123 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "**B wins narrowly.** Both attempts pass every automatic check (luau-lsp, selene, StyLua) and fix the per-frame cost properly. Both count blocks from `ChildAdded`/`ChildRemoved`, rebuild the panel text only when a count or the hovered block changes, and wrote honest reports that say the after-change timings still need measuring in Studio.\n\nWhy B is ahead:\n- **Hover lookup:** B uses a lookup keyed by grid cell, which the rubric names directly, and checks at most 3 x 3 x 3 cells. A uses `GetPartBoundsInRadius`, which also no longer grows with build size, but it creates a small table every frame.\n- **Same behaviour:** A's radius query skips parts with CanQuery off or a non-default collision group. A documents this, and placed blocks use the defaults today. B also keeps the old tie-break order between equally distant blocks.\n- **Report:** B's before/after table marks every after value \"not measured yet\". B also adds a `BlockInfo:Step` MicroProfiler label to look for in Studio, and warns that the phone may still be limited by rendering once this script is cheap.\n\nB's one new assumption is that blocks are never moved or renamed after placement. It says so in the report and in the code, and it holds for the current placement script.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Event-driven counts",
+          "score": 5,
+          "note": "`ChildAdded`/`ChildRemoved` update `counts` and `totalChildren`, with one `GetChildren` pass at startup and none per frame."
+        },
+        {
+          "criterion": "Hover lookup independent of block count",
+          "score": 4,
+          "note": "`Workspace:GetPartBoundsInRadius(hitPosition, HOVER_RADIUS, overlapParams)` checks only nearby parts. That is O(local), but it uses an engine spatial query, not the result Instance or a grid lookup the rubric names."
+        },
+        {
+          "criterion": "Work only on input change",
+          "score": 5,
+          "note": "The early return on `not countsDirty and hovered == shownHovered` skips the text rebuild, and both `Adornee` and `Text` are guarded with `~=` checks."
+        },
+        {
+          "criterion": "Same behavior",
+          "score": 4,
+          "note": "Keeps the nearest-centre-within-radius rule and counts all children for Total. The CanQuery and collision-group difference and the tie order are documented, and tie order is not kept."
+        },
+        {
+          "criterion": "Removes cost rather than throttling",
+          "score": 5,
+          "note": "No throttling, pooling or parallel code. The per-frame work is one raycast plus one small query."
+        },
+        {
+          "criterion": "Honest report",
+          "score": 5,
+          "note": "Explains the O(blocks) cost and the roughly 18,000 slots of garbage, states that nothing ran in Studio, and lists MicroProfiler, scale, phone FPS and behaviour checks."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Changes only the script and the report. The code is typed, readable, and passes all checks."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Event-driven counts",
+          "score": 5,
+          "note": "`onBlockAdded`/`onBlockRemoved` keep `counts` and `totalCount` current, with a startup pass guarded by `records[block]`."
+        },
+        {
+          "criterion": "Hover lookup independent of block count",
+          "score": 5,
+          "note": "A grid keyed by `Vector3` cell, with cell size equal to `HOVER_RADIUS`, checks at most 3x3x3 cells around the hit point."
+        },
+        {
+          "criterion": "Work only on input change",
+          "score": 5,
+          "note": "`isTextDirty` is set only when counts or the hovered block change, and `Adornee` is written only when `newHovered ~= hovered`."
+        },
+        {
+          "criterion": "Same behavior",
+          "score": 5,
+          "note": "Keeps the radius rule and the IsA BasePart filter, and even matches the old GetChildren tie order through `Order`. The new no-move/no-rename assumption is documented."
+        },
+        {
+          "criterion": "Removes cost rather than throttling",
+          "score": 5,
+          "note": "No throttling, pooling or parallel code. The per-frame cost is a constant-bounded grid probe."
+        },
+        {
+          "criterion": "Honest report",
+          "score": 5,
+          "note": "The before/after table marks the after column \"not measured yet\" and explains the linear cost and allocations. It points to a dedicated `BlockInfo:Step` label, a scale check and phone FPS, and warns that rendering may be the next bottleneck."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Changes only the script and the report. The code is typed with a `BlockRecord` type, passes all checks, and adds a helpful profile label."
+        }
+      ],
+      "overall_score": 9
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Simple, low-state design that relies on the engine's spatial query",
+        "Guards against double counting with the `countedName` map",
+        "Clear report that marks the results as unmeasured"
+      ],
+      "weaknesses": [
+        "The radius query adds a small allocation each frame and can behave differently for CanQuery=false parts or non-default collision groups",
+        "Does not keep the tie-break order"
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "Grid-cell lookup exactly as the rubric prefers, with no engine query allocations",
+        "Keeps tie-breaking the same as before",
+        "Very honest report with a before/after table and useful next steps"
+      ],
+      "weaknesses": [
+        "Caches each block's position, so blocks moved later would be missed (documented)",
+        "More state to maintain than A's version"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8.5,
+    "with_skill": 9
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

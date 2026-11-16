@@ -1,0 +1,125 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are correct: per-player CharmSync keys, a ready handshake, a vide-charm bridge inside the mount scope, and no client writes to the synced signal. A wins narrowly because one strictly typed PlayerData type and default are shared by server and client, which also makes the limit a single source and shows 50 before the first sync. B is clean and avoids A's small race between the ready request and PlayerAdded, but its `:: any` casts mean the type checker can't catch a mismatch between the two hand-kept PlayerState modules.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Server Charm state, limit check, cleanup",
+          "score": 5,
+          "note": "`Charm.signal({} :: { [Player]: PlayerData? })` is updated through `table.clone` in setPlayerData. The check reads `PlayerData.getData(player).BlocksLeft <= 0`, and onPlayerRemoving sets the player's entry to nil."
+        },
+        {
+          "criterion": "Server sync wiring",
+          "score": 5,
+          "note": "`CharmSync.server.connect` is called once in Start and fires the remote to one player. Each player is subscribed under `PlayerData-{userId}` with a per-player computed, and `removeClient` runs on PlayerRemoving."
+        },
+        {
+          "criterion": "Client sync wiring",
+          "score": 4,
+          "note": "StartAsync calls addSignals, connects OnClientEvent to `client.patch`, and only then fires FireServer. There is a small race: onClientReady drops a ready request that arrives before the server's onPlayerAdded has created the player's data."
+        },
+        {
+          "criterion": "Vide bridge, shared limit, pre-payload display",
+          "score": 5,
+          "note": "`VideCharm.useSignalState` runs inside the mounted `app`. The limit lives once in the shared `PlayerDataSync.DefaultData`, so the label reads 50 before the first sync."
+        },
+        {
+          "criterion": "UI never writes synced signal",
+          "score": 5,
+          "note": "setData is used only as the CharmSync setter; the UI only reads `getData`."
+        },
+        {
+          "criterion": "Easy to add next value",
+          "score": 5,
+          "note": "A new value means adding a field to the `PlayerData` type and `DefaultData`; the whole table is synced under one key."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "Strict typing is used throughout and all checks pass. Placement and the hotbar still work, and the new Hotbar component keeps the layout clean."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Server Charm state, limit check, cleanup",
+          "score": 5,
+          "note": "One `Charm.atom` per player, created in `PlayerState.get` and dropped on PlayerRemoving. The check reads `blocksLeft() <= 0`."
+        },
+        {
+          "criterion": "Server sync wiring",
+          "score": 5,
+          "note": "`server.connect` is called once, and the callback fires the remote to one player. Keys are per player (`field:userId` via keyAtoms), and `removeClient` runs on leave."
+        },
+        {
+          "criterion": "Client sync wiring",
+          "score": 5,
+          "note": "addSignals runs before the ready FireServer, OnClientEvent is connected to `client.patch` first, and the server subscribes on the ready request without depending on PlayerAdded order."
+        },
+        {
+          "criterion": "Vide bridge, shared limit, pre-payload display",
+          "score": 5,
+          "note": "`VideCharm.useAtom` is called inside the mounted app. The server syncs the remaining count itself, and the label stays hidden while the count is nil."
+        },
+        {
+          "criterion": "UI never writes synced signal",
+          "score": 5,
+          "note": "The client atoms are only written by CharmSync."
+        },
+        {
+          "criterion": "Easy to add next value",
+          "score": 4,
+          "note": "A new value means adding a matching atom to both PlayerState modules. Because of the `:: any` casts, a name mismatch between the two modules isn't checked."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "All checks pass and behaviour is correct. The `:: any` casts in keyAtoms calls lose type safety, and the files are not strict mode."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Fully typed per-player data table in a shared module",
+        "Shared default doubles as the single 50-block limit and as the value shown before the first sync",
+        "Ready handshake ordered correctly on the client"
+      ],
+      "weaknesses": [
+        "A ready request that arrives before PlayerAdded is ignored, so that player would never be subscribed",
+        "Every placement copies the table holding all players' data and reruns every player's computed (minor)",
+        "The explicit Start/StartAsync calls add wiring to the entry scripts"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Simple per-player atoms with lazy creation",
+        "Robust ready handshake with a guard against late requests from leaving players",
+        "Label is hidden until the count is known"
+      ],
+      "weaknesses": [
+        "`:: any` casts bypass typing on the sync keys",
+        "Field lists on the server and client must be kept in step by hand, with no shared type",
+        "The label is hidden briefly at startup instead of showing a count"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

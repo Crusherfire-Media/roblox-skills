@@ -1,0 +1,50 @@
+{
+  "id": 1,
+  "name": "kept-pages",
+  "skill": "vide-performance",
+  "prompt": "The build menu hitches all the time. It's BuildMenu.luau, opened with M or the Menu button, and Main.client.luau mounts it (both in src/StarterPlayer/StarterPlayerScripts). In the MicroProfiler on my laptop a normal frame is about 8 ms, but switching to the Shapes tab is a 40 ms frame with about 450 instances created, and Colors is about 30 ms with about 370. It's the same every time, not just the first. Opening the menu when it was last on Shapes or Colors spikes the same way.\n\nMake opening the menu and switching tabs smooth after the first time, without changing how the menu looks or animates. Then write a short note in docs/perf/build-menu.md: what you changed, and how I can check the improvement in Studio.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/shared/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/kept-pages/BuildMenu.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau" },
+    { "from": "fixtures/kept-pages/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/perf/build-menu.md",
+      "text": "The note docs/perf/build-menu.md exists"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau",
+      "pattern": "switch\\(props\\.Tab\\)",
+      "text": "Pages are no longer chosen with switch, which destroys the old page on every tab change"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau",
+      "pattern": "show\\(isMenuOpen,",
+      "text": "The menu is no longer built by show on the open flag, which destroys it on every close"
+    }
+  ],
+  "rubric": [
+    "Tab switches no longer rebuild pages: each page is built once (on its first visit, or up front) and kept, and switching only shows one and hides the others, for example `indexes` keyed by a table of visited tabs or every page built once with a bound `Visible`.",
+    "Opening no longer rebuilds the menu: it is built once (on first open or at start) and kept while closed, instead of `show` destroying it on every close.",
+    "The open and close slide still play every time, not only on the first open: the kept menu drives its slide from its own open flag (which starts closed, so the first open slides in too) and stays on screen until it has slid out.",
+    "Per-frame work stops while it can't be seen: the rainbow swatch's Heartbeat connection (or its replacement) runs only while the Colors page is on show and the menu is open, rather than forever once the page has been built.",
+    "A kept page still behaves like the old freshly built one where a player would notice (for example the scrolling pages start at the top again when the menu reopens), or the note names the difference as a choice for the user.",
+    "docs/perf/build-menu.md says what changed and how to confirm it on the same actions as the report: frame time and instances created when opening the menu and switching to Shapes or Colors after the first time, before and after, plus what to check by eye (slide, highlight, tint selection).",
+    "Correct and in scope: the menu looks the same, tabs, tint selection, the M key and Menu button still work, the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files, such as a preview story, count neither for nor against."
+  ],
+  "judge_facts": [
+    "Vide 0.4.1 `switch` and `show` (vide/src/switch.luau, show.luau): when the key changes, the old key's branch scope is destroyed (after the delay its builder returned) and the new key's component is built in a new scope, so returning to a tab or reopening rebuilds it from scratch. Each branch gets a `present` source that starts false and is set true right after its builder runs, and set false when its key goes away.",
+    "Vide 0.4.1 `indexes(input, component)` (vide/src/indexes.luau): builds one scope per key of the input table, keeps it while the key stays in the table (updating its value source when the value changes), and destroys it only when the key leaves.",
+    "Vide 0.4.1 `spring(source, period?, dampingRatio?)` (vide/src/spring.luau) starts at the source's value when created and animates toward later values; its second return value sets position or velocity directly.",
+    "Vide 0.4.1 (vide/src/graph.luau, implicit_effect.luau): a `derive` reruns its readers only when its new value `~=` the old one, while a function bound to a property reruns whenever a source it reads changes and writes the property each time it reruns.",
+    "Vide 0.4.1 `cleanup(value)` (vide/src/cleanup.luau) registers a cleanup on the running scope: a connection is disconnected and an Instance destroyed when the scope is destroyed."
+  ],
+  "timeout_minutes": 25
+}

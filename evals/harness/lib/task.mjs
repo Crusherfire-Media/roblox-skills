@@ -3,6 +3,9 @@ import path from "node:path";
 
 export const AUTO_CHECKS = ["luau-lsp", "selene", "stylua"];
 const CHECK_TYPES = ["file_exists", "file_absent", "file_matches", "file_not_matches", "any_file_matches", "command"];
+// Per-task library facts go into the judge prompt; the caps keep them from crowding out the diffs.
+export const MAX_JUDGE_FACTS = 12;
+export const MAX_JUDGE_FACT_CHARS = 600;
 
 // Paths in a task file are relative to the project (or, for setup files, to the
 // task file's folder). Rejecting absolute paths and ".." keeps a task from reading
@@ -57,6 +60,11 @@ export function validateTask(task) {
 		throw new Error("rubric must list 1 to 12 criteria");
 	}
 	task.rubric.forEach((c, i) => assertString(c, `rubric[${i}]`, 500));
+	const judgeFacts = task.judge_facts ?? [];
+	if (!Array.isArray(judgeFacts) || judgeFacts.length > MAX_JUDGE_FACTS) {
+		throw new Error(`judge_facts must list at most ${MAX_JUDGE_FACTS} facts`);
+	}
+	judgeFacts.forEach((f, i) => assertString(f, `judge_facts[${i}]`, MAX_JUDGE_FACT_CHARS));
 	const autoChecks = task.auto_checks ?? AUTO_CHECKS;
 	if (!Array.isArray(autoChecks) || !autoChecks.every((c) => AUTO_CHECKS.includes(c))) {
 		throw new Error(`auto_checks must be a subset of ${AUTO_CHECKS.join(", ")}`);
@@ -74,7 +82,7 @@ export function validateTask(task) {
 	if (typeof timeout !== "number" || timeout <= 0 || timeout > 120) {
 		throw new Error("timeout_minutes must be between 0 and 120");
 	}
-	return { ...task, auto_checks: autoChecks, checks, setup_files: setupFiles, timeout_minutes: timeout };
+	return { ...task, judge_facts: judgeFacts, auto_checks: autoChecks, checks, setup_files: setupFiles, timeout_minutes: timeout };
 }
 
 export function loadTask(file) {

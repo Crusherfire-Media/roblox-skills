@@ -1,0 +1,49 @@
+{
+  "id": 3,
+  "name": "startup-order",
+  "skill": "game-architecture",
+  "prompt": "I added plots and rounds, and now startup is broken in two ways.\n\n1. In some playtests every click says \"You can only build on a plot.\" even when I'm standing on one. Other playtests it works. When it's broken, the server output has:\n\n[S] >> Failed to init module _PlotPlacementMediator (took 0.000 seconds)\nServerScriptService.Modules.Systems.Gameplay.PlotSystem.Implementation._PlotPlacementMediator:13: attempt to iterate over a nil value\n[S] >> Skipping :Start() for module _PlotPlacementMediator because its :Init() failed\n\n2. Clients never finish loading: the number keys do nothing and clicking places nothing. The server output keeps printing this and never gets to === LOADING FINISHED ===:\n\n[S] >> :Start() for Module 'RoundServerService' is taking a while! (10.003 seconds elapsed)\n[S] >> :Start() for Module 'RoundServerService' is taking a while! (15.010 seconds elapsed)\n\nThe plot and round code is in src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem and RoundSystem. Please fix both. Keep the round timings, and keep clients waiting for the server to finish loading before they start.",
+  "setup_files": [
+    {
+      "from": "fixtures/base/src",
+      "to": "src"
+    },
+    {
+      "from": "fixtures/placement/src",
+      "to": "src"
+    },
+    {
+      "from": "fixtures/startup/src",
+      "to": "src"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\").posix,cp=require(\"child_process\");\nconst R=\"src/ServerScriptService\";\nconst rd=(f)=>{try{return JSON.parse(fs.readFileSync(f,\"utf8\").replace(/^\\uFEFF/,\"\"))}catch(e){return null}};\nconst attrs=(f)=>((rd(f)||{}).attributes)||{};\nconst isInit=(f)=>/^init\\.luau$/.test(p.basename(f));\nconst metaOf=(f)=>isInit(f)?p.join(p.dirname(f),\"init.meta.json\"):f.replace(/\\.luau$/,\".meta.json\");\nconst isModuleDir=(d)=>fs.existsSync(p.join(d,\"init.luau\"));\nconst parentDir=(f)=>isInit(f)?p.dirname(p.dirname(f)):p.dirname(f);\nconst owner=(f)=>{let o=f;let d=parentDir(f);while(d.startsWith(R+\"/\")){if(isModuleDir(d))o=p.join(d,\"init.luau\");d=p.dirname(d)}return o};\nconst cascade=(f,name)=>{let d=parentDir(f);while(d.startsWith(R)){if(!isModuleDir(d)){const v=attrs(p.join(d,\"init.meta.json\"))[name];if(v!==undefined)return v}if(d===R)break;d=p.dirname(d)}return undefined};\nconst relocates=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.RelocateToServerScriptService===true)return false;if(a.RelocateToReplicatedStorage!==undefined)return a.RelocateToReplicatedStorage===true;return cascade(f,\"RelocateToReplicatedStorage\")===true};\nconst clientOnly=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.ClientOnly!==undefined)return a.ClientOnly===true;return cascade(f,\"ClientOnly\")===true};\nconst changed=()=>cp.execFileSync(\"git\",[\"status\",\"--porcelain\",\"--untracked-files=all\"],{encoding:\"utf8\"}).split(/\\r?\\n/).filter(Boolean).map((l)=>l.slice(3).replace(/^\"|\"$/g,\"\")).filter((f)=>fs.existsSync(f));\nconst walk=(d,acc=[])=>{if(!fs.existsSync(d))return acc;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f,acc);else acc.push(f)}return acc};\nconst src=(f)=>fs.readFileSync(f,\"utf8\");\nconst fail=(m)=>{console.log(m);process.exit(1)};\nconst f=\"src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau\";\nif(!fs.existsSync(f))fail(\"RoundServerService.luau is missing\");\nconst s=src(f);\nfor(const name of [\"Init\",\"Start\"]){\nconst m=new RegExp(\"function RoundServerService[:.]\"+name+\"\\\\([^)]*\\\\)([\\\\s\\\\S]*?)\\\\nend\").exec(s);\nif(!m)continue;\nconst body=m[1];\nconst y=body.search(/task\\.wait\\(|:Wait\\(|\\bwait\\(|\\bwhile\\s|\\brepeat\\s|IsServerLoaded/);\nconst sp=body.search(/task\\.(spawn|defer)\\(|coroutine\\.(wrap|resume)\\(/);\nif(y!==-1&&(sp===-1||sp>y))fail(\"RoundServerService:\"+name+\" still waits or loops before handing off to a new thread\");\n}\nconsole.log(\"RoundServerService's Init and Start hand any waiting or looping to a new thread\");"
+      ],
+      "expect_exit": 0,
+      "text": "RoundServerService's Init and Start no longer wait or loop on the loader's thread (the planted yield is gone)"
+    }
+  ],
+  "rubric": [
+    "Fixes the plot error for good: the mediator's Init read PlotServerService's plots before PlotServerService's own Init created them, and modules with equal LoaderPriority have no fixed order. Moving the registration to the mediator's Start (which runs after every Init), or making it order-independent (plots created on first request, or placement asking for them when needed), fixes it; a higher LoaderPriority on PlotServerService also works. Retrying, waiting, or swallowing the error does not.",
+    "Fixes the stuck load: RoundServerService:Start waited for `IsServerLoaded()`, which only becomes true after every Start has returned, then ran the round loop inline, so it never returned. After the fix Start returns at once: the loop runs in a thread started with `task.spawn` or `task.defer`, and any wait for loaded state or for players happens inside that thread.",
+    "Keeps behavior: rounds still wait for a player, run a 15-second intermission and a 120-second building round, set the RoundState and RoundEndsAt attributes, and clear the blocks when a round ends; clients still wait for the server (`WAIT_FOR_SERVER` stays on); all eight plots still accept blocks.",
+    "Doesn't hide the symptoms: no raised YieldThreshold, no verbose logging or WAIT_FOR_SERVER turned off, no pcall that swallows the error, no deleted mediator.",
+    "In scope: changes stay in the plot and round systems plus anything strictly needed, and luau-lsp, selene, and StyLua pass on the changed files. Supporting files such as stories or specs count neither for nor against."
+  ],
+  "judge_facts": [
+    "Module Loader 4.0.1 (module-loader/src/init.luau, Module.Start): it requires every discovered module, then calls Init on each, then Start on each, in LoaderPriority order (higher first, default 0); modules with equal priority have no fixed order. Each call runs in its own thread, but the loader waits for it to return before calling the next one, with no timeout, so a yield in a module's top level, Init, or Start holds up every module after it. A module whose Init errors gets no Start.",
+    "Module Loader 4.0.1 (module-loader/src/init.luau): the ServerLoaded attribute that IsServerLoaded() reads is set only after every module's Start has returned. With the WAIT_FOR_SERVER setting, a client's Start waits for ServerLoaded before it requires any client module. Once a call runs past YieldThreshold (default 10 seconds), a 'taking a while' warning repeats every 5 seconds until it returns."
+  ],
+  "timeout_minutes": 20
+}

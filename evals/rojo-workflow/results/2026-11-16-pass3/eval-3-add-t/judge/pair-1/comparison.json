@@ -1,0 +1,102 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "The packaging and PR quality are nearly identical. A keeps the existing block type lookup and the handler's statement order intact, which is the lower-risk, faithful refactor the task asked for. B's t.keyOf copies ByName's keys when the script loads, and B reorders the handler without needing to. B's PR is slightly more cautious about what was run, but that doesn't outweigh the extra risk in the handler change.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "pesde.toml dependency",
+          "score": 5,
+          "note": "Adds `t = { wally = \"osyrisrblx/t\", version = \"=3.1.1\" }` under [dependencies], pinned exactly, under an alias that matches the require."
+        },
+        {
+          "criterion": "Require path / no other package manager",
+          "score": 5,
+          "note": "Uses `require(ReplicatedStorage.Packages.t)`; no wally.toml, lockfile edits, or roblox_packages files."
+        },
+        {
+          "criterion": "Correct t usage and all checks kept",
+          "score": 5,
+          "note": "`t.tuple(t.string, t.intersection(t.Vector3, notNaN))` with an early return; the ByName lookup, rate limit, character, reach, Y<0 and occupied checks are unchanged."
+        },
+        {
+          "criterion": "PR description",
+          "score": 5,
+          "note": "Has a 'Before you test' section with `pesde install`, says to commit `pesde.lock`, and says luau-lsp wasn't run; the stylua/selene claim is accurate."
+        },
+        {
+          "criterion": "Scope / lint",
+          "score": 5,
+          "note": "Only pesde.toml, the README table, and the handler change; selene and StyLua pass."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "pesde.toml dependency",
+          "score": 5,
+          "note": "Same correct `t = { wally = \"osyrisrblx/t\", version = \"=3.1.1\" }` entry under [dependencies]."
+        },
+        {
+          "criterion": "Require path / no other package manager",
+          "score": 5,
+          "note": "`require(ReplicatedStorage.Packages.t)`; no lockfile or other package manager changes."
+        },
+        {
+          "criterion": "Correct t usage and all checks kept",
+          "score": 4,
+          "note": "`t.tuple(t.keyOf(BlockTypes.ByName), t.intersection(t.Vector3, isNotNaN))` keeps every check, but takes a load-time copy of ByName's keys, drops the explicit nil guard, and moves `snapToCell` earlier."
+        },
+        {
+          "criterion": "PR description",
+          "score": 5,
+          "note": "Step-by-step pesde install, commit pesde.lock, Rojo restart; states plainly that nothing was run."
+        },
+        {
+          "criterion": "Scope / lint",
+          "score": 4,
+          "note": "Lint passes, but the handler's statement order changed (snapToCell moved) beyond what the task needed."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Small, faithful change that keeps the block type lookup explicit",
+        "Clear table mapping each old check to its new form, including why NaN needs its own check",
+        "Accurate install and lockfile instructions"
+      ],
+      "weaknesses": [
+        "Says lint was run (true, but this wasn't requested)",
+        "README edit is slightly beyond the task, though it fits the repo's conventions"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Very honest and thorough PR description with Rojo restart steps",
+        "Neat use of t.keyOf to merge the string check and the lookup"
+      ],
+      "weaknesses": [
+        "t.keyOf copies ByName's keys at load time, so it is less robust if the table changes",
+        "Unneeded reordering of snapToCell and loss of the explicit blockType nil check"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 9,
+    "with_skill": 8
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

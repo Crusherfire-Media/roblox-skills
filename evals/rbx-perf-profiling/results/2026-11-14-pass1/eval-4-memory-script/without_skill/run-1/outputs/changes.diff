@@ -1,0 +1,183 @@
+diff --git a/tools/profiling/memory.luau b/tools/profiling/memory.luau
+new file mode 100644
+index 0000000..d6b17ce
+--- /dev/null
++++ b/tools/profiling/memory.luau
+@@ -0,0 +1,177 @@
++-- Usage: lute memory.luau <file.gprx> [topN]
++-- Finds what is growing under the "memory" counter tree.
++-- Frames are printed as "id/abs t=Ns", the same as overview.luau: id is LibMP's FrameId
++-- (pass it to FetchFrameDesc etc.), abs is FrameAbsoluteId, and t is seconds into the dump,
++-- so you can find the frame in the MicroProfiler UI too.
++local process = require("@lute/process")
++local LibMP = require("./LibMP")
++
++local path = process.args[2]
++local topN = tonumber(process.args[3]) or 10
++
++local session = LibMP.Session.OpenFromFile(path)
++assert(session, "could not open " .. tostring(path))
++
++local tickToMs = session:FetchGlobalDesc().TickToMsCpu
++local minId, maxId = session:GetFrameIdMin(), session:GetFrameIdMax()
++
++-- Start of the first frame, so peaks can also be given as seconds into the dump.
++local t0
++for id = minId, maxId do
++	local d = session:FetchFrameDesc(id)
++	if not d.IsIncomplete then
++		t0 = d.TickStartCpu
++		break
++	end
++end
++
++local function frameName(frameId: number): string
++	local ok, d = pcall(session.FetchFrameDesc, session, frameId)
++	if not ok or not d then
++		return ("%d/?"):format(frameId)
++	end
++	if t0 then
++		return ("%d/%d t=%.2fs"):format(frameId, d.FrameAbsoluteId, (d.TickStartCpu - t0) * tickToMs / 1000)
++	end
++	return ("%d/%d"):format(frameId, d.FrameAbsoluteId)
++end
++
++-- Root-anchored first so we don't pick up some nested node that happens to be called "memory".
++local rootId = session:FindCounterId("/memory")
++if rootId == 0 then
++	rootId = session:FindCounterId("memory")
++end
++assert(rootId ~= 0, "no memory counter in this dump")
++
++local descCache = {}
++local function desc(id: number)
++	local d = descCache[id]
++	if not d then
++		d = session:FetchCounterDesc(id)
++		descCache[id] = d
++	end
++	return d
++end
++
++local function children(id: number): { number }
++	local out = {}
++	local c = desc(id).FirstChild
++	while c ~= 0 do
++		table.insert(out, c)
++		c = desc(c).Sibling
++	end
++	return out
++end
++
++local function fullPath(id: number): string
++	local parts = {}
++	while id ~= 0 do
++		table.insert(parts, 1, desc(id).CounterName)
++		id = desc(id).Parent
++	end
++	return table.concat(parts, "/")
++end
++
++type Stats = { Id: number, Path: string, First: number, Last: number, Peak: number, PeakFrame: number, Growth: number }
++
++local function stats(id: number): Stats?
++	local samples = session:FetchCounterSamples(id) -- deep copy, no Dispose needed
++	if #samples == 0 then
++		return nil
++	end
++	table.sort(samples, function(a, b)
++		return a.FrameId < b.FrameId
++	end)
++	local peak = samples[1]
++	for _, s in samples do
++		if s.Value > peak.Value then
++			peak = s
++		end
++	end
++	local first, last = samples[1].Value, samples[#samples].Value
++	return {
++		Id = id,
++		Path = fullPath(id),
++		First = first,
++		Last = last,
++		Peak = peak.Value,
++		PeakFrame = peak.FrameId,
++		Growth = last - first,
++	}
++end
++
++local function byGrowth(a: Stats, b: Stats)
++	return a.Growth > b.Growth
++end
++
++-- Memory counters are in bytes; print MB.
++local function mb(v: number): string
++	return ("%.2f"):format(v / (1024 * 1024))
++end
++local function signedMb(v: number): string
++	return (v >= 0 and "+" or "") .. mb(v)
++end
++
++print(("frames %d..%d (%d), counter root: %s"):format(minId, maxId, maxId - minId + 1, fullPath(rootId)))
++
++-- Subsystems: direct children of memory.
++local subsystems = {}
++for _, id in children(rootId) do
++	local s = stats(id)
++	if s then
++		table.insert(subsystems, s)
++	end
++end
++table.sort(subsystems, byGrowth)
++
++print("\nmemory subsystems by growth (MB; peak frame is id/abs):")
++print(("  %-32s %10s %10s %10s %10s  %s"):format("subsystem", "first", "last", "peak", "growth", "peak frame"))
++for _, s in subsystems do
++	print(
++		("  %-32s %10s %10s %10s %10s  %s"):format(
++			s.Path,
++			mb(s.First),
++			mb(s.Last),
++			mb(s.Peak),
++			signedMb(s.Growth),
++			frameName(s.PeakFrame)
++		)
++	)
++end
++
++-- Individual counters: every leaf under memory (parents would double-count their children).
++local leaves = {}
++local function collect(id: number)
++	local kids = children(id)
++	if #kids == 0 then
++		local s = stats(id)
++		if s then
++			table.insert(leaves, s)
++		end
++	else
++		for _, k in kids do
++			collect(k)
++		end
++	end
++end
++for _, k in children(rootId) do
++	collect(k)
++end
++table.sort(leaves, byGrowth)
++
++print(("\ntop %d growing counters under memory (MB):"):format(math.min(topN, #leaves)))
++for i = 1, math.min(topN, #leaves) do
++	local s = leaves[i]
++	print(
++		("  %10s  %s  (first %s, last %s, peak %s at frame %s)"):format(
++			signedMb(s.Growth),
++			s.Path,
++			mb(s.First),
++			mb(s.Last),
++			mb(s.Peak),
++			frameName(s.PeakFrame)
++		)
++	)
++end
++
++session:Dispose()

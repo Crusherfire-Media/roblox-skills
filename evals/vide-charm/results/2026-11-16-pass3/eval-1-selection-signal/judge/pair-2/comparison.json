@@ -1,0 +1,111 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are functionally correct. A calls useSignalState in app's mounted scope and leaves BlockPicker untouched as a pure Vide view. B moves the bridge into BlockPicker, so BlockPicker now depends on Charm and its `Selected` prop must be a Charm getter, which goes against criterion 5.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns selection as Charm signal",
+          "score": 5,
+          "note": "`local getBlockType, setSelectedName = Charm.signal(...)`; only the getter is exported, and `setBlockType` keeps the `assert(BlockTypes.ByName[name])` before calling `setSelectedName`."
+        },
+        {
+          "criterion": "Hotbar bridges via useSignalState in mounted scope",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockPlacer.getBlockType)` is called in the body of `app`, which runs inside `mount`, so the source is tracked and disposed with the UI."
+        },
+        {
+          "criterion": "Single copy of selection, BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirrored `source` and its event connection are deleted, the BindableEvent is gone, and `placeAt` reads `getBlockType()`."
+        },
+        {
+          "criterion": "PlacementPreview follows via Charm",
+          "score": 5,
+          "note": "`Charm.listen(BlockPlacer.getBlockType, applyBlockType)` colors the ghost right away and again on every change."
+        },
+        {
+          "criterion": "BlockPicker unchanged / view fed by caller",
+          "score": 5,
+          "note": "BlockPicker is untouched and still gets a Vide source as `Selected` from its caller."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 5,
+          "note": "The change is minimal and typed, and luau-lsp, selene, and StyLua all pass."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns selection as Charm signal",
+          "score": 5,
+          "note": "`getSelected, setSelected = Charm.signal(...)`; the getter is exported as `() -> string`, and `setBlockType` keeps the assert."
+        },
+        {
+          "criterion": "Hotbar bridges via useSignalState in mounted scope",
+          "score": 4,
+          "note": "`useSignalState(props.Selected)` is called in the BlockPicker body, which still runs inside mount, so it works; but Main passes the raw Charm getter as `Selected`."
+        },
+        {
+          "criterion": "Single copy of selection, BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirror source and the BindableEvent are removed, and `placeAt` uses `getSelected()`."
+        },
+        {
+          "criterion": "PlacementPreview follows via Charm",
+          "score": 5,
+          "note": "`Charm.listen(BlockPlacer.getBlockType, applyBlockType)`."
+        },
+        {
+          "criterion": "BlockPicker unchanged / view fed by caller",
+          "score": 2,
+          "note": "BlockPicker now requires VideCharm and expects `Selected` to be a Charm getter; a caller passing a Vide source would get an outline that never updates."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 4,
+          "note": "Works and passes all checks, but makes an unneeded change to BlockPicker."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Bridge sits at the composition root in `app`, inside the mount scope",
+        "BlockPicker stays a pure Vide view with no changes",
+        "Diff is clean and minimal"
+      ],
+      "weaknesses": [
+        "The getter is exported without an explicit type annotation (minor)"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Runtime behavior is correct",
+        "Clear comments and an explicit getter type"
+      ],
+      "weaknesses": [
+        "BlockPicker is now tied to Charm, so its props expect a Charm getter",
+        "Breaks reactivity for callers or stories that pass a Vide source"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 7
+  },
+  "mapping": {
+    "A": "with_skill/run-2",
+    "B": "without_skill/run-2"
+  }
+}

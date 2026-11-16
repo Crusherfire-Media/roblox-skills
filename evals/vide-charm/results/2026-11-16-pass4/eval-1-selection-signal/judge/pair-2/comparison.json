@@ -1,0 +1,112 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts are correct: the signal is owned by BlockPlacer with a private setter, BlockTypeChanged is gone, PlacementPreview uses Charm.listen, and the hotbar calls useSignalState inside a mounted scope. B calls useSignalState in app() and leaves BlockPicker unchanged as a view its caller feeds. A moves the conversion into BlockPicker, which couples it to VideCharm and quietly changes its Selected prop from a Vide source to a Charm getter. That costs A on criterion 5, so B wins.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns Charm signal",
+          "score": 5,
+          "note": "`local getSelected, setSelected = Charm.signal(...)`; only `getBlockType = getSelected` is exported, and `setBlockType` still asserts the name is known before `setSelected(name)`."
+        },
+        {
+          "criterion": "Hotbar converts to tracked, disposed Vide state",
+          "score": 4,
+          "note": "`useSignalState(props.Selected)` in the BlockPicker body runs inside mount's scope, so it is tracked and cleaned up, but the conversion sits inside the view rather than with the caller."
+        },
+        {
+          "criterion": "Single copy, BlockTypeChanged gone",
+          "score": 5,
+          "note": "The Main source and Connect mirror are removed, and so are the BindableEvent and the BlockTypeChanged export."
+        },
+        {
+          "criterion": "PlacementPreview via Charm",
+          "score": 5,
+          "note": "`Charm.listen(BlockPlacer.getBlockType, applyBlockType)` colors the ghost right away and on every change."
+        },
+        {
+          "criterion": "BlockPicker unchanged / view-like",
+          "score": 3,
+          "note": "BlockPicker now requires VideCharm, and its `Selected` prop silently has to be a Charm getter. A caller passing a Vide source would get a static outline."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 5,
+          "note": "All checks pass; placement uses `getSelected()`, and number keys and tile clicks still go through `setBlockType`."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns Charm signal",
+          "score": 5,
+          "note": "`Charm.signal` keeps `setSelectedName` private; `setBlockType` calls `error` on unknown names, then `setSelectedName(name)`."
+        },
+        {
+          "criterion": "Hotbar converts to tracked, disposed Vide state",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockPlacer.getBlockType)` in the body of `app()`, the component passed to mount, so the state is tracked and cleaned up with the UI."
+        },
+        {
+          "criterion": "Single copy, BlockTypeChanged gone",
+          "score": 5,
+          "note": "The mirrored source, the Connect call and the BindableEvent are all removed."
+        },
+        {
+          "criterion": "PlacementPreview via Charm",
+          "score": 5,
+          "note": "`Charm.listen(BlockPlacer.getBlockType, applyBlockType)` covers both the initial color and later changes."
+        },
+        {
+          "criterion": "BlockPicker unchanged / view-like",
+          "score": 5,
+          "note": "BlockPicker.luau is untouched and still receives a Vide source through `Selected = selected`."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 5,
+          "note": "All checks pass; placement uses `getSelectedName()`, and the change is minimal and readable."
+        }
+      ],
+      "overall_score": 9
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Clean Charm signal with the setter kept private and validation kept",
+        "PlacementPreview uses Charm.listen",
+        "All checks pass and BlockTypeChanged is fully removed"
+      ],
+      "weaknesses": [
+        "BlockPicker is coupled to Charm/VideCharm and the meaning of its prop changed without the type showing it",
+        "A Vide source passed as `Selected` (for example from a story) would no longer update the outline"
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "The Charm-to-Vide conversion happens in the mounted app component, as intended",
+        "BlockPicker stays a pure view and needs no change",
+        "Minimal, correct diff with all checks passing"
+      ],
+      "weaknesses": [
+        "Replacing assert with if/error is a minor change that wasn't needed"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8,
+    "with_skill": 9
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

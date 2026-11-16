@@ -1,0 +1,367 @@
+diff --git a/docs/perf/block-info.md b/docs/perf/block-info.md
+new file mode 100644
+index 0000000..dfb22ee
+--- /dev/null
++++ b/docs/perf/block-info.md
+@@ -0,0 +1,82 @@
++# BlockInfo performance
++
++Script: `src/StarterPlayer/StarterPlayerScripts/BlockInfo.client.luau` (block counts panel and
++hover highlight).
++
++## Symptom
++
++With about 6,000 placed blocks, the client MicroProfiler showed `Script_BlockInfo` at about 2.5 ms
++every frame, usually followed by a GC label. Phones dropped to about 35 FPS. An empty baseplate
++was fine. So the cost grew with the number of blocks.
++
++## What was costing time
++
++Everything ran inside one `RenderStepped` callback, every frame:
++
++1. **Counting by scanning.** `blocksFolder:GetChildren()` built a new array of every block (about
++   6,000 entries) just to count blocks by name. That's O(n) work, plus an O(n) allocation, every
++   frame.
++2. **Hover by scanning.** `findHoveredBlock` called `GetChildren()` a second time, then ran
++   `IsA("BasePart")`, read `.Position` and worked out a distance for every block, to find the one
++   nearest the mouse hit point. Each of those is a call from Luau into the engine, so this was
++   the most expensive part.
++3. **A third `GetChildren()`** just for `#children` in the "Total" line.
++4. **Garbage every frame.** Three arrays of about 6,000 entries each, a new counts table, a new
++   `RaycastParams`, a new filter table, and the panel string built up with repeated `..`, which
++   creates a temporary string for each step. That garbage is what caused the GC label after
++   `Script_BlockInfo` most frames.
++5. **`countsLabel.Text` was set every frame**, even when nothing had changed.
++
++The time and garbage per frame both grew with the number of blocks, so bigger builds would
++have been even slower.
++
++## What changed
++
++The per-frame cost no longer depends on how many blocks there are.
++
++- **Counts are updated by events.** `ChildAdded` and `ChildRemoved` on `Workspace.Blocks` update
++  the per-type counts and the total. Each block's name is recorded when it's added, so removal
++  subtracts from the right type. Blocks already in the folder when the script starts are counted
++  once at startup.
++- **Hover uses a grid index.** BaseParts are put into a hash map keyed by grid cell
++  (`floor(position / BlockSize)`, using `Vector3` keys, which don't allocate). Each frame, after
++  the raycast, only the cells within `HOVER_RADIUS` of the hit point are checked (at most 3×3×3 =
++  27 lookups, usually holding a handful of blocks). The rule is the same as before: the nearest
++  BasePart center strictly within `HOVER_RADIUS` of the hit point. Ties still go to the
++  earliest-added block, as they did with `GetChildren` order.
++- **One `RaycastParams`.** It's created once. Its character filter is updated on
++  `CharacterAdded` and `CharacterRemoving`, not rebuilt every frame.
++- **The panel text is rebuilt only when needed.** The counts text is rebuilt (with
++  `table.concat`) only on frames after the counts changed. The label is written only when the
++  counts or the hovered block change. `SelectionBox.Adornee` is set only when the hovered block
++  changes.
++
++Each frame now does one raycast, up to 27 table lookups and nothing else, and creates no
++garbage in steady state.
++
++What players see is unchanged: the same panel layout and text, the same counting rules (any child
++with a known type name counts toward its type, and every child counts toward Total), and the same
++hover rule and highlight.
++
++**Assumption:** blocks don't move or get renamed after they're placed. That's true today, since
++`BlockPlacement.server.luau` creates anchored parts and sets their name before parenting them. If
++something later moves or renames placed blocks, it would need to update the index (or
++remove and re-add the block).
++
++## What to check in Studio
++
++Run a test with your ~6,000-block build (or bigger) and compare with your earlier capture:
++
++1. **MicroProfiler (Ctrl+F6) on the client:** `Script_BlockInfo` should be far below 2.5 ms (it
++   should be in the microsecond range) and stay flat as the build grows. The GC label right after
++   it should be gone from most frames.
++2. **Phone or device emulator:** FPS on the big build should be close to the empty baseplate.
++3. **Counts:** place blocks of each type and check that each count and the Total go up by one.
++   If anything removes blocks, check that the counts go down. Join a server that already has a
++   build and check that the counts are right as soon as the panel appears.
++4. **Hover:** move the mouse over tops, sides, edges and corners of blocks, and over the baseplate
++   right next to a block. The highlight and the "Pointing at:" line should behave as before. The
++   highlight should clear when pointing at the sky or far from any block.
++5. **Respawn:** reset your character and check that hover still ignores your own character.
++6. **Script memory:** in the Developer Console (F9) → Memory, the memory used by Luau should grow
++   steadily with block count (a small record per block) instead of rising and falling every frame.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockInfo.client.luau b/src/StarterPlayer/StarterPlayerScripts/BlockInfo.client.luau
+index c2efed1..0f33238 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockInfo.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockInfo.client.luau
+@@ -2,6 +2,14 @@
+ 	Two building aids on the client: a panel in the top right corner that counts the placed blocks
+ 	of each type, and a selection box on the placed block under the mouse, with its type shown
+ 	under the counts.
++
++	Per-frame work does not depend on how many blocks exist. Counts are kept up to date from
++	ChildAdded and ChildRemoved on the Blocks folder, blocks are indexed by grid cell so the hover
++	lookup checks only the cells near the point under the mouse, and the panel text is rebuilt only
++	when something shown in it changes.
++
++	Blocks are anchored and never renamed after they are placed, so a block's name and position are
++	read once, when it is added.
+ ]]
+ 
+ local Players = game:GetService("Players")
+@@ -15,6 +23,9 @@ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ -- How far from the point under the mouse a block's center may be and still count as hovered.
+ local HOVER_RADIUS = BlockTypes.BlockSize
+ local RAY_LENGTH = 512
++-- Edge length of a cell in the hover index. Any block within HOVER_RADIUS of a point lies in the
++-- cells spanning [point - HOVER_RADIUS, point + HOVER_RADIUS] on each axis.
++local CELL_SIZE = BlockTypes.BlockSize
+ 
+ local localPlayer = Players.LocalPlayer
+ local playerGui = localPlayer:WaitForChild("PlayerGui")
+@@ -50,6 +61,132 @@ selectionBox.LineThickness = 0.05
+ selectionBox.Color3 = Color3.fromRGB(255, 220, 80)
+ selectionBox.Parent = Workspace
+ 
++--------------------------------------------------------------------------------
++-- Block tracking
++--------------------------------------------------------------------------------
++
++type BlockRecord = {
++	name: string,
++	-- Order the block was added in. Ties in hover distance go to the earlier block, as they did
++	-- when blocks were scanned in GetChildren order.
++	order: number,
++	-- Set only for BaseParts, the only blocks that can be hovered.
++	cell: Vector3?,
++	position: Vector3?,
++}
++
++local counts: { [string]: number } = {}
++for _, blockType in BlockTypes.List do
++	counts[blockType.Name] = 0
++end
++local totalCount = 0
++local nextOrder = 0
++
++local records: { [Instance]: BlockRecord } = {}
++-- Cell coordinates (in cells, not studs) to the BaseParts whose centers are in that cell.
++local cells: { [Vector3]: { BasePart } } = {}
++
++-- Set when the counts change; the panel text is rebuilt on the next frame.
++local countsDirty = true
++
++local function cellOf(position: Vector3): Vector3
++	return Vector3.new(
++		math.floor(position.X / CELL_SIZE),
++		math.floor(position.Y / CELL_SIZE),
++		math.floor(position.Z / CELL_SIZE)
++	)
++end
++
++local function onBlockAdded(child: Instance)
++	if records[child] then
++		return
++	end
++
++	nextOrder += 1
++	local record: BlockRecord = {
++		name = child.Name,
++		order = nextOrder,
++		cell = nil,
++		position = nil,
++	}
++
++	if child:IsA("BasePart") then
++		local position = child.Position
++		local cell = cellOf(position)
++		record.position = position
++		record.cell = cell
++		local bucket = cells[cell]
++		if bucket then
++			table.insert(bucket, child)
++		else
++			cells[cell] = { child }
++		end
++	end
++
++	records[child] = record
++	totalCount += 1
++	if counts[record.name] then
++		counts[record.name] += 1
++	end
++	countsDirty = true
++end
++
++local function onBlockRemoved(child: Instance)
++	local record = records[child]
++	if not record then
++		return
++	end
++	records[child] = nil
++
++	local cell = record.cell
++	if cell then
++		local bucket = cells[cell]
++		if bucket then
++			local index = table.find(bucket, child :: BasePart)
++			if index then
++				-- Order within a bucket doesn't matter; ties are settled by record.order.
++				local last = #bucket
++				bucket[index] = bucket[last]
++				bucket[last] = nil
++			end
++			if #bucket == 0 then
++				cells[cell] = nil
++			end
++		end
++	end
++
++	totalCount -= 1
++	if counts[record.name] then
++		counts[record.name] -= 1
++	end
++	countsDirty = true
++end
++
++blocksFolder.ChildAdded:Connect(onBlockAdded)
++blocksFolder.ChildRemoved:Connect(onBlockRemoved)
++for _, child in blocksFolder:GetChildren() do
++	onBlockAdded(child)
++end
++
++--------------------------------------------------------------------------------
++-- Hover
++--------------------------------------------------------------------------------
++
++local raycastParams = RaycastParams.new()
++raycastParams.FilterType = Enum.RaycastFilterType.Exclude
++
++local function updateRaycastFilter()
++	local character = localPlayer.Character
++	raycastParams.FilterDescendantsInstances = if character then { character } else {}
++end
++
++updateRaycastFilter()
++localPlayer.CharacterAdded:Connect(updateRaycastFilter)
++localPlayer.CharacterRemoving:Connect(function()
++	-- Character is still set while CharacterRemoving fires, so clear the filter after it changes.
++	task.defer(updateRaycastFilter)
++end)
++
+ local function findHoveredBlock(): BasePart?
+ 	local camera = Workspace.CurrentCamera
+ 	if not camera then
+@@ -58,54 +195,85 @@ local function findHoveredBlock(): BasePart?
+ 
+ 	local mousePosition = UserInputService:GetMouseLocation()
+ 	local ray = camera:ViewportPointToRay(mousePosition.X, mousePosition.Y)
+-	local params = RaycastParams.new()
+-	params.FilterType = Enum.RaycastFilterType.Exclude
+-	if localPlayer.Character then
+-		params.FilterDescendantsInstances = { localPlayer.Character }
+-	end
+-	local result = Workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
++	local result = Workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, raycastParams)
+ 	if not result then
+ 		return nil
+ 	end
+ 
++	local point = result.Position
++	local minX = math.floor((point.X - HOVER_RADIUS) / CELL_SIZE)
++	local maxX = math.floor((point.X + HOVER_RADIUS) / CELL_SIZE)
++	local minY = math.floor((point.Y - HOVER_RADIUS) / CELL_SIZE)
++	local maxY = math.floor((point.Y + HOVER_RADIUS) / CELL_SIZE)
++	local minZ = math.floor((point.Z - HOVER_RADIUS) / CELL_SIZE)
++	local maxZ = math.floor((point.Z + HOVER_RADIUS) / CELL_SIZE)
++
+ 	local nearest: BasePart? = nil
+ 	local nearestDistance = HOVER_RADIUS
+-	for _, block in blocksFolder:GetChildren() do
+-		if block:IsA("BasePart") then
+-			local distance = (block.Position - result.Position).Magnitude
+-			if distance < nearestDistance then
+-				nearest = block
+-				nearestDistance = distance
++	local nearestOrder = math.huge
++	for x = minX, maxX do
++		for y = minY, maxY do
++			for z = minZ, maxZ do
++				local bucket = cells[Vector3.new(x, y, z)]
++				if bucket then
++					for _, block in bucket do
++						local record = records[block]
++						local distance = ((record.position :: Vector3) - point).Magnitude
++						local winsTie = nearest ~= nil and record.order < nearestOrder
++						if
++							distance < nearestDistance or (distance == nearestDistance and winsTie)
++						then
++							nearest = block
++							nearestDistance = distance
++							nearestOrder = record.order
++						end
++					end
++				end
+ 			end
+ 		end
+ 	end
+ 	return nearest
+ end
+ 
+-RunService.RenderStepped:Connect(function()
+-	local counts: { [string]: number } = {}
++--------------------------------------------------------------------------------
++-- Panel
++--------------------------------------------------------------------------------
++
++local countsText = ""
++local shownHovered: BasePart? = nil
++
++local function rebuildCountsText()
++	local lines = table.create(#BlockTypes.List + 1)
+ 	for _, blockType in BlockTypes.List do
+-		counts[blockType.Name] = 0
++		table.insert(lines, `{blockType.DisplayName}: {counts[blockType.Name]}`)
+ 	end
+-	for _, block in blocksFolder:GetChildren() do
+-		if counts[block.Name] then
+-			counts[block.Name] += 1
+-		end
++	table.insert(lines, `Total: {totalCount}`)
++	countsText = table.concat(lines, "\n")
++end
++
++local function refreshLabel()
++	local text = countsText
++	if shownHovered then
++		local blockType = BlockTypes.ByName[shownHovered.Name]
++		local displayName = if blockType then blockType.DisplayName else shownHovered.Name
++		text ..= "\nPointing at: " .. displayName
+ 	end
++	countsLabel.Text = text
++end
+ 
++RunService.RenderStepped:Connect(function()
+ 	local hovered = findHoveredBlock()
+-	selectionBox.Adornee = hovered
+-
+-	local text = ""
+-	for _, blockType in BlockTypes.List do
+-		text = text .. blockType.DisplayName .. ": " .. counts[blockType.Name] .. "\n"
++	local hoverChanged = hovered ~= shownHovered
++	if hoverChanged then
++		shownHovered = hovered
++		selectionBox.Adornee = hovered
+ 	end
+-	text = text .. "Total: " .. #blocksFolder:GetChildren()
+-	if hovered then
+-		local blockType = BlockTypes.ByName[hovered.Name]
+-		text = text
+-			.. "\nPointing at: "
+-			.. (if blockType then blockType.DisplayName else hovered.Name)
++
++	if countsDirty then
++		countsDirty = false
++		rebuildCountsText()
++		refreshLabel()
++	elseif hoverChanged then
++		refreshLabel()
+ 	end
+-	countsLabel.Text = text
+ end)

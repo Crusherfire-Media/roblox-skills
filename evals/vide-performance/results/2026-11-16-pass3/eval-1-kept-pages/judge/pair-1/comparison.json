@@ -1,0 +1,122 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts correctly keep the pages and the menu, keep the slide animation, and reset the scroll position and hue when a page is shown again. A disconnects the rainbow swatch's Heartbeat connection while it can't be seen, which fully meets the per-frame criterion. B only returns early inside a connection that stays on. A's note is also more complete, with an instance counter, eye checks and the memory cost.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Tab switches no longer rebuild pages",
+          "score": 5,
+          "note": "`indexes(visitedTabs(props.Tab), ...)` builds each page on its first visit, never removes a key, and sets `page.Visible = isOnShow()`."
+        },
+        {
+          "criterion": "Opening no longer rebuilds the menu",
+          "score": 5,
+          "note": "Main.client uses `show(isMenuBuilt, ...)` with a sticky `wasMenuOpened` flag, so the menu is built on the first open and never destroyed."
+        },
+        {
+          "criterion": "Slide plays every time",
+          "score": 5,
+          "note": "The `isBuilt` source starts false and is set true after the panel is built, so the spring starts at 1 and slides in; `isMenuShowing` keeps the panel visible until `slide() < 1` is false."
+        },
+        {
+          "criterion": "Per-frame work stops while unseen",
+          "score": 5,
+          "note": "The Heartbeat connection is made inside an `effect` on `showingContext()`, which reflects whether the menu is showing and the page is on show, so it is cleaned up when the page is hidden."
+        },
+        {
+          "criterion": "Kept page behaves like a fresh one",
+          "score": 5,
+          "note": "`scrollToTopWhenShown` resets `CanvasPosition` each time the page is shown, and the hue resets to 0 when shown."
+        },
+        {
+          "criterion": "Perf note",
+          "score": 5,
+          "note": "Gives MicroProfiler steps for after the first visit, a `DescendantAdded` counter with before/after numbers, the memory cost, and eye checks for the slide, rainbow and scroll (highlight and tint are not called out explicitly)."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Typed, clean use of context and indexes; all checks pass; the M key and Menu button are unchanged."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Tab switches no longer rebuild pages",
+          "score": 5,
+          "note": "`keptPage` uses `show(visited, ...)` with a sticky `visited` flag per tab, and `Visible` is bound to `shown`."
+        },
+        {
+          "criterion": "Opening no longer rebuilds the menu",
+          "score": 5,
+          "note": "`show(menuBuilt, ...)` with a sticky `menuBuilt` source keeps the menu after the first open."
+        },
+        {
+          "criterion": "Slide plays every time",
+          "score": 5,
+          "note": "`Present = built() and isMenuOpen()` uses show's `present` flag, which starts false, so the first open slides in; `panelVisible` hides the panel only once `slide() == 1`."
+        },
+        {
+          "criterion": "Per-frame work stops while unseen",
+          "score": 3,
+          "note": "The Heartbeat connection stays connected for the page's whole life and only returns early when `not shown()`."
+        },
+        {
+          "criterion": "Kept page behaves like a fresh one",
+          "score": 5,
+          "note": "The `keptPage` effect resets `CanvasPosition` when the page is shown, and the rainbow resets the hue to 0."
+        },
+        {
+          "criterion": "Perf note",
+          "score": 4,
+          "note": "Has MicroProfiler steps and a `GetDescendants` count, but no checklist of what to check by eye (slide, highlight, tint)."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Typed and readable; all checks pass; the menu's behaviour is preserved."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "The rainbow Heartbeat connection really disconnects while hidden",
+        "Fresh-page behaviour is kept neatly through a showing context",
+        "Thorough note with an instance counter and the memory trade-off"
+      ],
+      "weaknesses": [
+        "The context and indexes setup is somewhat elaborate",
+        "The visual checklist leaves out tab highlight and tint selection"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Simple, readable `keptPage` helper",
+        "Makes good use of show's `present` source for the first slide-in"
+      ],
+      "weaknesses": [
+        "The Heartbeat connection keeps running forever once the Colors page is built",
+        "The note has no visual checklist"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 8
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

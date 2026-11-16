@@ -1,0 +1,114 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "The two attempts are nearly the same design and both are correct: present-driven slide springs, an exit delay returned from `show`, Interactable bound to present, a GuiState-driven press scale, and a highlight positioned in offset units. A wins on the closing slide. It waits 0.4s against a 0.35s period and parks the panel 16px further below the screen, so it is fully hidden before removal. B removes the picker at exactly SLIDE_PERIOD, while its critically damped spring still has about 1–2% of the distance left, and its hidden position has no margin, so a sliver can pop away. A also keeps the module's API unchanged.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Vide springs in component bodies",
+          "score": 5,
+          "note": "`scale`, `position`, and `highlightPosition` springs are all made at the top of `tile`/`blockPicker`, bound straight to properties, and none is made inside a binding."
+        },
+        {
+          "criterion": "Closing slide plays; opening moves the panel",
+          "score": 5,
+          "note": "The builder returns `panel, EXIT_DELAY`, and the 0.4s delay is longer than the 0.35s slide. `position` follows `props.Present()` toward `HIDDEN_POSITION`, which sits PANEL_HEIGHT+16 below the bottom edge, so the panel is fully off screen before it is removed."
+        },
+        {
+          "criterion": "Spam safety / reversal",
+          "score": 5,
+          "note": "`show` reuses the same picker while it is in its exit delay. The spring follows `present`, so it turns around mid-slide, and `Interactable = props.Present` stops a leaving picker from taking clicks."
+        },
+        {
+          "criterion": "Highlight glides in offset units",
+          "score": 5,
+          "note": "`tileOffset(index)` computes `(index-1)*(TILE_SIZE+TILE_GAP)` inside the padded panel and never reads Absolute* values."
+        },
+        {
+          "criterion": "Press feedback mouse & touch",
+          "score": 5,
+          "note": "`changed(\"GuiState\", guiState)` drives a UIScale spring to 0.86 on Press for mouse and touch alike, it springs back on release, and there is a small hover grow as well."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Selection, placement, the Build button, and UIScale are untouched, and all three checks pass. The Main change is minimal: it just passes `present`."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Vide springs in component bodies",
+          "score": 5,
+          "note": "The springs in `tile`, `highlight`, and `blockPicker` are created in component bodies and bound to Scale/Position."
+        },
+        {
+          "criterion": "Closing slide plays; opening moves the panel",
+          "score": 4,
+          "note": "It returns `picker, BlockPicker.ExitSeconds` and slides via `present`, but ExitSeconds equals SLIDE_PERIOD (0.3s). The hidden position puts the top edge exactly at the screen bottom, so the critically damped spring is still about 1–2% short and a sliver can pop away at removal."
+        },
+        {
+          "criterion": "Spam safety / reversal",
+          "score": 5,
+          "note": "`show` reuses the picker during its delay, the spring reverses with `present`, and `Interactable = props.IsInteractable` blocks clicks while it leaves."
+        },
+        {
+          "criterion": "Highlight glides in offset units",
+          "score": 5,
+          "note": "`highlight` springs to `UDim2.fromOffset((SelectedIndex()-1)*(TILE_SIZE+TILE_GAP), 0)` and never reads Absolute* values."
+        },
+        {
+          "criterion": "Press feedback mouse & touch",
+          "score": 5,
+          "note": "A GuiState source drives the UIScale spring to 0.88 on Press, and the 0.5 damping gives a bounce back on release."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "All checks pass and behaviour is preserved. The module's API changed to `BlockPicker.new`/`ExitSeconds`, and Main was updated to match."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "The exit delay (0.4s) is longer than the slide period, and the hidden position has an extra 16px margin, so the slide-out finishes before removal",
+        "Interactable is bound to present, so a leaving picker takes no clicks",
+        "The highlight and press motion are computed cleanly in offset units",
+        "Comments clearly explain how the picker works with `show`"
+      ],
+      "weaknesses": [
+        "The underdamped slide (0.75) can overshoot slightly, which is a style choice",
+        "`Present` is a required prop, so the picker can only be used through `show`"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Clean separate `highlight` component",
+        "Present is optional with a sensible default",
+        "The Outer highlight stroke lets a pressed tile sink inside the outline"
+      ],
+      "weaknesses": [
+        "The exit delay equals the slide period and there is no off-screen margin, so the panel may be removed just before it fully clears the screen",
+        "Changing the module's export shape is extra API churn"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 9,
+    "with_skill": 8
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

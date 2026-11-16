@@ -1,0 +1,5 @@
+These findings come from an outdated `sourcemap.json`, not from my edits. The sourcemap only lists `Shared` and `Main`. It has no entries for `BlockPicker`, `BlockPlacer`, `UiSounds`, `SoundIds` or `BlockTypes`, so luau-lsp can't resolve any of those requires.
+
+All seven flagged requires were already in the files before this change; I didn't add or change any. The fix is to regenerate the sourcemap with `rojo sourcemap default.project.json -o sourcemap.json` and run luau-lsp again. I couldn't do that here because shell commands need approval, which this session can't give.
+
+The UI-sound work itself is unchanged from my last reply. `UiSounds` keeps one loaded copy of each sound and plays copies of it, the HUD keeps `Click` and `PickerOpen` loaded, and the picker keeps `PickerClose` loaded while it's open. How to check it in Studio is in `docs/perf/ui-sounds.md`. None of it has been playtested or run through StyLua or Selene yet.

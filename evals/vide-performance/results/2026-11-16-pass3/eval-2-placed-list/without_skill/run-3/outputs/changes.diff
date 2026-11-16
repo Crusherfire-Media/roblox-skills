@@ -1,0 +1,300 @@
+diff --git a/docs/perf/placed-list.md b/docs/perf/placed-list.md
+new file mode 100644
+index 0000000..fbff71e
+--- /dev/null
++++ b/docs/perf/placed-list.md
+@@ -0,0 +1,68 @@
++# Placed blocks panel performance
++
++## The problem
++
++With about 2,000 placed blocks:
++
++- **One Heartbeat connection per row.** Each row ran its own clock every frame, even with the panel
++  closed. That's about 2,000 connections and roughly 10 ms of script time per frame.
++- **Every row existed as GUI.** Each row is 7 instances, so the panel held about 14,000 objects.
++  A `UIListLayout` with `AutomaticCanvasSize` had to lay all of them out, which made scrolling
++  choppy.
++- **Every placement did O(n) work.** `Main.client.luau` cloned the whole list for each new block,
++  and `indexes()` then walked every entry.
++
++## What changed
++
++`src/StarterPlayer/StarterPlayerScripts/PlacedList.luau`
++
++1. **One shared clock, only while the panel is open.** A single `now` source is updated from one
++   Heartbeat connection. An effect connects it when the panel opens and disconnects it when it
++   closes. Each row's age text is a `derive`, so the label's `Text` is written only when the
++   string changes, about once a second.
++2. **Virtualized list.** The `ScrollingFrame` gets an explicit `CanvasSize` that matches what the
++   old layout produced (`n * 44 + (n - 1) * 4`). The panel tracks `CanvasPosition` and
++   `AbsoluteWindowSize` and builds only the rows in the viewport, plus 2 extra rows above and
++   below. Each row is placed by `Position`, so the `UIListLayout` is gone. The panel now holds
++   about 13 rows (~90 instances) at any list length.
++3. **Recycled row frames.** Rows are keyed by `slot % poolSize`, so a row that scrolls out is
++   reused for the row scrolling in, and only its changed properties are written. While the panel
++   is closed, no rows exist at all.
++
++`src/StarterPlayer/StarterPlayerScripts/Main.client.luau`
++
++4. **No clone per placement.** The new block is appended to the existing array, and the source is
++   set again. Vide re-notifies dependents when a source is set to the same unfrozen table.
++
++The panel shows the same things as before: the same rows, newest first, with the same layout,
++text and colors, the same header count and the same scroll range. Row frames keep their
++`Row<Id>` names and `LayoutOrder`, but only on-screen rows exist now.
++
++## How to check it in Studio
++
++1. **Make a big list.** Start Play. In the command bar, in **Server** context, run:
++
++   ```lua
++   local names = { "Brick", "Dirt", "Grass", "Window", "Wood" }
++   local remote = game.ReplicatedStorage.BlockPlaced
++   for i = 1, 3000 do
++       remote:FireAllClients(names[i % 5 + 1], Vector3.new(i * 4 + 2, 2, 2))
++   end
++   ```
++
++   This only fills the panel; it doesn't put parts in the world, so the FPS you measure is the
++   panel's cost alone. To measure a real build, place blocks normally.
++2. **Panel closed.** Open **View → Script Profiler**, profile the client for a few seconds, and
++   look for `PlacedList`. Before: about 2,000 Heartbeat connections and about 10 ms a frame. After:
++   nothing from `PlacedList` per frame. Check FPS with **Shift+F5** (or the MicroProfiler,
++   **Ctrl+F6**); it should stay at about 60.
++3. **Panel open (press L).** The profiler should show one Heartbeat connection from `PlacedList`
++   with tiny per-frame cost. In the Explorer, under
++   `Players > <you> > PlayerGui > PlacedListGui > PlacedList > Rows`, there should be about 13
++   `Row…` frames instead of 3,000. Scroll fast from top to bottom: it should be smooth, rows
++   should never go blank, and the header should read `Placed blocks (3000)`.
++4. **New-block hitch.** With the panel open and closed, place blocks normally and watch the
++   MicroProfiler. The old per-placement spike should be gone.
++5. **Same output as before.** The newest block is at the top, ages count up ("12 s ago", then
++   "1 min ago"), the color swatches and positions match, and the scrollbar can reach the oldest
++   block at the bottom.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 38ff61f..1f09d0a 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -39,7 +39,9 @@ end)
+ 
+ local blockPlaced = ReplicatedStorage:WaitForChild("BlockPlaced") :: RemoteEvent
+ blockPlaced.OnClientEvent:Connect(function(blockTypeName: string, position: Vector3)
+-	local nextPlaced = table.clone(placed())
++	-- Append in place instead of cloning the whole list on every placement. Vide re-notifies
++	-- dependents when a source is set to the same (unfrozen) table, so this still updates the UI.
++	local nextPlaced = placed()
+ 	table.insert(nextPlaced, {
+ 		Id = nextId,
+ 		BlockTypeName = blockTypeName,
+diff --git a/src/StarterPlayer/StarterPlayerScripts/PlacedList.luau b/src/StarterPlayer/StarterPlayerScripts/PlacedList.luau
+index 5fde220..7d6c485 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/PlacedList.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/PlacedList.luau
+@@ -2,6 +2,15 @@
+ 	The placed blocks panel: a scrolling list of every block the player has placed this session,
+ 	newest at the top. Each row shows the block's color, its type, where it is, and how long ago it
+ 	was placed.
++
++	Performance notes (see docs/perf/placed-list.md):
++	- The list is virtualized. Only the rows inside the scroll viewport (plus a small overscan) exist
++	  as GUI objects; they are positioned by hand on a canvas sized for the full list, so the
++	  scrollbar behaves exactly as if every row existed.
++	- Row frames are recycled while scrolling: each frame is keyed by `slot % poolSize`, so a row
++	  that scrolls out of view is reused for the one scrolling in, and only its properties change.
++	- One shared clock drives every "x s ago" label, and it only runs while the panel is open.
++	  Nothing in the panel does per-frame work while it is closed.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+@@ -10,8 +19,11 @@ local RunService = game:GetService("RunService")
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local changed = Vide.changed
+ local cleanup = Vide.cleanup
+ local create = Vide.create
++local derive = Vide.derive
++local effect = Vide.effect
+ local indexes = Vide.indexes
+ local source = Vide.source
+ 
+@@ -29,6 +41,9 @@ local PANEL_PADDING = 10
+ local HEADER_HEIGHT = 28
+ local ROW_HEIGHT = 44
+ local ROW_GAP = 4
++local ROW_STRIDE = ROW_HEIGHT + ROW_GAP
++-- Extra rows kept alive above and below the viewport so fast scrolling never shows a gap.
++local OVERSCAN = 2
+ local SWATCH_SIZE = 28
+ local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+ local ROW_COLOR = Color3.fromRGB(44, 44, 52)
+@@ -42,20 +57,45 @@ local function formatAge(seconds: number): string
+ 	return `{math.floor(seconds / 60)} min ago`
+ end
+ 
+-local function row(entry: () -> PlacedBlock, index: number): Frame
+-	local now = source(os.clock())
+-	cleanup(RunService.Heartbeat:Connect(function()
+-		now(os.clock())
+-	end))
++-- One visible row: which slot (0 = top/newest) it sits in, and the block shown there.
++type VisibleRow = {
++	Slot: number,
++	Index: number,
++	Entry: PlacedBlock,
++}
+ 
+-	local function blockType(): BlockTypes.BlockType
++local function row(item: () -> VisibleRow, now: () -> number): Frame
++	-- derive() only notifies dependents when its value actually changes, so a recycled frame
++	-- only touches the properties that differ between the old and new block.
++	local slot = derive(function()
++		return item().Slot
++	end)
++	local index = derive(function()
++		return item().Index
++	end)
++	local entry = derive(function()
++		return item().Entry
++	end)
++	local blockType = derive(function(): BlockTypes.BlockType
+ 		return BlockTypes.ByName[entry().BlockTypeName]
+-	end
++	end)
++	-- Re-evaluated every frame while open, but the label's Text is only written when the string
++	-- changes (about once a second).
++	local ageText = derive(function()
++		return formatAge(now() - entry().PlacedAt)
++	end)
+ 
+ 	return create("Frame")({
+-		Name = `Row{entry().Id}`,
++		Name = function()
++			return `Row{entry().Id}`
++		end,
+ 		-- Newest first: a higher index is a later placement.
+-		LayoutOrder = -index,
++		LayoutOrder = function()
++			return -index()
++		end,
++		Position = function()
++			return UDim2.fromOffset(0, slot() * ROW_STRIDE)
++		end,
+ 		Size = UDim2.new(1, 0, 0, ROW_HEIGHT),
+ 		BackgroundColor3 = ROW_COLOR,
+ 
+@@ -108,9 +148,7 @@ local function row(entry: () -> PlacedBlock, index: number): Frame
+ 			TextSize = 13,
+ 			TextColor3 = MUTED_TEXT_COLOR,
+ 			TextXAlignment = Enum.TextXAlignment.Right,
+-			Text = function()
+-				return formatAge(now() - entry().PlacedAt)
+-			end,
++			Text = ageText,
+ 		}),
+ 	})
+ end
+@@ -121,6 +159,63 @@ export type PlacedListProps = {
+ }
+ 
+ local function placedList(props: PlacedListProps): Frame
++	-- Shared clock for every age label. Created before the rows so that, on opening, it is
++	-- refreshed before any row reads it.
++	local now = source(os.clock())
++	effect(function()
++		if not props.IsOpen() then
++			return
++		end
++		now(os.clock())
++		cleanup(RunService.Heartbeat:Connect(function()
++			now(os.clock())
++		end))
++	end)
++
++	local scrollY = source(0)
++	local viewportHeight = source(0)
++
++	local count = derive(function()
++		return #props.Placed()
++	end)
++
++	-- Slot range the viewport covers. Kept as separate number derives so scrolling within a row
++	-- does not rebuild the visible set.
++	local firstSlot = derive(function()
++		return math.max(0, math.floor(scrollY() / ROW_STRIDE) - OVERSCAN)
++	end)
++	local lastSlot = derive(function()
++		return math.min(
++			count() - 1,
++			math.floor((scrollY() + viewportHeight()) / ROW_STRIDE) + OVERSCAN
++		)
++	end)
++	-- Upper bound on how many slots can be visible at once; frames are keyed by slot % poolSize.
++	local poolSize = derive(function()
++		return math.floor(viewportHeight() / ROW_STRIDE) + 2 + 2 * OVERSCAN
++	end)
++
++	local visibleRows = derive(function(): { [number]: VisibleRow }
++		local rows = {}
++		if not props.IsOpen() then
++			return rows
++		end
++
++		local placed = props.Placed()
++		local n = #placed
++		local pool = poolSize()
++		for slot = firstSlot(), lastSlot() do
++			-- Slot 0 is the newest block.
++			local index = n - slot
++			rows[slot % pool] = {
++				Slot = slot,
++				Index = index,
++				Entry = placed[index],
++			}
++		end
++		return rows
++	end)
++
+ 	return create("Frame")({
+ 		Name = "PlacedList",
+ 		AnchorPoint = Vector2.new(1, 0.5),
+@@ -147,7 +242,7 @@ local function placedList(props: PlacedListProps): Frame
+ 			TextColor3 = TEXT_COLOR,
+ 			TextXAlignment = Enum.TextXAlignment.Left,
+ 			Text = function()
+-				return `Placed blocks ({#props.Placed()})`
++				return `Placed blocks ({count()})`
+ 			end,
+ 		}),
+ 		create("ScrollingFrame")({
+@@ -157,15 +252,22 @@ local function placedList(props: PlacedListProps): Frame
+ 			BackgroundTransparency = 1,
+ 			BorderSizePixel = 0,
+ 			ScrollBarThickness = 6,
+-			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+-			CanvasSize = UDim2.new(),
++			-- Same height the old UIListLayout + AutomaticCanvasSize produced for every row.
++			CanvasSize = function()
++				local n = count()
++				return UDim2.fromOffset(0, math.max(0, n * ROW_HEIGHT + (n - 1) * ROW_GAP))
++			end,
+ 
+-			create("UIListLayout")({
+-				FillDirection = Enum.FillDirection.Vertical,
+-				Padding = UDim.new(0, ROW_GAP),
+-			}),
++			changed("CanvasPosition", function(position: Vector2)
++				scrollY(position.Y)
++			end),
++			changed("AbsoluteWindowSize", function(size: Vector2)
++				viewportHeight(size.Y)
++			end),
+ 
+-			indexes(props.Placed, row),
++			indexes(visibleRows, function(item)
++				return row(item, now)
++			end),
+ 		}),
+ 	})
+ end

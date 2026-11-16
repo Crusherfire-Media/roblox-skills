@@ -1,0 +1,125 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "B wins, though the two attempts are close. Both set up the same good structure: a BlockStock module that owns one Charm signal, updates that copy the table instead of changing it, a useSignalState bridge created inside the mounted Vide scope, and a BlockPlacer guard that reads Charm directly. All checks pass for both, and neither shares a computed between the UI and BlockPlacer. B comes out ahead on a few smaller points. Before the server's first update it shows blank counts instead of grayed-out zeros, which looks right. It validates what arrives over the remote and skips updates that change nothing. And it starts the stock listener with task.spawn, so a slow WaitForChild can't hold up BlockPlacer.start.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Single owning Charm signal",
+          "score": 5,
+          "note": "BlockStock.luau owns `Charm.signal({})`, exposes `getStock`/`getCount`, and only `onStockChanged` writes to it."
+        },
+        {
+          "criterion": "2. Immutable updates",
+          "score": 5,
+          "note": "`setStock(function(stock) local nextStock = table.clone(stock) ... return nextStock end)` builds a new table on each update."
+        },
+        {
+          "criterion": "3. Shared derived values, Charm-direct guard",
+          "score": 4,
+          "note": "`BlockStock.getCount` is the shared getter, and BlockPlacer reads it straight from Charm, but BlockPicker re-derives the count itself with its own `countOf` instead of sharing a computed."
+        },
+        {
+          "criterion": "4. Vide-tracked bridge",
+          "score": 5,
+          "note": "Main calls `VideCharm.useSignalState(BlockStock.getStock)` inside `app` and passes the result down as the `Stock` source."
+        },
+        {
+          "criterion": "5. Live updates and initial look",
+          "score": 4,
+          "note": "Tiles and the label react to both stock and selection, but before the first StockChanged every tile shows \"0\" and is grayed out, and the label reads \"0 left\"."
+        },
+        {
+          "criterion": "6. No yields or leaks in Charm callbacks",
+          "score": 5,
+          "note": "The updater is pure, and the listener is cleaned up through useSignalState."
+        },
+        {
+          "criterion": "7. Correct, in scope, checks pass",
+          "score": 4,
+          "note": "All checks pass and selection and placement still work; `BlockStock.start()` runs synchronously before `BlockPlacer.start()`, so a slow WaitForChild would hold up the placer."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Single owning Charm signal",
+          "score": 5,
+          "note": "BlockStock.luau owns the signal, has a typed `Stock` export, and only `onStockChanged` writes to it."
+        },
+        {
+          "criterion": "2. Immutable updates",
+          "score": 5,
+          "note": "Clones the table before changing it, and returns the same table when the count is unchanged so nobody is notified for nothing."
+        },
+        {
+          "criterion": "3. Shared derived values, Charm-direct guard",
+          "score": 4,
+          "note": "`BlockStock.getCount` is the shared getter and the BlockPlacer guard reads Charm directly, but the UI re-derives `props.Stock()[props.Selected()]` itself."
+        },
+        {
+          "criterion": "4. Vide-tracked bridge",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockStock.getStock)` runs inside `app`, and its result is passed down as a source."
+        },
+        {
+          "criterion": "5. Live updates and initial look",
+          "score": 5,
+          "note": "Updates live on both stock and selection changes; before the first StockChanged, unknown counts show as blank and tiles are not grayed out."
+        },
+        {
+          "criterion": "6. No yields or leaks in Charm callbacks",
+          "score": 5,
+          "note": "The updater is pure, and the listener cleanup is handled by useSignalState."
+        },
+        {
+          "criterion": "7. Correct, in scope, checks pass",
+          "score": 5,
+          "note": "All checks pass, remote arguments are validated against BlockTypes.ByName, and `task.spawn(BlockStock.start)` keeps the two start functions from blocking each other."
+        }
+      ],
+      "overall_score": 9
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "Clean owning module with immutable updates",
+        "Correct vide-charm bridge created in the mounted scope",
+        "Guard reads Charm directly and reuses the selected type it already read"
+      ],
+      "weaknesses": [
+        "Shows 0 and grays out every tile before the server's first update",
+        "Starts the stock listener synchronously, which can delay BlockPlacer.start",
+        "No shared computed for the selected type's count"
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "Keeps \"not reported yet\" separate from \"none left\" so the UI looks right before the first update",
+        "Validates remote input and skips no-op sets",
+        "Starts the stock listener with task.spawn so it doesn't block the placer",
+        "Grays out empty tiles by tinting the block's own color, so they still look like that block type"
+      ],
+      "weaknesses": [
+        "No shared computed for the selected type's count; the UI derives it again",
+        "Guard needs an `or 0` because getCount can return nil"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8,
+    "without_skill": 9
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

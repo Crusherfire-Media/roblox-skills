@@ -1,0 +1,5 @@
+I fixed the luau-lsp errors. All 12 came from the same cause: the `@game/ReplicatedStorage/...` string requires don't resolve in this project's luau-lsp setup. Every "Unknown type" error was a knock-on from an unresolved require.
+
+Both ghost scripts now load `BlockTypes` and `GhostCodec` with `require(ReplicatedStorage.Shared.X)`, the same style the rest of the project already uses. I didn't use relative `../` paths: they would pass analysis but fail at runtime in the client script, because Roblox copies it into each player's PlayerScripts, where `../` no longer leads to the game root. Inside `GhostCodec`, `require("./BlockTypes")` is a sibling require and analysis accepted it, so I left it.
+
+I couldn't run luau-lsp myself to confirm the errors are gone; the next check will show that. Everything else from my previous summary still stands: nothing has been tested in a playtest, the traffic figures are estimates, and nothing is committed.

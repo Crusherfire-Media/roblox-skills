@@ -1,0 +1,124 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts wire Charm and CharmSync correctly: per-player keys, a ready handshake sent after the client is listening, `useSignalState` inside the Vide scope, and no writes to the synced signal from the client. A is simpler and matches the existing code style. The server syncs the remaining count, so the limit lives in one place, and the label stays hidden until the first sync. B adds a well-designed shared store and a Hotbar component, but it never disposes the per-player computeds, and its `const` and string-require style breaks from the surrounding code. A comes out narrowly ahead.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Server Charm state",
+          "score": 5,
+          "note": "`ServerScriptService/PlayerData.luau` gives each player their own Charm signal through `getEntry`. The 50-block check reads `PlayerData.get(player).BlocksLeft`, `update` changes a clone, and `entries[player] = nil` runs on PlayerRemoving."
+        },
+        {
+          "criterion": "Server sync wiring",
+          "score": 5,
+          "note": "`connect` is called once and fires the remote to that one player. `addSignalsToClient` uses the per-player key `syncKey(UserId)` when the client says it's ready, skips players who have already left, and `removeClient` runs on PlayerRemoving."
+        },
+        {
+          "criterion": "Client sync wiring",
+          "score": 5,
+          "note": "`PlayerData.start` calls `addSignals` with the per-player key, connects `OnClientEvent` to `patch`, and only then fires `FireServer` as the ready signal, so the first full payload can't be missed."
+        },
+        {
+          "criterion": "Vide bridge, shared limit, initial display",
+          "score": 5,
+          "note": "`useSignalState(PlayerData.get)` runs inside the mounted `app` scope. The server syncs BlocksLeft itself, the 50 lives only in Shared `Defaults`, and the label stays hidden while the value is nil."
+        },
+        {
+          "criterion": "UI never writes synced signal",
+          "score": 5,
+          "note": "`setData` is only handed to CharmSync; the UI only reads."
+        },
+        {
+          "criterion": "Easy to add next value",
+          "score": 5,
+          "note": "The whole PlayerData table is synced under one key, so the next value is a new field in the type and in `Defaults`."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 4,
+          "note": "All checks pass and the hotbar is restacked in a list layout. One small gap: `getEntry` would recreate an entry if a placement arrived after the player left."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Server Charm state",
+          "score": 5,
+          "note": "`PlayerDataStore` keeps one signal holding a table keyed by Player and updates it by cloning. The check reads `PlayerDataStore:Get(player).BlocksLeft`, and the player's entry is removed on PlayerRemoving."
+        },
+        {
+          "criterion": "Server sync wiring",
+          "score": 4,
+          "note": "`connect` is called once and fires to one player. Each player gets a per-player key, a guard stops duplicate ready messages, and `removeClient` runs on leave. However, each per-player `Charm.computed` is never disposed."
+        },
+        {
+          "criterion": "Client sync wiring",
+          "score": 5,
+          "note": "`addSignals` runs first, then `OnClientEvent` is connected to `patch`, then the separate ready remote is fired."
+        },
+        {
+          "criterion": "Vide bridge, shared limit, initial display",
+          "score": 5,
+          "note": "`useSignalState` runs inside `app` with a derived getter. `MaxBlocksPerPlayer` is shared, and the client signal starts from `PlayerData.new()`, so it shows 50 before the first payload."
+        },
+        {
+          "criterion": "UI never writes synced signal",
+          "score": 5,
+          "note": "Only CharmSync uses the setter."
+        },
+        {
+          "criterion": "Easy to add next value",
+          "score": 5,
+          "note": "The next value is a new field in `PlayerData` and in `new()`, and both sides build from that."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 4,
+          "note": "All checks pass and the Hotbar component is a tidy addition. But it uses `const` and `@game/` string requires, which don't match the existing scripts, and the per-player computeds leak."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Clean per-player signals with a guarded ready handshake on one remote",
+        "The server syncs the remaining count, so the limit is defined in one place",
+        "The label stays hidden until the first sync, and the code matches the existing style"
+      ],
+      "weaknesses": [
+        "Calling `getEntry` lazily can recreate an entry after the player has left",
+        "The hotbar layout container is built inline in `Main.client.luau`"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "A single store signal updated by copying, with clean separation of store and sync scripts",
+        "The limit is shared and the label shows the starting value before the first sync",
+        "A reusable Hotbar component, plus a story"
+      ],
+      "weaknesses": [
+        "Per-player `Charm.computed` getters are never cleaned up",
+        "Its `const` and string-require style differs from the existing code",
+        "More files and moving parts"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8.5,
+    "with_skill": 8
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

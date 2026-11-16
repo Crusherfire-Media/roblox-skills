@@ -1,0 +1,450 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index daf599e..9c44a85 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -2,6 +2,8 @@ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local CoinCounter = require(script.Parent.UI.CoinCounter)
++local QuestCard = require(script.Parent.UI.QuestCard)
+ local Screen = require(script.Parent.UI.Screen)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+@@ -13,8 +15,15 @@ local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+ mount(function()
+ 	return create("ScreenGui")({
+ 		Name = "GameGui",
++		-- Mounted once from a script, so it must survive respawns.
++		ResetOnSpawn = false,
++		-- The HUD design measures from the top of the screen, not from below the top bar. Device
++		-- safe insets still keep it clear of notches.
++		ScreenInsets = Enum.ScreenInsets.DeviceSafeInsets,
+ 
+ 		Screen.uiScale(),
++		CoinCounter(),
++		QuestCard(),
+ 	})
+ end, playerGui)
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau b/src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau
+new file mode 100644
+index 0000000..75db5b9
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau
+@@ -0,0 +1,128 @@
++--[[
++	Coin counter pill, top center of the HUD. Built from the "Coin Pill" frame (40:13) in
++	design/figma/hud-4k.json. The design is on a 3840x2160 canvas and our UI is authored for a
++	1080-tall screen (Screen.uiScale doubles it at 4K), so every Figma value here is halved.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local HudData = require(script.Parent.Parent.HudData)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local cleanup = Vide.cleanup
++local create = Vide.create
++local source = Vide.source
++
++-- TODO: replace with the exported coin art and its glow.
++local COIN_ICON_IMAGE = "rbxassetid://0"
++local COIN_GLOW_IMAGE = "rbxassetid://0"
++
++local FONT_EXTRA_BOLD = Font.new(
++	"rbxasset://fonts/families/BuilderSans.json",
++	Enum.FontWeight.ExtraBold,
++	Enum.FontStyle.Normal
++)
++
++local PILL_HEIGHT = 44
++local ICON_SIZE = 32
++-- The glow is a 16px (8px at 1080) blur around the icon.
++local GLOW_SIZE = ICON_SIZE + 8 * 2
++
++--[[
++	12450 -> "12,450". Fractions are dropped; negatives keep their sign.
++]]
++local function formatCoins(amount: number): string
++	local whole = math.floor(math.abs(amount))
++	local digits = tostring(whole)
++	local formatted = digits:reverse():gsub("(%d%d%d)", "%1,"):reverse()
++	if formatted:sub(1, 1) == "," then
++		formatted = formatted:sub(2)
++	end
++	return if amount < 0 then "-" .. formatted else formatted
++end
++
++local function CoinCounter(): Frame
++	local coins = source(HudData.getCoins())
++	cleanup(HudData.Changed:Connect(function()
++		coins(HudData.getCoins())
++	end))
++
++	return create("Frame")({
++		Name = "CoinCounter",
++		AnchorPoint = Vector2.new(0.5, 0),
++		Position = UDim2.new(0.5, 0, 0, 20),
++		Size = UDim2.fromOffset(0, PILL_HEIGHT),
++		AutomaticSize = Enum.AutomaticSize.X,
++		BackgroundColor3 = Color3.new(0, 0, 0),
++		BackgroundTransparency = 0.5,
++		BorderSizePixel = 0,
++
++		create("UICorner")({
++			CornerRadius = UDim.new(0.5, 0),
++		}),
++		create("UIPadding")({
++			PaddingLeft = UDim.new(0, 12),
++			PaddingRight = UDim.new(0, 16),
++			PaddingTop = UDim.new(0, 6),
++			PaddingBottom = UDim.new(0, 6),
++		}),
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++			SortOrder = Enum.SortOrder.LayoutOrder,
++			Padding = UDim.new(0, 8),
++		}),
++
++		-- The glow has to sit outside the list layout, so the icon slot holds both.
++		create("Frame")({
++			Name = "Icon",
++			LayoutOrder = 1,
++			Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE),
++			BackgroundTransparency = 1,
++
++			create("ImageLabel")({
++				Name = "Glow",
++				AnchorPoint = Vector2.new(0.5, 0.5),
++				Position = UDim2.fromScale(0.5, 0.5),
++				Size = UDim2.fromOffset(GLOW_SIZE, GLOW_SIZE),
++				BackgroundTransparency = 1,
++				Image = COIN_GLOW_IMAGE,
++				ImageColor3 = Color3.fromRGB(255, 204, 51),
++				ImageTransparency = 0.3,
++				ZIndex = 1,
++			}),
++			create("ImageLabel")({
++				Name = "Coin",
++				Size = UDim2.fromScale(1, 1),
++				BackgroundTransparency = 1,
++				Image = COIN_ICON_IMAGE,
++				ZIndex = 2,
++			}),
++		}),
++
++		create("TextLabel")({
++			Name = "Amount",
++			LayoutOrder = 2,
++			Size = UDim2.fromOffset(0, 28),
++			AutomaticSize = Enum.AutomaticSize.X,
++			BackgroundTransparency = 1,
++			FontFace = FONT_EXTRA_BOLD,
++			TextSize = 24,
++			LineHeight = 56 / 48,
++			TextColor3 = Color3.new(1, 1, 1),
++			TextXAlignment = Enum.TextXAlignment.Left,
++			TextYAlignment = Enum.TextYAlignment.Center,
++			Text = function()
++				return formatCoins(coins())
++			end,
++
++			create("UIStroke")({
++				Color = Color3.new(0, 0, 0),
++				Thickness = 2,
++				ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
++			}),
++		}),
++	})
++end
++
++return CoinCounter
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau b/src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau
+new file mode 100644
+index 0000000..8992b39
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau
+@@ -0,0 +1,281 @@
++--[[
++	Current quest card, top right of the HUD. Built from the "Quest Card" frame (40:10) in
++	design/figma/hud-4k.json. The design is on a 3840x2160 canvas and our UI is authored for a
++	1080-tall screen (Screen.uiScale doubles it at 4K), so every Figma value here is halved.
++
++	The card has a fixed width and grows downward to fit the quest text. Titles wrap to at most
++	two lines and descriptions to at most four, with an ellipsis past that, so a very long quest
++	can't push the card down the screen.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local HudData = require(script.Parent.Parent.HudData)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local changed = Vide.changed
++local cleanup = Vide.cleanup
++local create = Vide.create
++local source = Vide.source
++
++-- TODO: replace with the exported scroll-and-seal icon and a soft 9-slice shadow.
++local QUEST_ICON_IMAGE = "rbxassetid://0"
++local SHADOW_IMAGE = "rbxassetid://0"
++-- Assumes a 128x128 shadow image whose blur fills a 32px border on each side.
++local SHADOW_SLICE_CENTER = Rect.new(32, 32, 96, 96)
++
++local BUILDER_SANS = "rbxasset://fonts/families/BuilderSans.json"
++local FONT_REGULAR = Font.new(BUILDER_SANS, Enum.FontWeight.Regular, Enum.FontStyle.Normal)
++local FONT_BOLD = Font.new(BUILDER_SANS, Enum.FontWeight.Bold, Enum.FontStyle.Normal)
++
++local CARD_WIDTH = 360
++local PADDING = 16
++local GAP = 8
++local ICON_SIZE = 24
++
++local TITLE_SIZE = 24
++local TITLE_LINE_HEIGHT = 28
++local TITLE_MAX_LINES = 2
++local BODY_SIZE = 16
++local BODY_LINE_HEIGHT = 24
++local BODY_MAX_LINES = 4
++
++-- Figma's drop shadow: 0 8 24 at 4K, black at 35%.
++local SHADOW_BLUR = 12
++local SHADOW_OFFSET_Y = 4
++
++local function QuestCard(): Frame
++	local quest = source(HudData.getQuest())
++	cleanup(HudData.Changed:Connect(function()
++		quest(HudData.getQuest())
++	end))
++
++	local function progressRatio(): number
++		local current = quest()
++		if current.Goal <= 0 then
++			return 1
++		end
++		return math.clamp(current.Progress / current.Goal, 0, 1)
++	end
++
++	-- The card's height in authored (unscaled) pixels, so the shadow can follow it. The card
++	-- sizes itself to its text; AbsoluteSize is in screen pixels, so divide out the UIScale using
++	-- the known width.
++	local cardHeight = source(0)
++	local function onCardSizeChanged(absoluteSize: Vector2)
++		if absoluteSize.X > 0 then
++			cardHeight(absoluteSize.Y * CARD_WIDTH / absoluteSize.X)
++		end
++	end
++
++	return create("Frame")({
++		Name = "QuestCard",
++		AnchorPoint = Vector2.new(1, 0),
++		Position = UDim2.new(1, -24, 0, 80),
++		Size = function()
++			return UDim2.fromOffset(CARD_WIDTH, cardHeight())
++		end,
++		BackgroundTransparency = 1,
++
++		-- The shadow is a sibling under the card, since children always draw above their parent.
++		create("ImageLabel")({
++			Name = "Shadow",
++			Position = UDim2.fromOffset(-SHADOW_BLUR, -SHADOW_BLUR + SHADOW_OFFSET_Y),
++			Size = function()
++				return UDim2.fromOffset(
++					CARD_WIDTH + SHADOW_BLUR * 2,
++					cardHeight() + SHADOW_BLUR * 2
++				)
++			end,
++			BackgroundTransparency = 1,
++			Image = SHADOW_IMAGE,
++			ImageColor3 = Color3.new(0, 0, 0),
++			ImageTransparency = 0.65,
++			ScaleType = Enum.ScaleType.Slice,
++			SliceCenter = SHADOW_SLICE_CENTER,
++			-- The blur fades over SHADOW_BLUR px outside the card edge and as far again under it.
++			SliceScale = SHADOW_BLUR * 2 / 32,
++			ZIndex = 1,
++		}),
++
++		create("Frame")({
++			Name = "Card",
++			Size = UDim2.fromScale(1, 0),
++			AutomaticSize = Enum.AutomaticSize.Y,
++			BackgroundColor3 = Color3.new(1, 1, 1),
++			BackgroundTransparency = 0.06,
++			BorderSizePixel = 0,
++			ZIndex = 2,
++
++			changed("AbsoluteSize", onCardSizeChanged),
++
++			create("UICorner")({
++				CornerRadius = UDim.new(0, 16),
++			}),
++			create("UIGradient")({
++				Color = ColorSequence.new(Color3.fromRGB(24, 27, 44), Color3.fromRGB(38, 29, 61)),
++			}),
++			create("UIStroke")({
++				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++				Color = Color3.new(1, 1, 1),
++				Transparency = 0.86,
++				Thickness = 2,
++			}),
++			create("UIPadding")({
++				PaddingLeft = UDim.new(0, PADDING),
++				PaddingRight = UDim.new(0, PADDING),
++				PaddingTop = UDim.new(0, PADDING),
++				PaddingBottom = UDim.new(0, PADDING),
++			}),
++			create("UIListLayout")({
++				FillDirection = Enum.FillDirection.Vertical,
++				SortOrder = Enum.SortOrder.LayoutOrder,
++				Padding = UDim.new(0, GAP),
++			}),
++
++			create("Frame")({
++				Name = "Header",
++				LayoutOrder = 1,
++				Size = UDim2.fromScale(1, 0),
++				AutomaticSize = Enum.AutomaticSize.Y,
++				BackgroundTransparency = 1,
++
++				create("UIListLayout")({
++					FillDirection = Enum.FillDirection.Horizontal,
++					VerticalAlignment = Enum.VerticalAlignment.Center,
++					SortOrder = Enum.SortOrder.LayoutOrder,
++					Padding = UDim.new(0, GAP),
++				}),
++
++				create("ImageLabel")({
++					Name = "Icon",
++					LayoutOrder = 1,
++					Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE),
++					BackgroundTransparency = 1,
++					Image = QUEST_ICON_IMAGE,
++				}),
++
++				create("TextLabel")({
++					Name = "Title",
++					LayoutOrder = 2,
++					Size = UDim2.new(1, -(ICON_SIZE + GAP), 0, TITLE_LINE_HEIGHT),
++					AutomaticSize = Enum.AutomaticSize.Y,
++					BackgroundTransparency = 1,
++					FontFace = FONT_BOLD,
++					TextSize = TITLE_SIZE,
++					LineHeight = TITLE_LINE_HEIGHT / TITLE_SIZE,
++					TextColor3 = Color3.new(1, 1, 1),
++					TextXAlignment = Enum.TextXAlignment.Left,
++					TextYAlignment = Enum.TextYAlignment.Center,
++					TextWrapped = true,
++					TextTruncate = Enum.TextTruncate.AtEnd,
++					Text = function()
++						return quest().Title
++					end,
++
++					create("UISizeConstraint")({
++						MaxSize = Vector2.new(math.huge, TITLE_LINE_HEIGHT * TITLE_MAX_LINES),
++					}),
++				}),
++			}),
++
++			create("TextLabel")({
++				Name = "Description",
++				LayoutOrder = 2,
++				Size = UDim2.fromScale(1, 0),
++				AutomaticSize = Enum.AutomaticSize.Y,
++				BackgroundTransparency = 1,
++				FontFace = FONT_REGULAR,
++				TextSize = BODY_SIZE,
++				LineHeight = BODY_LINE_HEIGHT / BODY_SIZE,
++				TextColor3 = Color3.fromRGB(199, 204, 224),
++				TextXAlignment = Enum.TextXAlignment.Left,
++				TextYAlignment = Enum.TextYAlignment.Top,
++				TextWrapped = true,
++				TextTruncate = Enum.TextTruncate.AtEnd,
++				Text = function()
++					return quest().Description
++				end,
++
++				create("UISizeConstraint")({
++					MaxSize = Vector2.new(math.huge, BODY_LINE_HEIGHT * BODY_MAX_LINES),
++				}),
++			}),
++
++			create("Frame")({
++				Name = "Progress",
++				LayoutOrder = 3,
++				Size = UDim2.new(1, 0, 0, 20),
++				BackgroundTransparency = 1,
++
++				create("UIListLayout")({
++					FillDirection = Enum.FillDirection.Horizontal,
++					VerticalAlignment = Enum.VerticalAlignment.Center,
++					SortOrder = Enum.SortOrder.LayoutOrder,
++					Padding = UDim.new(0, GAP),
++				}),
++
++				create("Frame")({
++					Name = "Track",
++					LayoutOrder = 1,
++					Size = UDim2.fromOffset(0, 12),
++					BackgroundColor3 = Color3.new(1, 1, 1),
++					BackgroundTransparency = 0.88,
++					BorderSizePixel = 0,
++					ClipsDescendants = true,
++
++					-- Takes whatever width the count text leaves.
++					create("UIFlexItem")({
++						FlexMode = Enum.UIFlexMode.Fill,
++					}),
++					create("UICorner")({
++						CornerRadius = UDim.new(0.5, 0),
++					}),
++
++					create("Frame")({
++						Name = "Fill",
++						Size = function()
++							return UDim2.fromScale(progressRatio(), 1)
++						end,
++						Visible = function()
++							return progressRatio() > 0
++						end,
++						BackgroundColor3 = Color3.new(1, 1, 1),
++						BorderSizePixel = 0,
++
++						create("UICorner")({
++							CornerRadius = UDim.new(0.5, 0),
++						}),
++						create("UIGradient")({
++							Color = ColorSequence.new(
++								Color3.fromRGB(102, 230, 128),
++								Color3.fromRGB(51, 179, 89)
++							),
++							Rotation = 90,
++						}),
++					}),
++				}),
++
++				create("TextLabel")({
++					Name = "Count",
++					LayoutOrder = 2,
++					Size = UDim2.fromOffset(0, 20),
++					AutomaticSize = Enum.AutomaticSize.X,
++					BackgroundTransparency = 1,
++					FontFace = FONT_BOLD,
++					TextSize = 16,
++					LineHeight = 40 / 32,
++					TextColor3 = Color3.new(1, 1, 1),
++					TextXAlignment = Enum.TextXAlignment.Right,
++					TextYAlignment = Enum.TextYAlignment.Center,
++					Text = function()
++						local current = quest()
++						return `{current.Progress}/{current.Goal}`
++					end,
++				}),
++			}),
++		}),
++	})
++end
++
++return QuestCard

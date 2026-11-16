@@ -1,0 +1,324 @@
+diff --git a/src/ReplicatedStorage/Shared/Dev/FrameReport.luau b/src/ReplicatedStorage/Shared/Dev/FrameReport.luau
+index ede07d3..c91bc55 100644
+--- a/src/ReplicatedStorage/Shared/Dev/FrameReport.luau
++++ b/src/ReplicatedStorage/Shared/Dev/FrameReport.luau
+@@ -3,13 +3,25 @@
+ 	each recent frame it returns the frame time, the time the main thread spent in the Physics
+ 	group, the GPU time, and the five scopes that took longest on the main thread. It also returns
+ 	the Luau heap size at the end of the capture.
++
++	The MicroProfiler state is shared with FpsOverlay and the on-screen MicroProfiler, so the
++	report never pauses capture or touches the overlay's session: it reads its own snapshot and
++	puts the overlay's frame limit back afterwards.
+ ]]
+ 
++local RunService = game:GetService("RunService")
++
+ local LibMP = require(script.Parent.LibMPLoader)
+ local FpsOverlay = require(script.Parent.FpsOverlay)
+ 
+ local REPORT_FRAMES = 120
+ local TOP_SCOPES = 5
++local MAX_FRAME_LIMIT = 256
++-- One frame warms up the scope stacks before the first reported frame, and the newest frame is
++-- usually still incomplete when the snapshot is taken.
++local EXTRA_FRAMES = 2
++-- The first capture after the profiler turns on holds a one-time engine stall about 12 frames in.
++local PROFILER_WARMUP_FRAMES = 24
+ 
+ export type ScopeTime = {
+ 	Name: string,
+@@ -17,9 +29,12 @@ export type ScopeTime = {
+ }
+ 
+ export type FrameRow = {
++	-- Numbered within the snapshot; FrameAbsoluteId is the number the MicroProfiler UI shows.
+ 	FrameId: number,
++	FrameAbsoluteId: number,
+ 	FrameMs: number,
+-	GpuMs: number,
++	-- nil on platforms without a GPU thread.
++	GpuMs: number?,
+ 	PhysicsMs: number,
+ 	TopScopes: { ScopeTime },
+ }
+@@ -31,22 +46,69 @@ export type Report = {
+ 
+ local FrameReport = {}
+ 
++local isRunning = false
++
++local function waitFrames(count: number)
++	for _ = 1, count do
++		RunService.Heartbeat:Wait()
++	end
++end
++
+ local function scopeName(session: any, timerId: number): string
+-	local timer = session:GetTimerDesc(timerId)
+-	local group = session:FetchGroupDesc(timer:GroupId())
+-	return `{timer:TimerName()} [{group.GroupName}]`
++	local timer = session:FetchTimerDesc(timerId)
++	local group = session:FetchGroupDesc(timer.GroupId)
++	return `{timer.TimerName} [{group.GroupName}]`
+ end
+ 
+-function FrameReport.run(): Report
+-	-- Hold the data still while we read it, and keep enough frames for the report.
+-	LibMP.Control:EnableCapture(false)
+-	LibMP.Control:SetFrameLimit(256)
++--[[
++	The overlay keeps only 60 frames, so the limit is raised until the report's frames exist,
++	then copied into a buffer while capture keeps running.
++]]
++local function captureSnapshotAsync(): buffer
++	local overlayIsRunning = FpsOverlay.getSession() ~= nil
++	local waitCount = REPORT_FRAMES + EXTRA_FRAMES
++	if not overlayIsRunning then
++		-- Nothing else turned the profiler on, so there is no earlier state or limit to restore.
++		LibMP.Control:EnableProfiler(true)
++		LibMP.Control:EnableCapture(true)
++		waitCount += PROFILER_WARMUP_FRAMES
++	end
++
++	LibMP.Control:SetFrameLimit(MAX_FRAME_LIMIT)
++	local ok, result = pcall(function()
++		waitFrames(waitCount)
++		return LibMP.Control:CaptureToBufferSync()
++	end)
++	if overlayIsRunning then
++		LibMP.Control:SetFrameLimit(FpsOverlay.FrameLimit)
++	end
++
++	if not ok then
++		error(result, 0)
++	end
++	return result
++end
+ 
+-	local session = FpsOverlay.getSession() or LibMP.Session.OpenFromLiveData()
+-	assert(session, "could not open the MicroProfiler data")
++local function buildReport(session: any): Report
+ 	local global = session:FetchGlobalDesc()
++	local tickToMsCpu = global.TickToMsCpu
++	local tickToMsGpu = global.TickToMsGpu
++
++	local minId = session:GetFrameIdMin()
+ 	local lastId = session:GetFrameIdMax()
+-	local firstId = math.max(session:GetFrameIdMin(), lastId - REPORT_FRAMES + 1)
++	while lastId > minId and session:FetchFrameDesc(lastId).IsIncomplete do
++		lastId -= 1
++	end
++	-- The frame before firstId is iterated only to warm up the scope stacks.
++	local firstId = math.max(minId + 1, lastId - REPORT_FRAMES + 1)
++	if firstId > lastId then
++		return { Frames = {}, LuauHeap = nil }
++	end
++
++	local mainThreadId = session:FindThreadId("Main")
++	assert(mainThreadId ~= 0, "the MicroProfiler data has no Main thread")
++	local gpuThreadId = session:GetThreadIdGpu()
++	local physicsGroupId = session:FindGroupId("Physics")
+ 
+ 	local rows: { [number]: FrameRow } = {}
+ 	local scopeMs: { [number]: { [number]: number } } = {}
+@@ -54,42 +116,129 @@ function FrameReport.run(): Report
+ 		local frame = session:FetchFrameDesc(frameId)
+ 		rows[frameId] = {
+ 			FrameId = frameId,
+-			FrameMs = (frame.TickEndCpu - frame.TickStartCpu) * global.TickToMsCpu,
+-			GpuMs = (frame.TickEndGpu - frame.TickStartGpu) * global.TickToMsCpu,
++			FrameAbsoluteId = frame.FrameAbsoluteId,
++			FrameMs = (frame.TickEndCpu - frame.TickStartCpu) * tickToMsCpu,
++			GpuMs = if gpuThreadId ~= 0 then 0 else nil,
+ 			PhysicsMs = 0,
+ 			TopScopes = {},
+ 		}
+ 		scopeMs[frameId] = {}
+ 	end
+ 
++	local isPhysicsTimer: { [number]: boolean? } = {}
++	local function isPhysics(timerId: number): boolean
++		local cached = isPhysicsTimer[timerId]
++		if cached == nil then
++			cached = session:FetchTimerDesc(timerId).GroupId == physicsGroupId
++			isPhysicsTimer[timerId] = cached
++		end
++		return cached
++	end
++
+ 	local iter = session:CreateLogIterator()
+ 	local state = iter:GetState()
+-	local mainThreadId = session:FindThreadId("Main")
++
++	-- Physics scopes nest, and counting every level would add the same time more than once.
++	local function hasPhysicsAncestor(depth: number): boolean
++		for ancestorDepth = 0, depth - 1 do
++			local element = iter:GetCurrentThreadStackElement(ancestorDepth)
++			if element and isPhysics(element:EnterTimerId()) then
++				return true
++			end
++		end
++		return false
++	end
++
++	local function addMainScope(
++		row: FrameRow,
++		timerId: number,
++		ms: number,
++		isOutermostPhysics: boolean
++	)
++		local frameScopes = scopeMs[row.FrameId]
++		frameScopes[timerId] = (frameScopes[timerId] or 0) + ms
++		if isOutermostPhysics then
++			row.PhysicsMs += ms
++		end
++	end
++
++	local threadIds = { mainThreadId }
++	if gpuThreadId ~= 0 then
++		table.insert(threadIds, gpuThreadId)
++	end
+ 	iter:Configure({
+ 		SkipEvents = true,
+-		ThreadIds = { mainThreadId },
++		EmitThreadFrameEnd = true,
++		ThreadIds = threadIds,
+ 	})
+-	iter:RewindTo(firstId, lastId)
++	iter:RewindTo(firstId - 1, lastId)
+ 
++	-- A scope can cross frame boundaries, so each frame gets only the part of it inside that
++	-- frame: exits measure from the enter time clamped to the frame start, and scopes still open
++	-- at a thread's frame end count up to that point.
++	local frameStartCpu = 0
++	local frameStartGpu = 0
+ 	while iter:Step() do
+-		if
+-			state:IsExit()
+-			and not state:ThreadStackIsUnderflowed()
+-			and not state:ThreadStackWasOverflowed()
+-		then
+-			local row = rows[state:FrameId()]
+-			if row then
+-				local element = iter:GetCurrentThreadStackElement(state:ThreadStackDepth())
+-				local ms = (state:Timestamp() - element:EnterTimestamp()) * global.TickToMsCpu
+-				local timerId = state:TimerId()
+-				local frameScopes = scopeMs[row.FrameId]
+-				frameScopes[timerId] = (frameScopes[timerId] or 0) + ms
+-				if session:FetchTimerDesc(timerId).GroupId == session:FindGroupId("Physics") then
+-					row.PhysicsMs += ms
++		if state:IsFrameBoundary() then
++			frameStartCpu = state:Timestamp()
++			frameStartGpu = state:TimestampGpu()
++			continue
++		end
++
++		local row = rows[state:FrameId()]
++		if not row then
++			continue
++		end
++		local isGpu = state:IsGpuThread()
++
++		if state:IsThreadFrameEnd() then
++			local endTimestamp = state:Timestamp()
++			local depth = state:ThreadStackDepth()
++			if isGpu then
++				-- Frame GPU start and end ticks can be wrong, but top-level GPU scopes never
++				-- overlap, so their sum is the GPU busy time.
++				local element = if depth > 0 then iter:GetCurrentThreadStackElement(0) else nil
++				if element then
++					local ticks = endTimestamp - element:EnterTimestampFrameLocal()
++					row.GpuMs = (row.GpuMs or 0) + ticks * tickToMsGpu
++				end
++			else
++				local isInsidePhysics = false
++				for elementDepth = 0, depth - 1 do
++					local element = iter:GetCurrentThreadStackElement(elementDepth)
++					if element then
++						local timerId = element:EnterTimerId()
++						local ticks = endTimestamp - element:EnterTimestampFrameLocal()
++						local physics = isPhysics(timerId)
++						local isOutermostPhysics = physics and not isInsidePhysics
++						addMainScope(row, timerId, ticks * tickToMsCpu, isOutermostPhysics)
++						isInsidePhysics = isInsidePhysics or physics
++					end
++				end
++			end
++		elseif state:IsExit() and not state:ThreadStackWasOverflowed() then
++			local depth = state:ThreadStackDepth()
++			local enterTimestamp
++			if state:ThreadStackIsUnderflowed() then
++				enterTimestamp = if isGpu then frameStartGpu else frameStartCpu
++			else
++				local element = iter:GetCurrentThreadStackElement(depth)
++				enterTimestamp = element:EnterTimestampFrameLocal()
++			end
++			local ticks = state:Timestamp() - enterTimestamp
++
++			if isGpu then
++				if depth == 0 then
++					row.GpuMs = (row.GpuMs or 0) + ticks * tickToMsGpu
+ 				end
++			else
++				local timerId = state:TimerId()
++				local isOutermostPhysics = isPhysics(timerId) and not hasPhysicsAncestor(depth)
++				addMainScope(row, timerId, ticks * tickToMsCpu, isOutermostPhysics)
+ 			end
+ 		end
+ 	end
++	iter:Dispose()
+ 
+ 	local frames: { FrameRow } = {}
+ 	for frameId = firstId, lastId do
+@@ -107,17 +256,44 @@ function FrameReport.run(): Report
+ 		table.insert(frames, row)
+ 	end
+ 
++	local luauHeap = nil
+ 	local heapId = session:FindCounterId("**/Luau/heap")
+-	local heapSamples = session:GetCounterSamples(heapId)
+-	local lastHeapSample = heapSamples:FetchLastSample()
+-
+-	iter:Dispose()
+-	session:Dispose()
++	if heapId ~= 0 then
++		local lastHeapSample = session:FetchLastCounterSample(heapId)
++		luauHeap = if lastHeapSample then lastHeapSample.Value else nil
++	end
+ 
+ 	return {
+ 		Frames = frames,
+-		LuauHeap = if lastHeapSample then lastHeapSample.Value else nil,
++		LuauHeap = luauHeap,
+ 	}
+ end
+ 
++--[[
++	Yields for about two seconds while the MicroProfiler collects the report's frames. Errors if
++	a report is already running, since both would fight over the frame limit.
++]]
++function FrameReport.run(): Report
++	assert(not isRunning, "a frame report is already running")
++	isRunning = true
++
++	local ok, result = pcall(function()
++		local snapshot = captureSnapshotAsync()
++		local session = LibMP.Session.OpenFromBuffer(snapshot)
++		assert(session, "could not open the MicroProfiler snapshot")
++		local buildOk, report = pcall(buildReport, session)
++		session:Dispose()
++		if not buildOk then
++			error(report, 0)
++		end
++		return report
++	end)
++
++	isRunning = false
++	if not ok then
++		error(result, 0)
++	end
++	return result
++end
++
+ return FrameReport

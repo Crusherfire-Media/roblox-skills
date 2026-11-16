@@ -1,0 +1,54 @@
+{
+  "id": 5,
+  "name": "plain-removal",
+  "skill": "game-architecture",
+  "prompt": "Players can place blocks but can't take them back. Let them remove blocks they placed: right-click a block on PC, or long-press it on a phone or tablet. Only the player who placed a block can remove it, and removing needs the same server-side checks as placing (reach and rate).\n\nPlacement is in src/ServerScriptService/BlockPlacement.server.luau and src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau.",
+  "setup_files": [
+    {
+      "from": "fixtures/plain/src",
+      "to": "src"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\").posix,cp=require(\"child_process\");\nconst R=\"src/ServerScriptService\";\nconst rd=(f)=>{try{return JSON.parse(fs.readFileSync(f,\"utf8\").replace(/^\\uFEFF/,\"\"))}catch(e){return null}};\nconst attrs=(f)=>((rd(f)||{}).attributes)||{};\nconst isInit=(f)=>/^init\\.luau$/.test(p.basename(f));\nconst metaOf=(f)=>isInit(f)?p.join(p.dirname(f),\"init.meta.json\"):f.replace(/\\.luau$/,\".meta.json\");\nconst isModuleDir=(d)=>fs.existsSync(p.join(d,\"init.luau\"));\nconst parentDir=(f)=>isInit(f)?p.dirname(p.dirname(f)):p.dirname(f);\nconst owner=(f)=>{let o=f;let d=parentDir(f);while(d.startsWith(R+\"/\")){if(isModuleDir(d))o=p.join(d,\"init.luau\");d=p.dirname(d)}return o};\nconst cascade=(f,name)=>{let d=parentDir(f);while(d.startsWith(R)){if(!isModuleDir(d)){const v=attrs(p.join(d,\"init.meta.json\"))[name];if(v!==undefined)return v}if(d===R)break;d=p.dirname(d)}return undefined};\nconst relocates=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.RelocateToServerScriptService===true)return false;if(a.RelocateToReplicatedStorage!==undefined)return a.RelocateToReplicatedStorage===true;return cascade(f,\"RelocateToReplicatedStorage\")===true};\nconst clientOnly=(f0)=>{const f=owner(f0);const a=attrs(metaOf(f));if(a.ClientOnly!==undefined)return a.ClientOnly===true;return cascade(f,\"ClientOnly\")===true};\nconst changed=()=>cp.execFileSync(\"git\",[\"status\",\"--porcelain\",\"--untracked-files=all\"],{encoding:\"utf8\"}).split(/\\r?\\n/).filter(Boolean).map((l)=>l.slice(3).replace(/^\"|\"$/g,\"\")).filter((f)=>fs.existsSync(f));\nconst walk=(d,acc=[])=>{if(!fs.existsSync(d))return acc;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f,acc);else acc.push(f)}return acc};\nconst src=(f)=>fs.readFileSync(f,\"utf8\");\nconst fail=(m)=>{console.log(m);process.exit(1)};\nconst hits=walk(\"src\").filter((f)=>/\\.luau$/.test(f)&&/ModuleLoader|LOAD_MODULE/.test(src(f)));\nconst meta=walk(\"src\").filter((f)=>/\\.meta\\.json$/.test(f)&&/LOAD_MODULE|Relocate|IgnoreLoader/.test(src(f)));\nif(hits.length||meta.length)fail(\"module loader setup added in: \"+hits.concat(meta).join(\", \"));\nif(fs.existsSync(R+\"/Modules\"))fail(\"a new ServerScriptService/Modules tree was added\");\nconsole.log(\"no module loader or new code layout introduced\");"
+      ],
+      "expect_exit": 0,
+      "text": "No module loader, LOAD_MODULE tags, or new ServerScriptService/Modules tree is introduced in a project that doesn't use them"
+    },
+    {
+      "type": "file_exists",
+      "path": "src/ServerScriptService/BlockPlacement.server.luau",
+      "text": "BlockPlacement.server.luau still exists"
+    },
+    {
+      "type": "file_exists",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau",
+      "text": "BlockPlacer.luau still exists"
+    },
+    {
+      "type": "any_file_matches",
+      "dir": "src",
+      "ext": ".luau",
+      "pattern": "MouseButton2",
+      "text": "Some client code handles right-click (MouseButton2)"
+    }
+  ],
+  "rubric": [
+    "Fits the project as it is: the feature goes into the existing placement script and client module (plus a shared module in ReplicatedStorage/Shared if one helps), in their style. The attempt doesn't bring in a framework or code layout the project doesn't use (a module loader, Init/Start services, a new folder tree) and doesn't move, rename, or restructure the existing scripts.",
+    "Ownership is enforced on the server: the server records who placed each block (an attribute or a server-side table keyed by part) and refuses removal requests from anyone else; nothing the client sends is trusted for this.",
+    "Removal requests are validated like placement: the target must be an Instance that is a block in the Blocks folder (checked with typeof, IsA, and IsDescendantOf or similar), within reach of the character, and rate-limited, and the occupied-cell record is cleared so the cell can be built on again.",
+    "Input: right-click removes on PC and a long press removes on touch, without breaking click or tap to place, and input already processed by UI is ignored.",
+    "Correct and in scope: placement keeps working, changes stay in the placement files plus anything strictly needed, and luau-lsp, selene, and StyLua pass on the changed files. Supporting files such as stories or specs count neither for nor against."
+  ],
+  "timeout_minutes": 20
+}

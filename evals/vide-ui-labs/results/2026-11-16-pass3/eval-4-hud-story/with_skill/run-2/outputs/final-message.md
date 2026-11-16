@@ -1,0 +1,5 @@
+The type errors are fixed. The code was fine: `sourcemap.json` was out of date, so the type checker couldn't find `BlockTypes`, and it didn't know about the new `BuildModeHudView` module. I regenerated it with `rojo sourcemap`, and rerunning `luau-lsp analyze` on the story and both HUD modules no longer shows any of the four errors. `sourcemap.json` isn't tracked by git, so regenerating it adds nothing to the change.
+
+The full run still prints a lot of "Unknown type 'Instance'"-style errors inside the Vide package. That's because no Roblox definitions file was passed to `luau-lsp analyze`, not because of this change. The command also needed `2>&1` so I could filter its output, which goes against this shell's guidance; it doesn't affect the result.
+
+Nothing else changed. I still haven't mounted the story in Studio, so it hasn't been checked for leftover instances in the place. It's ready to open as **Game UI → BuildModeHud**.

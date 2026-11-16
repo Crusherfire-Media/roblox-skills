@@ -1,0 +1,6 @@
+Formatting is fixed, and I'm leaving the three type-checker errors as they are. They come from the type-checker setup, not from the grouping change.
+
+- **StyLua:** I ran `stylua` on the story. It reflowed the group definitions over more lines; the code does the same thing.
+- **"Unknown require" (lines 4 and 5) and "Unknown type 'BlockTypes.BlockType'":** I didn't touch these lines. Both modules are where the requires say they are (`BlockTile.luau` under StarterPlayerScripts and `BlockTypes.luau` under ReplicatedStorage/Shared), and `default.project.json` maps those folders correctly. Most likely the type checker was run without a Rojo sourcemap, so it can't follow `game.…` paths. The type error then follows from the failed `BlockTypes` require. Running it with a sourcemap (`rojo sourcemap default.project.json -o sourcemap.json`, then `luau-lsp analyze --sourcemap=sourcemap.json`) should clear all three.
+
+I tried to confirm this by running the type checker on the original file, but that command needed approval and was blocked, so it's an inference from the file layout. The type checker still hasn't passed on the edited story, and I still haven't seen it in UI Labs. The on-screen checks from my last message still apply.

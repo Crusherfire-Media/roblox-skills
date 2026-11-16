@@ -1,0 +1,412 @@
+diff --git a/docs/placement-spec-cleanup.md b/docs/placement-spec-cleanup.md
+new file mode 100644
+index 0000000..160e6f2
+--- /dev/null
++++ b/docs/placement-spec-cleanup.md
+@@ -0,0 +1,74 @@
++# PlacementRules spec cleanup
++
++`PlacementRules.spec.luau` goes from 31 tests to 21. Every rule in the `PlacementRules.luau`
++doc comments is still covered, and the two rules that had no test now have one. The tests only
++use the public API (`snap`, `validate`, `MaxHeight`, `MaxReach`) and `BlockTypes.BlockSize`,
++so a refactor that keeps behavior the same should no longer break them. `PlacementRules.luau` is
++unchanged.
++
++## The two failing tests
++
++- **"rejects a position that isn't a Vector3"** called matchers with a colon
++  (`expect(ok):toBe(false)`). Jest Roblox matchers are dot-called, so the test errored instead
++  of asserting. Fixed and moved into the bad-position table.
++- **"doesn't mark the cell occupied"** asserted `expect(count).toBeFalsy()` with `count = 0`.
++  In Luau `0` is truthy, so this always failed. It now checks the `occupied` table directly.
++
++A third test, **"rejects placing twice in the same cell"**, only passed because the test before
++it had written into a shared file-level `occupied` table. Run alone, it failed. The shared table
++is gone and every test builds its own state.
++
++## Removed
++
++| Test | Why |
++|---|---|
++| `snap` "snaps positions to cell centers" | Computed the expected value with the same formula as the code, so it could never fail. |
++| `snap` rows `(1,1,1)` and `(2,2,2)` | Same case as the `(0,0,0)` row: a point inside the first cell. |
++| `_isFinite` x3 | Tested a private helper exposed only for the spec. NaN and infinity are now covered through `validate`, so inlining or renaming the helper no longer breaks the suite. (`PlacementRules._isFinite` is now unused, but this change leaves the module alone.) |
++| "accepts a $Name block" (5 rows, built at runtime from `BlockTypes.List`) | `validate` treats every block type the same, so one accepted name is enough. It is covered by the valid-placement test. |
++| "returns the snapped center" | Expected `PlacementRules.snap(position)`, which is tautological. Merged into the valid-placement test, which now expects a hand-worked center. |
++| "calls snap exactly once" | Spied on an internal call count. This is the test most likely to break on a refactor that keeps behavior. |
++| "rejects placing twice in the same cell" | Duplicate of "rejects a cell that is already occupied", and it depended on test order. |
++| `BlockTypes` "has the right block types" | Restated catalog data field by field (colors, materials, transparency). No rule says those values are fixed, so any art tweak broke it. It also didn't belong in this module's spec. |
++
++## Changed
++
++- **Snap table**: 5 rows written as fractions of `BlockSize`. The rows are a cell's lower
++  corner, just below the next cell, exactly on the next cell's corner, just below zero, and one
++  row with different values per axis so each axis is checked on its own.
++- **Height table**: rows are now built from `MaxHeight`, not hard-coded 196/200. The four rows
++  sit just below the Baseplate, on the Baseplate, half a cell under `MaxHeight`, and half a cell
++  over it. The root stands at the position, so reach never affects these rows.
++- **Reach table**: rows were literals that assumed `BlockSize = 4`. They are now
++  "exactly `MaxReach`" (accepted, the documented inclusive edge) and "just past `MaxReach`"
++  (rejected). The well-inside row was dropped because it is the same case as the exact edge.
++- **Rejection reasons**: tests no longer compare the reason strings. The doc only promises
++  "a short reason for the server log", so tests check that a string comes back. Each rejection
++  test changes one input from a placement that is otherwise accepted, so the result still shows
++  which rule did the rejecting.
++- **Bad input**: `validate` writes its own guards, so there is one row per branch. Block type has
++  two rows (unknown name, not a string). Position has four rows (not a Vector3, NaN, infinity,
++  negative infinity), with each bad value on a different axis.
++- The spec now follows the project style: `--!strict`, `const`, and `@game/...` string requires.
++
++## Added (rules that had no test)
++
++- "rejects a player with no character" (`rootPosition == nil`).
++- "leaves occupied unchanged when it accepts a placement". The old test checked the empty-table
++  case with a broken assertion.
++
++## Assumptions and notes for review
++
++- Specs can't run in this environment. luau-lsp (strict), selene, and StyLua pass. The edge
++  values were worked out by hand against the current tuning (`BlockSize = 4`, `MaxHeight = 200`,
++  `MaxReach = 24`). The first CI or Studio run is the real check.
++- The doc comment says a cell must be "above the Baseplate (Y > 0)", but the code rejects
++  `center.Y < 0`. Cell centers are always odd multiples of `BlockSize / 2`, so no center can be
++  exactly 0 and the two agree in practice. For the same reason, whether `MaxHeight` itself is
++  inclusive can't be tested with the current tuning. I left both as they are, since this change
++  doesn't touch the module.
++- I would normally confirm the cut list before making it. Nobody was available, so I went ahead
++  using the rules above: one test per behavior, test at the public API, and no restating data.
++- `BlockTypes` has no spec of its own now. If its invariants matter (unique names, `ByName`
++  matching `List`), they belong in a separate `BlockTypes.spec.luau` that loops over the entries
++  and collects offenders.
+diff --git a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+index c2ccab9..46bc0dc 100644
+--- a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
++++ b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+@@ -1,209 +1,158 @@
+-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-local ServerScriptService = game:GetService("ServerScriptService")
+-
+-local JestGlobals = require(ServerScriptService.Tests.Packages.JestGlobals)
+-local describe = JestGlobals.describe
+-local expect = JestGlobals.expect
+-local it = JestGlobals.it
+-local jest = JestGlobals.jest
+-
+-local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+-local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
+-
+-local occupied: { [Vector3]: boolean } = {}
++--!strict
++const JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
++const describe = JestGlobals.describe
++const expect = JestGlobals.expect
++const it = JestGlobals.it
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const PlacementRules = require("@game/ReplicatedStorage/Shared/PlacementRules")
++
++-- Positions are written in cells so the spec survives a change to BlockSize,
++-- MaxHeight, or MaxReach.
++const SIZE = BlockTypes.BlockSize
++const HALF = SIZE / 2
++const BLOCK_NAME = BlockTypes.List[1].Name
++-- Cells line up with the origin, so the cell just above it is centered here.
++const ORIGIN_CELL = Vector3.new(HALF, HALF, HALF)
+ 
+ describe("PlacementRules", function()
+ 	describe("snap", function()
+-		it("snaps positions to cell centers", function()
+-			local size = BlockTypes.BlockSize
+-			local samples = {
+-				Vector3.new(1, 1, 1),
+-				Vector3.new(5, 9, -3),
+-				Vector3.new(-7, 2, 13),
+-			}
+-			for _, position in samples do
+-				local expected = Vector3.new(
+-					(math.floor(position.X / size) + 0.5) * size,
+-					(math.floor(position.Y / size) + 0.5) * size,
+-					(math.floor(position.Z / size) + 0.5) * size
+-				)
+-				expect(PlacementRules.snap(position)).toEqual(expected)
+-			end
+-		end)
+-
+ 		it.each({
+-			{ X = 1, Y = 1, Z = 1, CenterX = 2, CenterY = 2, CenterZ = 2 },
+-			{ X = 2, Y = 2, Z = 2, CenterX = 2, CenterY = 2, CenterZ = 2 },
+-			{ X = 0, Y = 0, Z = 0, CenterX = 2, CenterY = 2, CenterZ = 2 },
+-			{ X = 3.9, Y = 0, Z = 0, CenterX = 2, CenterY = 2, CenterZ = 2 },
+-			{ X = 4, Y = 0, Z = 0, CenterX = 6, CenterY = 2, CenterZ = 2 },
+-			{ X = -0.1, Y = 0, Z = 0, CenterX = -2, CenterY = 2, CenterZ = 2 },
+-		})("snaps ($X, $Y, $Z) to ($CenterX, $CenterY, $CenterZ)", function(row)
+-			local center = PlacementRules.snap(Vector3.new(row.X, row.Y, row.Z))
+-
+-			expect(center).toEqual(Vector3.new(row.CenterX, row.CenterY, row.CenterZ))
+-		end)
+-	end)
+-
+-	describe("_isFinite", function()
+-		it("rejects NaN", function()
+-			expect(PlacementRules._isFinite(0 / 0)).toBe(false)
+-		end)
+-
+-		it("rejects infinity", function()
+-			expect(PlacementRules._isFinite(math.huge)).toBe(false)
+-		end)
+-
+-		it("accepts zero", function()
+-			expect(PlacementRules._isFinite(0)).toBe(true)
++			{ Case = "a cell's lower corner", X = 0, Y = 0, Z = 0, CX = 0.5, CY = 0.5, CZ = 0.5 },
++			{
++				Case = "just below the next cell",
++				X = 0.99,
++				Y = 0.99,
++				Z = 0.99,
++				CX = 0.5,
++				CY = 0.5,
++				CZ = 0.5,
++			},
++			{ Case = "the next cell's corner", X = 1, Y = 1, Z = 1, CX = 1.5, CY = 1.5, CZ = 1.5 },
++			{
++				Case = "just below zero",
++				X = -0.01,
++				Y = -0.01,
++				Z = -0.01,
++				CX = -0.5,
++				CY = -0.5,
++				CZ = -0.5,
++			},
++			{
++				Case = "each axis on its own",
++				X = 1,
++				Y = 0,
++				Z = -0.01,
++				CX = 1.5,
++				CY = 0.5,
++				CZ = -0.5,
++			},
++		})("moves $Case to its cell's center", function(row)
++			local position = Vector3.new(row.X, row.Y, row.Z) * SIZE
++
++			local center = PlacementRules.snap(position)
++
++			expect(center).toEqual(Vector3.new(row.CX, row.CY, row.CZ) * SIZE)
+ 		end)
+ 	end)
+ 
+ 	describe("validate", function()
+-		local blockTypeRows = {}
+-		for _, blockType in BlockTypes.List do
+-			table.insert(blockTypeRows, { Name = blockType.Name })
+-		end
+-
+-		it.each(blockTypeRows)("accepts a $Name block", function(row)
+-			local ok = PlacementRules.validate(
+-				row.Name,
+-				Vector3.new(1, 1, 1),
+-				Vector3.new(2, 2, 10),
+-				occupied
+-			)
++		it("accepts a valid placement and returns the cell's center", function()
++			local position = Vector3.new(0.25, 0.75, 0.5) * SIZE
++
++			local ok, center = PlacementRules.validate(BLOCK_NAME, position, ORIGIN_CELL, {})
+ 
+ 			expect(ok).toBe(true)
++			expect(center).toEqual(ORIGIN_CELL)
+ 		end)
+ 
+-		it("rejects an unknown block type", function()
+-			local ok, reason =
+-				PlacementRules.validate("Lava", Vector3.new(1, 1, 1), Vector3.new(2, 2, 2), {})
++		it.each({
++			{ Case = "a name not in BlockTypes", Name = "Lava" :: unknown },
++			{ Case = "a value that isn't a string", Name = 5 },
++		})("rejects $Case as the block type", function(row)
++			local ok, reason = PlacementRules.validate(row.Name, ORIGIN_CELL, ORIGIN_CELL, {})
+ 
+ 			expect(ok).toBe(false)
+-			expect(reason).toBe("unknown block type")
++			expect(reason).toEqual(expect.any("string"))
+ 		end)
+ 
+-		it("rejects a position that isn't a Vector3", function()
+-			local ok, reason = PlacementRules.validate(
+-				"Brick",
+-				{ 1, 1, 1 },
+-				Vector3.new(2, 2, 2),
+-				{}
+-			)
+-
+-			expect(ok):toBe(false)
+-			expect(reason):toBe("position is not a Vector3")
+-		end)
+-
+-		it("rejects NaN positions", function()
+-			local ok, reason =
+-				PlacementRules.validate("Brick", Vector3.new(0 / 0, 1, 1), Vector3.new(2, 2, 2), {})
++		it.each({
++			{ Case = "a table", Position = { 1, 1, 1 } :: unknown },
++			{ Case = "NaN in X", Position = Vector3.new(0 / 0, HALF, HALF) },
++			{ Case = "infinity in Y", Position = Vector3.new(HALF, math.huge, HALF) },
++			{ Case = "negative infinity in Z", Position = Vector3.new(HALF, HALF, -math.huge) },
++		})("rejects $Case as the position", function(row)
++			local ok, reason = PlacementRules.validate(BLOCK_NAME, row.Position, ORIGIN_CELL, {})
+ 
+ 			expect(ok).toBe(false)
+-			expect(reason).toBe("position is not finite")
+-		end)
+-
+-		it("returns the snapped center", function()
+-			local position = Vector3.new(5, 1, -3)
+-
+-			local ok, center = PlacementRules.validate("Brick", position, Vector3.new(2, 2, 2), {})
+-
+-			expect(ok).toBe(true)
+-			expect(center).toEqual(PlacementRules.snap(position))
+-		end)
+-
+-		it("calls snap exactly once", function()
+-			local snapSpy = jest.spyOn(PlacementRules, "snap")
+-
+-			PlacementRules.validate("Brick", Vector3.new(1, 1, 1), Vector3.new(2, 2, 2), {})
+-
+-			expect(snapSpy).toHaveBeenCalledTimes(1)
+-			snapSpy.mockRestore()
++			expect(reason).toEqual(expect.any("string"))
+ 		end)
+ 
++		-- With BlockSize 4 and MaxHeight 200 no cell center lands exactly on 0
++		-- or MaxHeight, so these rows sit half a cell either side of each limit.
+ 		it.each({
+-			{ Y = -0.1, Accepted = false },
+-			{ Y = 0, Accepted = true },
+-			{ Y = 196, Accepted = true },
+-			{ Y = 200, Accepted = false },
+-		})("height: Y = $Y accepted is $Accepted", function(row)
+-			local ok = PlacementRules.validate(
+-				"Brick",
+-				Vector3.new(1, row.Y, 1),
+-				Vector3.new(2, row.Y, 2),
+-				{}
+-			)
+-
+-			expect(ok).toBe(row.Accepted)
++			{ Case = "a cell below the Baseplate", Y = -0.01, IsAccepted = false },
++			{ Case = "the cell resting on the Baseplate", Y = 0, IsAccepted = true },
++			{
++				Case = "the highest cell under MaxHeight",
++				Y = PlacementRules.MaxHeight - HALF,
++				IsAccepted = true,
++			},
++			{
++				Case = "a cell above MaxHeight",
++				Y = PlacementRules.MaxHeight + HALF,
++				IsAccepted = false,
++			},
++		})("height: $Case is accepted: $IsAccepted", function(row)
++			-- The root stands at the position, always within reach of its cell.
++			local position = Vector3.new(HALF, row.Y, HALF)
++
++			local ok = PlacementRules.validate(BLOCK_NAME, position, position, {})
++
++			expect(ok).toBe(row.IsAccepted)
+ 		end)
+ 
+ 		it.each({
+-			{ Z = 21, Distance = 20, Accepted = true },
+-			{ Z = 25, Distance = 24, Accepted = true },
+-			{ Z = 29, Distance = 28, Accepted = false },
+-		})("reach: a cell $Distance studs away accepted is $Accepted", function(row)
+-			local ok, reason =
+-				PlacementRules.validate("Brick", Vector3.new(2, 2, row.Z), Vector3.new(2, 2, 2), {})
++			{ Case = "exactly MaxReach", Distance = PlacementRules.MaxReach, IsAccepted = true },
++			{
++				Case = "just past MaxReach",
++				Distance = PlacementRules.MaxReach + 0.01,
++				IsAccepted = false,
++			},
++		})("reach: a cell $Case away is accepted: $IsAccepted", function(row)
++			local rootPosition = ORIGIN_CELL + Vector3.new(0, 0, row.Distance)
+ 
+-			expect(ok).toBe(row.Accepted)
+-			if not row.Accepted then
+-				expect(reason).toBe("out of reach")
+-			end
+-		end)
++			local ok = PlacementRules.validate(BLOCK_NAME, ORIGIN_CELL, rootPosition, {})
+ 
+-		it("rejects a cell that is already occupied", function()
+-			occupied[Vector3.new(2, 2, 2)] = true
++			expect(ok).toBe(row.IsAccepted)
++		end)
+ 
+-			local ok, reason = PlacementRules.validate(
+-				"Brick",
+-				Vector3.new(1, 1, 1),
+-				Vector3.new(2, 2, 2),
+-				occupied
+-			)
++		it("rejects a player with no character", function()
++			local ok, reason = PlacementRules.validate(BLOCK_NAME, ORIGIN_CELL, nil, {})
+ 
+ 			expect(ok).toBe(false)
+-			expect(reason).toBe("cell is occupied")
++			expect(reason).toEqual(expect.any("string"))
+ 		end)
+ 
+-		it("rejects placing twice in the same cell", function()
+-			local ok = PlacementRules.validate(
+-				"Dirt",
+-				Vector3.new(3, 3, 3),
+-				Vector3.new(2, 2, 2),
+-				occupied
+-			)
++		it("rejects a cell that is already occupied", function()
++			local occupied = { [ORIGIN_CELL] = true }
++
++			local ok, reason =
++				PlacementRules.validate(BLOCK_NAME, ORIGIN_CELL, ORIGIN_CELL, occupied)
+ 
+ 			expect(ok).toBe(false)
++			expect(reason).toEqual(expect.any("string"))
+ 		end)
+ 
+-		it("doesn't mark the cell occupied", function()
+-			local cells = {}
++		it("leaves occupied unchanged when it accepts a placement", function()
++			local otherCell = ORIGIN_CELL + Vector3.new(SIZE, 0, 0)
++			local occupied = { [otherCell] = true }
+ 
+-			PlacementRules.validate("Brick", Vector3.new(1, 1, 1), Vector3.new(2, 2, 2), cells)
++			local ok = PlacementRules.validate(BLOCK_NAME, ORIGIN_CELL, ORIGIN_CELL, occupied)
+ 
+-			local count = 0
+-			for _ in cells do
+-				count += 1
+-			end
+-			expect(count).toBeFalsy()
+-		end)
+-	end)
+-
+-	describe("BlockTypes", function()
+-		it("has the right block types", function()
+-			expect(#BlockTypes.List).toBe(5)
+-			expect(BlockTypes.List[1].Name).toBe("Brick")
+-			expect(BlockTypes.List[1].Color).toEqual(Color3.fromRGB(163, 75, 60))
+-			expect(BlockTypes.List[1].Material).toBe(Enum.Material.Brick)
+-			expect(BlockTypes.List[2].Name).toBe("Dirt")
+-			expect(BlockTypes.List[2].Color).toEqual(Color3.fromRGB(110, 78, 52))
+-			expect(BlockTypes.List[3].Name).toBe("Grass")
+-			expect(BlockTypes.List[3].Color).toEqual(Color3.fromRGB(88, 145, 62))
+-			expect(BlockTypes.List[4].Name).toBe("Window")
+-			expect(BlockTypes.List[4].Transparency).toBe(0.6)
+-			expect(BlockTypes.List[5].Name).toBe("Wood")
+-			expect(BlockTypes.List[5].Material).toBe(Enum.Material.WoodPlanks)
++			expect(ok).toBe(true)
++			expect(occupied[ORIGIN_CELL]).toBeNil()
++			expect(occupied[otherCell]).toBe(true)
+ 		end)
+ 	end)
+ end)

@@ -1,0 +1,330 @@
+diff --git a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+new file mode 100644
+index 0000000..010f814
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+@@ -0,0 +1,324 @@
++--[[
++	Specs for ReplicatedStorage.Shared.PlacementRules.
++
++	Assumptions:
++	- The reason strings returned by validate are asserted exactly. They are only meant for the
++	  server log, but they are the only way to tell which rule rejected a request, so a reworded
++	  reason should come with an updated spec.
++	- Vector3 results are compared component by component (as plain tables) so failures print the
++	  numbers instead of an opaque userdata.
++	- BlockTypes.BlockSize is 4 when these specs were written. Expected cell centers are derived
++	  from it where that stays readable; literal coordinates assume 4.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local JestGlobals = require(script.Parent.Parent.Packages.JestGlobals)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
++
++local describe = JestGlobals.describe
++local it = JestGlobals.it
++local expect = JestGlobals.expect
++
++local SIZE = BlockTypes.BlockSize
++local HALF = SIZE / 2
++
++local function components(vector: Vector3): { X: number, Y: number, Z: number }
++	return { X = vector.X, Y = vector.Y, Z = vector.Z }
++end
++
++local function expectVector(actual: unknown, x: number, y: number, z: number)
++	expect(typeof(actual)).toBe("Vector3")
++	expect(components(actual :: Vector3)).toEqual({ X = x, Y = y, Z = z })
++end
++
++-- Calls validate, defaulting occupied to an empty set.
++local function validate(
++	blockTypeName: unknown,
++	position: unknown,
++	rootPosition: Vector3?,
++	occupied: { [Vector3]: boolean }?
++): (boolean, Vector3 | string)
++	return PlacementRules.validate(blockTypeName, position, rootPosition, occupied or {})
++end
++
++local function expectRejected(reason: string, ok: boolean, result: Vector3 | string)
++	expect(ok).toBe(false)
++	expect(result).toBe(reason)
++end
++
++describe("PlacementRules", function()
++	describe("constants", function()
++		it("exposes MaxHeight and MaxReach", function()
++			expect(PlacementRules.MaxHeight).toBe(200)
++			expect(PlacementRules.MaxReach).toBe(24)
++		end)
++	end)
++
++	describe("snap", function()
++		it("returns the center of the cell at the origin", function()
++			expectVector(PlacementRules.snap(Vector3.zero), HALF, HALF, HALF)
++		end)
++
++		it("returns the same center for every point inside one cell", function()
++			expectVector(PlacementRules.snap(Vector3.new(0.1, 1, 3.9)), 2, 2, 2)
++			expectVector(PlacementRules.snap(Vector3.new(2, 2, 2)), 2, 2, 2)
++			expectVector(PlacementRules.snap(Vector3.new(3.999, 3.999, 3.999)), 2, 2, 2)
++		end)
++
++		it("puts a point on a cell boundary into the higher cell", function()
++			expectVector(PlacementRules.snap(Vector3.new(4, 8, 12)), 6, 10, 14)
++		end)
++
++		it("snaps negative coordinates down to the cell below", function()
++			expectVector(PlacementRules.snap(Vector3.new(-0.001, -4, -4.5)), -2, -2, -6)
++		end)
++
++		it("snaps each axis independently", function()
++			expectVector(PlacementRules.snap(Vector3.new(5, -1, 101)), 6, -2, 102)
++		end)
++
++		it("is idempotent", function()
++			local once = PlacementRules.snap(Vector3.new(13.7, 42.2, -9.1))
++			local twice = PlacementRules.snap(once)
++			expect(components(twice)).toEqual(components(once))
++		end)
++
++		it("puts the cell resting on the Baseplate at Y = BlockSize / 2", function()
++			expect(PlacementRules.snap(Vector3.new(0, 0, 0)).Y).toBe(HALF)
++			expect(PlacementRules.snap(Vector3.new(0, SIZE - 0.01, 0)).Y).toBe(HALF)
++		end)
++	end)
++
++	describe("validate", function()
++		local cell = Vector3.new(2, 2, 2)
++
++		it("accepts a valid placement and returns the snapped cell center", function()
++			local ok, result = validate("Brick", Vector3.new(1, 3, 0.5), cell)
++			expect(ok).toBe(true)
++			expectVector(result, 2, 2, 2)
++		end)
++
++		describe("block type", function()
++			it("accepts every block type in BlockTypes.List", function()
++				for _, blockType in BlockTypes.List do
++					local ok = validate(blockType.Name, cell, cell)
++					expect(ok).toBe(true)
++				end
++			end)
++
++			it("rejects a name that is not a block type", function()
++				expectRejected("unknown block type", validate("Lava", cell, cell))
++				expectRejected("unknown block type", validate("", cell, cell))
++			end)
++
++			it("matches names case-sensitively", function()
++				expectRejected("unknown block type", validate("brick", cell, cell))
++				expectRejected("unknown block type", validate("BRICK", cell, cell))
++			end)
++
++			it("rejects non-string block types", function()
++				expectRejected("unknown block type", validate(nil, cell, cell))
++				expectRejected("unknown block type", validate(1, cell, cell))
++				expectRejected("unknown block type", validate(true, cell, cell))
++				expectRejected("unknown block type", validate(BlockTypes.ByName.Brick, cell, cell))
++				expectRejected("unknown block type", validate({ Name = "Brick" }, cell, cell))
++			end)
++
++			it("checks the block type before anything else", function()
++				expectRejected("unknown block type", validate("Lava", "not a vector", nil))
++			end)
++		end)
++
++		describe("position", function()
++			it("rejects values that are not a Vector3", function()
++				local reason = "position is not a Vector3"
++				expectRejected(reason, validate("Brick", nil, cell))
++				expectRejected(reason, validate("Brick", "2, 2, 2", cell))
++				expectRejected(reason, validate("Brick", 2, cell))
++				expectRejected(reason, validate("Brick", { X = 2, Y = 2, Z = 2 }, cell))
++				expectRejected(reason, validate("Brick", CFrame.new(2, 2, 2), cell))
++				expectRejected(reason, validate("Brick", Vector2.new(2, 2), cell))
++			end)
++
++			it("rejects NaN in any component", function()
++				local nan = 0 / 0
++				local reason = "position is not finite"
++				expectRejected(reason, validate("Brick", Vector3.new(nan, 2, 2), cell))
++				expectRejected(reason, validate("Brick", Vector3.new(2, nan, 2), cell))
++				expectRejected(reason, validate("Brick", Vector3.new(2, 2, nan), cell))
++			end)
++
++			it("rejects infinite components", function()
++				local reason = "position is not finite"
++				expectRejected(reason, validate("Brick", Vector3.new(math.huge, 2, 2), cell))
++				expectRejected(reason, validate("Brick", Vector3.new(2, -math.huge, 2), cell))
++				expectRejected(reason, validate("Brick", Vector3.new(2, 2, math.huge), cell))
++			end)
++
++			it("checks the position before the character", function()
++				expectRejected(
++					"position is not finite",
++					validate("Brick", Vector3.new(0 / 0, 2, 2), nil)
++				)
++			end)
++		end)
++
++		describe("height", function()
++			it("accepts the cell resting on the Baseplate", function()
++				local ok, result = validate("Brick", Vector3.new(2, 0, 2), cell)
++				expect(ok).toBe(true)
++				expectVector(result, 2, HALF, 2)
++			end)
++
++			it("rejects a cell inside the Baseplate", function()
++				local root = Vector3.new(2, -2, 2)
++				expectRejected(
++					"out of height range",
++					validate("Brick", Vector3.new(2, -0.01, 2), root)
++				)
++				expectRejected(
++					"out of height range",
++					validate("Brick", Vector3.new(2, -3, 2), root)
++				)
++			end)
++
++			it("accepts the highest cell whose center is at or below MaxHeight", function()
++				-- With BlockSize 4 that cell spans Y 196..200, center 198.
++				local root = Vector3.new(2, 198, 2)
++				local ok, result = validate("Brick", Vector3.new(2, 199.9, 2), root)
++				expect(ok).toBe(true)
++				expectVector(result, 2, 198, 2)
++			end)
++
++			it("rejects a cell whose center is above MaxHeight", function()
++				-- Y = 200 lands in the cell spanning 200..204, center 202.
++				local root = Vector3.new(2, 202, 2)
++				expectRejected(
++					"out of height range",
++					validate("Brick", Vector3.new(2, 200, 2), root)
++				)
++				expectRejected(
++					"out of height range",
++					validate("Brick", Vector3.new(2, 5000, 2), root)
++				)
++			end)
++
++			it("checks the height before the character", function()
++				expectRejected(
++					"out of height range",
++					validate("Brick", Vector3.new(2, -10, 2), nil)
++				)
++			end)
++		end)
++
++		describe("character and reach", function()
++			it("rejects a player without a character", function()
++				expectRejected("no character", validate("Brick", cell, nil))
++			end)
++
++			it("measures reach to the cell center, not the requested position", function()
++				-- The requested point is 25 studs from the root, but its cell's center (2, 2, 2) is
++				-- only 23 away, so it is in reach.
++				local root = Vector3.new(2, 2, 25)
++				local ok, result = validate("Brick", Vector3.new(2, 2, 0), root)
++				expect(ok).toBe(true)
++				expectVector(result, 2, 2, 2)
++			end)
++
++			it("accepts a cell just inside MaxReach", function()
++				local root = cell + Vector3.new(0, PlacementRules.MaxReach - 0.01, 0)
++				local ok = validate("Brick", cell, root)
++				expect(ok).toBe(true)
++			end)
++
++			-- BUG: validate's doc comment says "A cell exactly MaxReach away is in reach", but the
++			-- code rejects with `distance >= MaxReach`. This should be `>` (reject only when the
++			-- distance is strictly greater). The distance here is exactly 24 with no float error
++			-- (a pure Y offset of MaxReach), so this spec fails until PlacementRules.validate is
++			-- fixed. Left failing on purpose; the client preview and the server must agree on this
++			-- edge, so it is worth settling.
++			it("accepts a cell exactly MaxReach away", function()
++				local root = cell + Vector3.new(0, PlacementRules.MaxReach, 0)
++				expect((root - cell).Magnitude).toBe(PlacementRules.MaxReach)
++				local ok, result = validate("Brick", cell, root)
++				expect(ok).toBe(true)
++				expectVector(result, 2, 2, 2)
++			end)
++
++			it("rejects a cell beyond MaxReach", function()
++				local root = cell + Vector3.new(0, PlacementRules.MaxReach + 0.01, 0)
++				expectRejected("out of reach", validate("Brick", cell, root))
++			end)
++
++			it("uses straight-line distance across all three axes", function()
++				-- (14, 14, 14) from the cell is about 24.25 studs: each axis is in reach alone,
++				-- but the diagonal is not.
++				local root = cell + Vector3.new(14, 14, 14)
++				expectRejected("out of reach", validate("Brick", cell, root))
++			end)
++
++			it("checks reach before occupancy", function()
++				local far = cell + Vector3.new(100, 0, 0)
++				expectRejected("out of reach", validate("Brick", cell, far, { [cell] = true }))
++			end)
++		end)
++
++		describe("occupied cells", function()
++			it("rejects a cell that is already occupied", function()
++				local occupied = { [Vector3.new(2, 2, 2)] = true }
++				expectRejected("cell is occupied", validate("Brick", cell, cell, occupied))
++			end)
++
++			it("matches occupancy by the snapped center, not the requested point", function()
++				local occupied = { [Vector3.new(2, 2, 2)] = true }
++				expectRejected(
++					"cell is occupied",
++					validate("Brick", Vector3.new(0.5, 3.5, 1), cell, occupied)
++				)
++			end)
++
++			it("accepts a neighbouring cell when only another cell is occupied", function()
++				local occupied = { [Vector3.new(2, 2, 2)] = true }
++				local ok, result = validate("Brick", Vector3.new(2, 6, 2), cell, occupied)
++				expect(ok).toBe(true)
++				expectVector(result, 2, 6, 2)
++			end)
++
++			it("treats a false entry as empty", function()
++				local occupied = { [Vector3.new(2, 2, 2)] = false }
++				local ok = validate("Brick", cell, cell, occupied)
++				expect(ok).toBe(true)
++			end)
++
++			it("does not change occupied, whether it accepts or rejects", function()
++				local other = Vector3.new(6, 2, 2)
++				local occupied = { [other] = true }
++
++				local accepted = validate("Brick", cell, cell, occupied)
++				expect(accepted).toBe(true)
++				local rejected = validate("Brick", other, cell, occupied)
++				expect(rejected).toBe(false)
++
++				local keys = {}
++				for key, value in occupied do
++					table.insert(keys, { key = components(key), value = value })
++				end
++				expect(keys).toEqual({ { key = components(other), value = true } })
++			end)
++		end)
++
++		it("lets the caller place the returned center into occupied to block a repeat", function()
++			local occupied: { [Vector3]: boolean } = {}
++			local ok, result = validate("Wood", Vector3.new(3, 1, 3), cell, occupied)
++			expect(ok).toBe(true)
++			occupied[result :: Vector3] = true
++
++			expectRejected(
++				"cell is occupied",
++				validate("Dirt", Vector3.new(1, 3, 1), cell, occupied)
++			)
++		end)
++	end)
++end)

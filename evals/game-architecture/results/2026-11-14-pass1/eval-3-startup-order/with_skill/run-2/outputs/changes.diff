@@ -1,0 +1,52 @@
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
+index 9ac9e39..b276570 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
+@@ -9,7 +9,8 @@ local PlotServerService = require("../SystemPackage/PlotServerService")
+ 
+ local PlotPlacementMediator = {}
+ 
+-function PlotPlacementMediator:Init()
++-- Start, not Init: the plots exist only after PlotServerService:Init has run.
++function PlotPlacementMediator:Start()
+ 	for _, plot in PlotServerService:GetPlots() do
+ 		PlacementServerService:AddBuildArea(plot)
+ 	end
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
+index b7b787b..ffe7306 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
+@@ -6,8 +6,6 @@
+ local Players = game:GetService("Players")
+ local Workspace = game:GetService("Workspace")
+ 
+-local ModuleLoader = require("@game/ReplicatedStorage/Packages/ModuleLoader")
+-
+ local INTERMISSION_SECONDS = 15
+ local ROUND_SECONDS = 120
+ 
+@@ -33,12 +31,7 @@ local function runRound()
+ 	roundEnded:Fire()
+ end
+ 
+-function RoundServerService:Start()
+-	-- Every other system has to be running before the first round starts.
+-	while not ModuleLoader.IsServerLoaded() do
+-		task.wait()
+-	end
+-
++local function runRoundsAsync()
+ 	while true do
+ 		if #Players:GetPlayers() == 0 then
+ 			Players.PlayerAdded:Wait()
+@@ -47,4 +40,10 @@ function RoundServerService:Start()
+ 	end
+ end
+ 
++function RoundServerService:Start()
++	-- The loop never returns, and the loader sets ServerLoaded only after
++	-- every Start returns.
++	task.spawn(runRoundsAsync)
++end
++
+ return RoundServerService

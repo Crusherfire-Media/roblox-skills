@@ -1,0 +1,103 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts make the same correct pesde.toml and README changes, require t through its link, and tell the reviewer to install and commit the lockfile. B keeps the explicit block type lookup and uses t.string, exactly the pattern the rubric expects, so it is the most faithful way to keep the original checks. A's t.keyOf works the same but builds its key list once at module load and folds two checks into one, which is subtler for a reviewer to verify. B's PR also covers more setup (sourcemap, restarting Rojo). B wins narrowly.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "pesde.toml dependency",
+          "score": 5,
+          "note": "Adds `t = { wally = \"osyrisrblx/t\", version = \"=3.1.1\" }` under [dependencies], pinned exactly like the other entries, with an alias that matches the require."
+        },
+        {
+          "criterion": "Require path / no other package manager",
+          "score": 5,
+          "note": "Uses `require(ReplicatedStorage.Packages.t)`, with no .pesde path, no lockfile edit and no wally.toml."
+        },
+        {
+          "criterion": "Correct t usage and kept checks",
+          "score": 4,
+          "note": "`t.tuple(t.keyOf(BlockTypes.ByName), t.intersection(t.Vector3, notNaN))` keeps the string, lookup and NaN checks, and the later checks are unchanged. Merging the lookup into a key list built once at module load is subtler, and it depends on ByName being frozen."
+        },
+        {
+          "criterion": "PR description",
+          "score": 5,
+          "note": "Tells the reviewer to run `pesde install` and commit the updated `pesde.lock`, and says plainly that nothing was installed or run."
+        },
+        {
+          "criterion": "Scope and lint",
+          "score": 5,
+          "note": "Changes only the handler, pesde.toml, the README package table and the PR file; selene and StyLua pass."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "pesde.toml dependency",
+          "score": 5,
+          "note": "Adds `t = { wally = \"osyrisrblx/t\", version = \"=3.1.1\" }` under [dependencies], pinned exactly like the other entries."
+        },
+        {
+          "criterion": "Require path / no other package manager",
+          "score": 5,
+          "note": "Uses `require(ReplicatedStorage.Packages.t)`, with no lockfile or roblox_packages edits."
+        },
+        {
+          "criterion": "Correct t usage and kept checks",
+          "score": 5,
+          "note": "`t.tuple(t.string, t.intersection(t.Vector3, isNotNaN))` with an early return; keeps the explicit `BlockTypes.ByName` lookup and all the later checks unchanged."
+        },
+        {
+          "criterion": "PR description",
+          "score": 5,
+          "note": "Tells the reviewer to run `pesde install`, commit the updated `pesde.lock`, regenerate the sourcemap and restart Rojo, and says luau-lsp hasn't been run."
+        },
+        {
+          "criterion": "Scope and lint",
+          "score": 5,
+          "note": "Changes only the handler, pesde.toml, the README and the PR file; selene and StyLua pass."
+        }
+      ],
+      "overall_score": 9
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Every check is kept, and the NaN check is handled correctly with t.intersection",
+        "Clear before-and-after table and honest notes on what was and wasn't done",
+        "Bad-argument test cases cover a missing argument as well"
+      ],
+      "weaknesses": [
+        "t.keyOf takes a snapshot of ByName at module load, so the explicit lookup is gone and correctness rests on ByName never changing",
+        "The cast `blockTypeName :: string` relies on keyOf having already ruled out non-strings"
+      ]
+    },
+    "B": {
+      "score": 9,
+      "strengths": [
+        "Matches the expected t.tuple pattern exactly and keeps the block type lookup explicit",
+        "Thorough reviewer steps: install, commit the lockfile, regenerate the sourcemap, restart Rojo",
+        "Explains why the casts are needed (t doesn't narrow types)"
+      ],
+      "weaknesses": [
+        "The PR ends with a 'Generated with Claude Code' footer",
+        "A ticked checkbox says the lint checks pass, which the reviewer has to take on trust"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8.5,
+    "with_skill": 9
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

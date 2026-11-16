@@ -1,0 +1,676 @@
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/BlockPlacementRules.luau b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/BlockPlacementRules.luau
+new file mode 100644
+index 0000000..e4d1752
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/BlockPlacementRules.luau
+@@ -0,0 +1,138 @@
++--[[
++	The checks a placement request must pass. Pure functions with no Roblox state, so the server
++	service stays thin and specs can drive every rule directly.
++]]
++
++local BlockTypes = require("@game/ServerScriptService/Modules/Catalogs/BlockTypes")
++local Grid = require("@game/ServerScriptService/Modules/Utilities/Grid")
++
++-- Farthest a cell center may be from the player's character, in studs.
++local MAX_PLACE_DISTANCE = 64
++-- Most placement requests one player may make in RATE_WINDOW_SECONDS.
++local MAX_REQUESTS_PER_WINDOW = 10
++local RATE_WINDOW_SECONDS = 1
++-- Any coordinate beyond this is junk, whatever the reach check would say.
++local MAX_COORDINATE = 16384
++-- Allows for float error when comparing a cell's bottom face with the baseplate top.
++local HEIGHT_EPSILON = 1e-3
++
++export type Rejection =
++	"InvalidBlockType"
++	| "InvalidPosition"
++	| "BelowBaseplate"
++	| "Occupied"
++	| "NoCharacter"
++	| "TooFar"
++
++export type CheckContext = {
++	-- Top surface of the baseplate. No cell may reach below it.
++	BaseplateTopY: number,
++	-- Where the player's character is, or nil when it has none.
++	CharacterPosition: Vector3?,
++	IsOccupied: (cellKey: string) -> boolean,
++}
++
++export type Placement = {
++	BlockType: BlockTypes.BlockType,
++	CellCenter: Vector3,
++	CellKey: string,
++}
++
++local BlockPlacementRules = {
++	MaxPlaceDistance = MAX_PLACE_DISTANCE,
++	MaxRequestsPerWindow = MAX_REQUESTS_PER_WINDOW,
++	RateWindowSeconds = RATE_WINDOW_SECONDS,
++}
++
++local function isSaneNumber(value: number): boolean
++	-- NaN fails every comparison, and infinity fails the bound.
++	return value == value and math.abs(value) <= MAX_COORDINATE
++end
++
++--[[
++	True when the value is a Vector3 with finite components inside the world bounds.
++]]
++function BlockPlacementRules.isSanePosition(value: unknown): boolean
++	if typeof(value) ~= "Vector3" then
++		return false
++	end
++	local position = value :: Vector3
++	return isSaneNumber(position.X) and isSaneNumber(position.Y) and isSaneNumber(position.Z)
++end
++
++--[[
++	A string key naming the grid cell that contains the position.
++]]
++function BlockPlacementRules.getCellKey(position: Vector3): string
++	local index = Grid.toCellIndex(position, BlockTypes.BlockSize)
++	return `{index.X},{index.Y},{index.Z}`
++end
++
++--[[
++	Records a request at time `now` in the player's recent request times and returns whether it
++	fits the rate limit. Refused requests are not recorded, so a player who keeps spamming gets
++	through again as soon as their older requests leave the window.
++]]
++function BlockPlacementRules.allowRequest(recentTimes: { number }, now: number): boolean
++	local windowStart = now - RATE_WINDOW_SECONDS
++	-- Times are appended in order, so the expired ones sit at the front. The list never holds
++	-- more than MAX_REQUESTS_PER_WINDOW entries, so removing from the front stays cheap.
++	while recentTimes[1] ~= nil and recentTimes[1] <= windowStart do
++		table.remove(recentTimes, 1)
++	end
++
++	if #recentTimes >= MAX_REQUESTS_PER_WINDOW then
++		return false
++	end
++	table.insert(recentTimes, now)
++	return true
++end
++
++--[[
++	Checks the arguments a client sent with a placement request. Returns the placement to make,
++	or nil and the reason the request was refused.
++]]
++function BlockPlacementRules.check(
++	blockTypeName: unknown,
++	position: unknown,
++	context: CheckContext
++): (Placement?, Rejection?)
++	local blockType = if typeof(blockTypeName) == "string"
++		then BlockTypes.ByName[blockTypeName :: string]
++		else nil
++	if not blockType then
++		return nil, "InvalidBlockType"
++	end
++
++	if not BlockPlacementRules.isSanePosition(position) then
++		return nil, "InvalidPosition"
++	end
++	-- The client sends a cell center, but snapping here means only whole cells are ever used.
++	local cellCenter = Grid.snapToCell(position :: Vector3, BlockTypes.BlockSize)
++
++	local cellBottom = cellCenter.Y - BlockTypes.BlockSize / 2
++	if cellBottom < context.BaseplateTopY - HEIGHT_EPSILON then
++		return nil, "BelowBaseplate"
++	end
++
++	local cellKey = BlockPlacementRules.getCellKey(cellCenter)
++	if context.IsOccupied(cellKey) then
++		return nil, "Occupied"
++	end
++
++	local characterPosition = context.CharacterPosition
++	if not characterPosition then
++		return nil, "NoCharacter"
++	end
++	if (cellCenter - characterPosition).Magnitude > MAX_PLACE_DISTANCE then
++		return nil, "TooFar"
++	end
++
++	return {
++		BlockType = blockType,
++		CellCenter = cellCenter,
++		CellKey = cellKey,
++	}, nil
++end
++
++return table.freeze(BlockPlacementRules)
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/BlockPlacementRules.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/BlockPlacementRules.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/BlockPlacementRules.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/init.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/init.meta.json
+new file mode 100644
+index 0000000..3117f37
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/init.meta.json
+@@ -0,0 +1,5 @@
++{
++  "properties": {
++    "IconTint": [0, 0.6666666865348816, 1]
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementClientService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementClientService.luau
+new file mode 100644
+index 0000000..2732be0
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementClientService.luau
+@@ -0,0 +1,118 @@
++--[[
++	Turns clicks and taps on the baseplate or a placed block into placement requests, and lets
++	the number keys pick the block type. The server decides whether each request goes through.
++]]
++
++local Players = game:GetService("Players")
++local UserInputService = game:GetService("UserInputService")
++local Workspace = game:GetService("Workspace")
++
++local BlockTypes = require("@game/ServerScriptService/Modules/Catalogs/BlockTypes")
++local Grid = require("@game/ServerScriptService/Modules/Utilities/Grid")
++local BlockPlacementConstants = require("./BlockPlacementConstants")
++local BlockPlacementNetwork = require("./BlockPlacementNetwork")
++
++-- How far the click ray reaches. The server limits reach on its own, so this only needs to be
++-- long enough to hit what the player can see.
++local RAY_LENGTH = 1024
++-- Number keys in order. Key N selects the Nth block type in the catalog.
++local NUMBER_KEYS = {
++	Enum.KeyCode.One,
++	Enum.KeyCode.Two,
++	Enum.KeyCode.Three,
++	Enum.KeyCode.Four,
++	Enum.KeyCode.Five,
++	Enum.KeyCode.Six,
++	Enum.KeyCode.Seven,
++	Enum.KeyCode.Eight,
++	Enum.KeyCode.Nine,
++}
++
++local BlockPlacementClientService = {}
++
++local localPlayer = Players.LocalPlayer
++local selectedBlockType: BlockTypes.BlockType = BlockTypes.List[1]
++local blockIndexByKey: { [Enum.KeyCode]: number } = {}
++for index = 1, math.min(#BlockTypes.List, #NUMBER_KEYS) do
++	blockIndexByKey[NUMBER_KEYS[index]] = index
++end
++
++--[[
++	True for the parts a player may build on: the baseplate and blocks already placed.
++]]
++local function isBuildSurface(instance: Instance): boolean
++	if instance.Name == BlockPlacementConstants.BASEPLATE_NAME and instance.Parent == Workspace then
++		return true
++	end
++	local parent = instance.Parent
++	return parent ~= nil
++		and parent.Name == BlockPlacementConstants.PLACED_BLOCKS_FOLDER_NAME
++		and parent.Parent == Workspace
++		and instance:GetAttribute(BlockPlacementConstants.BLOCK_TYPE_ATTRIBUTE) ~= nil
++end
++
++--[[
++	Casts a ray through the screen point and requests a block in the cell beside the face it hits.
++	The screen point excludes the top bar inset, as InputObject and TouchTapInWorld positions do.
++]]
++local function requestPlacementAt(screenPosition: Vector2)
++	local camera = Workspace.CurrentCamera
++	if not camera then
++		return
++	end
++
++	local ray = camera:ScreenPointToRay(screenPosition.X, screenPosition.Y)
++	local params = RaycastParams.new()
++	params.FilterType = Enum.RaycastFilterType.Exclude
++	params.FilterDescendantsInstances = if localPlayer.Character
++		then { localPlayer.Character }
++		else {}
++
++	local result = Workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
++	if not result or not isBuildSurface(result.Instance) then
++		return
++	end
++
++	-- Half a block out along the face normal lands in the middle of the neighboring cell.
++	local cellSize = BlockTypes.BlockSize
++	local cellCenter = Grid.snapToCell(result.Position + result.Normal * (cellSize / 2), cellSize)
++	BlockPlacementNetwork.PlaceBlock:FireServer(selectedBlockType.Name, cellCenter)
++end
++
++local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
++	if gameProcessedEvent then
++		return
++	end
++
++	if input.UserInputType == Enum.UserInputType.MouseButton1 then
++		requestPlacementAt(Vector2.new(input.Position.X, input.Position.Y))
++		return
++	end
++
++	local blockIndex = blockIndexByKey[input.KeyCode]
++	if blockIndex then
++		selectedBlockType = BlockTypes.List[blockIndex]
++	end
++end
++
++-- Fires for taps only, not for drags that move the camera or the thumbstick.
++local function onTouchTapInWorld(position: Vector2, processedByUI: boolean)
++	if processedByUI then
++		return
++	end
++	requestPlacementAt(position)
++end
++
++function BlockPlacementClientService:Init()
++	UserInputService.InputBegan:Connect(onInputBegan)
++	UserInputService.TouchTapInWorld:Connect(onTouchTapInWorld)
++end
++
++--[[
++	The block type the next placement will use.
++]]
++function BlockPlacementClientService:GetSelectedBlockType(): BlockTypes.BlockType
++	return selectedBlockType
++end
++
++return BlockPlacementClientService
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementClientService.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementClientService.meta.json
+new file mode 100644
+index 0000000..966c67f
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementClientService.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "ClientOnly": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementConstants.luau b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementConstants.luau
+new file mode 100644
+index 0000000..1357364
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementConstants.luau
+@@ -0,0 +1,14 @@
++--[[
++	Names the server and client both rely on to find placed blocks.
++]]
++
++local BlockPlacementConstants = {
++	-- Folder in Workspace that holds every placed block.
++	PLACED_BLOCKS_FOLDER_NAME = "PlacedBlocks",
++	-- Attribute on each placed block holding its BlockTypes name.
++	BLOCK_TYPE_ATTRIBUTE = "BlockType",
++	-- Name of the Part placements stand on.
++	BASEPLATE_NAME = "Baseplate",
++}
++
++return table.freeze(BlockPlacementConstants)
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementNetwork/PlaceBlock.model.json b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementNetwork/PlaceBlock.model.json
+new file mode 100644
+index 0000000..dc005af
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementNetwork/PlaceBlock.model.json
+@@ -0,0 +1,3 @@
++{
++  "className": "RemoteEvent"
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementNetwork/init.luau b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementNetwork/init.luau
+new file mode 100644
+index 0000000..dec2de8
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementNetwork/init.luau
+@@ -0,0 +1,12 @@
++--[[
++	Remotes for block placement. Each remote is a child of this module, so it reaches clients
++	together with the module.
++]]
++
++local BlockPlacementNetwork = {
++	-- Client to server: (blockTypeName: string, cellCenter: Vector3)
++	-- The server treats both arguments as untrusted and checks them before placing anything.
++	PlaceBlock = script:WaitForChild("PlaceBlock") :: RemoteEvent,
++}
++
++return table.freeze(BlockPlacementNetwork)
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementServerService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementServerService.luau
+new file mode 100644
+index 0000000..25e10e1
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementServerService.luau
+@@ -0,0 +1,141 @@
++--[[
++	Places blocks for players. Every request from a client is checked by BlockPlacementRules
++	before a block appears, and the server keeps its own record of which cells are filled.
++]]
++
++local Players = game:GetService("Players")
++local Workspace = game:GetService("Workspace")
++
++local BlockTypes = require("@game/ServerScriptService/Modules/Catalogs/BlockTypes")
++local NotificationServerService = require(
++	"@game/ServerScriptService/Modules/Systems/Core/NotificationSystem/SystemPackage/NotificationServerService"
++)
++local BlockPlacementRules = require("../Implementation/BlockPlacementRules")
++local BlockPlacementConstants = require("./BlockPlacementConstants")
++local BlockPlacementNetwork = require("./BlockPlacementNetwork")
++
++-- Shortest gap between two "too far" notifications to one player, so spam clicks don't stack them.
++local TOO_FAR_NOTIFY_COOLDOWN = 1
++local TOO_FAR_MESSAGE =
++	`That spot is too far away. You can place blocks up to {BlockPlacementRules.MaxPlaceDistance} studs from you.`
++
++type PlayerState = {
++	RecentRequestTimes: { number },
++	LastTooFarNotifyTime: number,
++}
++
++local BlockPlacementServerService = {}
++
++local placedBlocksFolder: Folder
++local baseplateTopY = 0
++-- Cell key to the block filling that cell.
++local blocksByCell: { [string]: BasePart } = {}
++local stateByPlayer: { [Player]: PlayerState } = {}
++
++local function getPlayerState(player: Player): PlayerState
++	local state = stateByPlayer[player]
++	if not state then
++		state = {
++			RecentRequestTimes = {},
++			LastTooFarNotifyTime = -math.huge,
++		}
++		stateByPlayer[player] = state
++	end
++	return state
++end
++
++local function getCharacterPosition(player: Player): Vector3?
++	local character = player.Character
++	if not character then
++		return nil
++	end
++	local humanoid = character:FindFirstChildOfClass("Humanoid")
++	local rootPart = character:FindFirstChild("HumanoidRootPart")
++	if not humanoid or humanoid.Health <= 0 or not rootPart or not rootPart:IsA("BasePart") then
++		return nil
++	end
++	return rootPart.Position
++end
++
++local function isOccupied(cellKey: string): boolean
++	return blocksByCell[cellKey] ~= nil
++end
++
++local function createBlock(placement: BlockPlacementRules.Placement)
++	local blockType = placement.BlockType
++	local block = Instance.new("Part")
++	block.Name = blockType.Name
++	block.Anchored = true
++	block.Size = Vector3.one * BlockTypes.BlockSize
++	block.Position = placement.CellCenter
++	block.Color = blockType.Color
++	block.Material = blockType.Material
++	block.Transparency = blockType.Transparency
++	block.TopSurface = Enum.SurfaceType.Smooth
++	block.BottomSurface = Enum.SurfaceType.Smooth
++	block:SetAttribute(BlockPlacementConstants.BLOCK_TYPE_ATTRIBUTE, blockType.Name)
++
++	local cellKey = placement.CellKey
++	blocksByCell[cellKey] = block
++	-- Frees the cell if anything else removes the block later.
++	block.Destroying:Once(function()
++		if blocksByCell[cellKey] == block then
++			blocksByCell[cellKey] = nil
++		end
++	end)
++	block.Parent = placedBlocksFolder
++end
++
++local function notifyTooFar(player: Player, state: PlayerState)
++	local now = os.clock()
++	if now - state.LastTooFarNotifyTime < TOO_FAR_NOTIFY_COOLDOWN then
++		return
++	end
++	state.LastTooFarNotifyTime = now
++	NotificationServerService:Notify(player, TOO_FAR_MESSAGE)
++end
++
++local function onPlaceBlockRequest(player: Player, blockTypeName: unknown, position: unknown)
++	local state = getPlayerState(player)
++	-- Counted before any other check, so junk requests can't be sent faster than real ones.
++	if not BlockPlacementRules.allowRequest(state.RecentRequestTimes, os.clock()) then
++		return
++	end
++
++	local placement, rejection = BlockPlacementRules.check(blockTypeName, position, {
++		BaseplateTopY = baseplateTopY,
++		CharacterPosition = getCharacterPosition(player),
++		IsOccupied = isOccupied,
++	})
++	if placement then
++		createBlock(placement)
++	elseif rejection == "TooFar" then
++		notifyTooFar(player, state)
++	end
++end
++
++local function findBaseplateTopY(): number
++	local baseplate = Workspace:FindFirstChild(BlockPlacementConstants.BASEPLATE_NAME)
++	if baseplate and baseplate:IsA("BasePart") then
++		return baseplate.Position.Y + baseplate.Size.Y / 2
++	end
++	warn(
++		`[BlockPlacement] Workspace.{BlockPlacementConstants.BASEPLATE_NAME} not found; using Y = 0 as the floor.`
++	)
++	return 0
++end
++
++function BlockPlacementServerService:Init()
++	baseplateTopY = findBaseplateTopY()
++
++	placedBlocksFolder = Instance.new("Folder")
++	placedBlocksFolder.Name = BlockPlacementConstants.PLACED_BLOCKS_FOLDER_NAME
++	placedBlocksFolder.Parent = Workspace
++
++	BlockPlacementNetwork.PlaceBlock.OnServerEvent:Connect(onPlaceBlockRequest)
++	Players.PlayerRemoving:Connect(function(player)
++		stateByPlayer[player] = nil
++	end)
++end
++
++return BlockPlacementServerService
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementServerService.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementServerService.meta.json
+new file mode 100644
+index 0000000..2322559
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/BlockPlacementServerService.meta.json
+@@ -0,0 +1,5 @@
++{
++  "attributes": {
++    "RelocateToServerScriptService": true
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/init.meta.json b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/init.meta.json
+new file mode 100644
+index 0000000..1aecc9c
+--- /dev/null
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/SystemPackage/init.meta.json
+@@ -0,0 +1,5 @@
++{
++  "properties": {
++    "IconTint": [1, 0, 0]
++  }
++}
+diff --git a/src/ServerScriptService/Modules/Utilities/Grid.luau b/src/ServerScriptService/Modules/Utilities/Grid.luau
+index 7ee1813..e542a8e 100644
+--- a/src/ServerScriptService/Modules/Utilities/Grid.luau
++++ b/src/ServerScriptService/Modules/Utilities/Grid.luau
+@@ -19,4 +19,16 @@ function Grid.snapToCell(position: Vector3, cellSize: number): Vector3
+ 	)
+ end
+ 
++--[[
++	Returns the whole-number index of the grid cell that contains the position. Neighboring cells
++	differ by 1 on one axis, so the index works as a stable key for a cell.
++]]
++function Grid.toCellIndex(position: Vector3, cellSize: number): Vector3
++	return Vector3.new(
++		math.floor(position.X / cellSize),
++		math.floor(position.Y / cellSize),
++		math.floor(position.Z / cellSize)
++	)
++end
++
+ return table.freeze(Grid)
+diff --git a/src/ServerScriptService/Tests/Specs/BlockPlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/BlockPlacementRules.spec.luau
+new file mode 100644
+index 0000000..c05b2bb
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/BlockPlacementRules.spec.luau
+@@ -0,0 +1,132 @@
++local JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
++local BlockTypes = require("@game/ServerScriptService/Modules/Catalogs/BlockTypes")
++local BlockPlacementRules = require(
++	"@game/ServerScriptService/Modules/Systems/Gameplay/BlockPlacementSystem/Implementation/BlockPlacementRules"
++)
++
++local describe = JestGlobals.describe
++local expect = JestGlobals.expect
++local it = JestGlobals.it
++
++local SIZE = BlockTypes.BlockSize
++local FIRST_LAYER_Y = SIZE / 2
++
++local function context(overrides: { [string]: any }?): BlockPlacementRules.CheckContext
++	local base: { [string]: any } = {
++		BaseplateTopY = 0,
++		CharacterPosition = Vector3.new(0, 3, 0),
++		IsOccupied = function()
++			return false
++		end,
++	}
++	if overrides then
++		for key, value in overrides do
++			base[key] = value
++		end
++	end
++	return base :: any
++end
++
++describe("BlockPlacementRules.check", function()
++	it("accepts a valid request and snaps it to a cell", function()
++		local placement, rejection =
++			BlockPlacementRules.check("Brick", Vector3.new(5, FIRST_LAYER_Y + 0.4, 7), context())
++		expect(rejection).toBeNil()
++		assert(placement, "expected a placement")
++		expect(placement.BlockType).toBe(BlockTypes.ByName.Brick)
++		expect(placement.CellCenter).toEqual(Vector3.new(6, FIRST_LAYER_Y, 6))
++		expect(placement.CellKey).toBe("1,0,1")
++	end)
++
++	it("rejects unknown and non-string block types", function()
++		local position = Vector3.new(2, FIRST_LAYER_Y, 2)
++		expect(select(2, BlockPlacementRules.check("Lava", position, context()))).toBe(
++			"InvalidBlockType"
++		)
++		expect(select(2, BlockPlacementRules.check(1, position, context()))).toBe(
++			"InvalidBlockType"
++		)
++		expect(select(2, BlockPlacementRules.check(nil, position, context()))).toBe(
++			"InvalidBlockType"
++		)
++	end)
++
++	it("rejects positions that are not sane Vector3s", function()
++		for _, position in
++			{
++				"here",
++				Vector3.new(0 / 0, 2, 2),
++				Vector3.new(math.huge, 2, 2),
++				Vector3.new(1e9, 2, 2),
++			}
++		do
++			expect(select(2, BlockPlacementRules.check("Dirt", position, context()))).toBe(
++				"InvalidPosition"
++			)
++		end
++	end)
++
++	it("rejects cells below the baseplate top", function()
++		local _, rejection =
++			BlockPlacementRules.check("Dirt", Vector3.new(2, -FIRST_LAYER_Y, 2), context())
++		expect(rejection).toBe("BelowBaseplate")
++	end)
++
++	it("rejects filled cells", function()
++		local _, rejection = BlockPlacementRules.check(
++			"Dirt",
++			Vector3.new(2, FIRST_LAYER_Y, 2),
++			context({
++				IsOccupied = function(key: string)
++					return key == "0,0,0"
++				end,
++			})
++		)
++		expect(rejection).toBe("Occupied")
++	end)
++
++	it("rejects players without a character", function()
++		local _, rejection = BlockPlacementRules.check(
++			"Dirt",
++			Vector3.new(2, FIRST_LAYER_Y, 2),
++			context({ CharacterPosition = false })
++		)
++		expect(rejection).toBe("NoCharacter")
++	end)
++
++	it("rejects cells beyond reach and accepts cells within it", function()
++		local reach = BlockPlacementRules.MaxPlaceDistance
++		local origin = Vector3.new(FIRST_LAYER_Y, FIRST_LAYER_Y, FIRST_LAYER_Y)
++		local nearCell = origin + Vector3.new(reach - SIZE, 0, 0)
++		local farCell = origin + Vector3.new(reach + SIZE, 0, 0)
++
++		local nearPlacement =
++			BlockPlacementRules.check("Wood", nearCell, context({ CharacterPosition = origin }))
++		expect(nearPlacement).never.toBeNil()
++		local _, rejection =
++			BlockPlacementRules.check("Wood", farCell, context({ CharacterPosition = origin }))
++		expect(rejection).toBe("TooFar")
++	end)
++end)
++
++describe("BlockPlacementRules.allowRequest", function()
++	it("allows the limit within a window, then refuses", function()
++		local times = {}
++		for index = 1, BlockPlacementRules.MaxRequestsPerWindow do
++			expect(BlockPlacementRules.allowRequest(times, 100 + index * 0.01)).toBe(true)
++		end
++		expect(BlockPlacementRules.allowRequest(times, 100.5)).toBe(false)
++	end)
++
++	it("allows requests again once old ones leave the window", function()
++		local times = {}
++		for _ = 1, BlockPlacementRules.MaxRequestsPerWindow do
++			BlockPlacementRules.allowRequest(times, 100)
++		end
++		expect(BlockPlacementRules.allowRequest(times, 100.9)).toBe(false)
++		expect(BlockPlacementRules.allowRequest(times, 100 + BlockPlacementRules.RateWindowSeconds)).toBe(
++			true
++		)
++		expect(#times).toBe(1)
++	end)
++end)

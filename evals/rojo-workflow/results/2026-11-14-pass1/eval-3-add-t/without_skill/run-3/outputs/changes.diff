@@ -1,0 +1,122 @@
+diff --git a/PR_DESCRIPTION.md b/PR_DESCRIPTION.md
+new file mode 100644
+index 0000000..8ef03e5
+--- /dev/null
++++ b/PR_DESCRIPTION.md
+@@ -0,0 +1,62 @@
++# Use `t` to validate PlaceBlock remote arguments
++
++## Summary
++
++- Adds the [`t`](https://github.com/osyrisrblx/t) runtime type checker as a dependency, pinned to `=3.1.1` (the latest version on the Wally index).
++- Switches the `PlaceBlock` handler in `src/ServerScriptService/BlockPlacement.server.luau` from hand-written argument checks to a `t` validator. Remotes we add later can use the same approach.
++
++## How the dependency is added
++
++This repo manages packages with **pesde**, not a `wally.toml`. Wally packages come in through pesde's `[wally_indices]`. So `t` goes into `pesde.toml` the same way as Vide, Charm and the others:
++
++```toml
++t = { wally = "osyrisrblx/t", version = "=3.1.1" }
++```
++
++After install, pesde writes the linker module `roblox_packages/t.luau`. Rojo already maps `roblox_packages` to `ReplicatedStorage.Packages`, so the handler loads it with `require(ReplicatedStorage.Packages.t)`. `default.project.json` doesn't need to change.
++
++## Behaviour of the PlaceBlock handler
++
++Every check the handler did before is still there:
++
++| Check | Before | After |
++| --- | --- | --- |
++| `blockTypeName` is a string | `typeof(...) ~= "string"` | `t.string` |
++| `position` is a `Vector3` | `typeof(...) ~= "Vector3"` | `t.Vector3` |
++| `position` has no NaN components | `position ~= position` | custom `notNaN` check, combined with `t.Vector3` using `t.intersection` (`t.Vector3` does not reject NaN) |
++| Block type exists | `BlockTypes.ByName` lookup | unchanged |
++| Rate limit (`MIN_INTERVAL`) | | unchanged |
++| Character has a `HumanoidRootPart` | | unchanged |
++| Cell is not below Y=0 and not already filled | | unchanged |
++| Cell is within `MAX_REACH` | | unchanged |
++
++Invalid calls still return without doing anything, the same as before. Extra arguments are still ignored. The block-type lookup stays in the handler because it also returns the `BlockType` the handler uses.
++
++`t` checks don't narrow types for the Luau type checker, so the handler casts the arguments (`:: string`, `:: Vector3`) once the validator passes.
++
++## ⚠️ Before testing (reviewer action required)
++
++The packages were **not installed** while this change was written. That means `pesde.lock` has **not** been updated and `roblox_packages/t.luau` does not exist yet.
++
++1. Install dependencies with the pesde version pinned in `rokit.toml` (`pesde-pkg/pesde@0.7.4+registry.0.2.3`):
++   ```sh
++   rokit install   # only if your tools aren't up to date
++   pesde install
++   ```
++2. Check that `roblox_packages/t.luau` now exists. Without it, `BlockPlacement.server.luau` errors at startup on `require(ReplicatedStorage.Packages.t)`.
++3. **Commit the updated `pesde.lock`** to this PR. It is tracked by git (`!pesde.lock` in `.gitignore`), and it should gain a `wally#osyrisrblx/t@3.1.1 roblox` entry.
++4. If you use luau-lsp, regenerate `sourcemap.json` (pesde's `sourcemap_generator` script or `rojo sourcemap`) so `t` resolves in the editor.
++
++## Test plan
++
++- [ ] `pesde install` succeeds and `pesde.lock` includes `t@3.1.1`
++- [ ] `rojo serve` / build, then play: the server starts with no script errors
++- [ ] Placing blocks with the normal client flow still works
++- [ ] Firing `PlaceBlock` from the command bar / an exploit-style client with bad arguments places nothing and throws no errors:
++  - [ ] non-string block name (e.g. `123`, `nil`)
++  - [ ] unknown block name (`"Lava"`)
++  - [ ] non-Vector3 position (e.g. `CFrame.new()`, `{}`)
++  - [ ] NaN position (`Vector3.new(0/0, 0, 0)`)
++- [ ] Rate limit, reach limit, occupied-cell and below-ground checks still reject as before
++
++🤖 Generated with [Claude Code](https://claude.com/claude-code)
+diff --git a/pesde.toml b/pesde.toml
+index d196787..e10bc52 100644
+--- a/pesde.toml
++++ b/pesde.toml
+@@ -23,6 +23,7 @@ VideCharm = { wally = "littensy/vide-charm", version = "=0.4.1" }
+ CharmSync = { wally = "littensy/charm-sync", version = "=0.4.1" }
+ UILabs = { wally = "pepeeltoro41/ui-labs", version = "=2.4.2" }
+ ModuleLoader = { wally = "crusherfire/module-loader", version = "=4.0.1" }
++t = { wally = "osyrisrblx/t", version = "=3.1.1" }
+ 
+ [dev_dependencies]
+ scripts_rojo = { name = "pesde/scripts_rojo", version = "^0.2.0", target = "lune" }
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index 812f4f9..91ad34d 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local Workspace = game:GetService("Workspace")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local t = require(ReplicatedStorage.Packages.t)
+ 
+ local BLOCK_SIZE = BlockTypes.BlockSize
+ -- How far from the player's character a block may be placed, in studs.
+@@ -34,14 +35,24 @@ local function snapToCell(position: Vector3): Vector3
+ 	return Vector3.new(snapAxis(position.X), snapAxis(position.Y), snapAxis(position.Z))
+ end
+ 
+-local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+-	if typeof(blockTypeName) ~= "string" or typeof(position) ~= "Vector3" then
+-		return
+-	end
++-- t.Vector3 only checks the type, so NaN components need their own check.
++local function notNaN(value: any): (boolean, string?)
+ 	-- NaN is the only value not equal to itself.
+-	if position ~= position then
++	if value ~= value then
++		return false, "NaN value"
++	end
++	return true
++end
++
++local isPlaceBlockArgs = t.tuple(t.string, t.intersection(t.Vector3, notNaN))
++
++local function onPlaceBlock(player: Player, rawBlockTypeName: unknown, rawPosition: unknown)
++	if not isPlaceBlockArgs(rawBlockTypeName, rawPosition) then
+ 		return
+ 	end
++	-- t's checks don't narrow types for the Luau type checker, so cast after they pass.
++	local blockTypeName = rawBlockTypeName :: string
++	local position = rawPosition :: Vector3
+ 
+ 	local blockType = BlockTypes.ByName[blockTypeName]
+ 	if not blockType then

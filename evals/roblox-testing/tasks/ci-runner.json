@@ -1,0 +1,77 @@
+{
+  "id": 3,
+  "name": "ci-runner",
+  "skill": "roblox-testing",
+  "prompt": "We want GitHub Actions to run our Jest specs (src/ServerScriptService/Tests/Specs) on every pull request. The plan: build the place with Rojo, upload it to a dedicated CI place, and run the specs there through Roblox Open Cloud's Luau Execution API. The CI place's universe ID, its place ID, and an Open Cloud API key will be repository secrets: ROBLOX_UNIVERSE_ID, ROBLOX_PLACE_ID, and ROBLOX_API_KEY.\n\nWrite the workflow at .github/workflows/specs.yml, the Luau script the job sends as the task's script at ci/run-specs.luau, and any project changes the CI place's build needs. A pull request should fail when any spec fails. You can't reach Roblox from here; I'll add the secrets and try it. I can't answer questions while you work, so make reasonable calls and note any assumptions in a comment or in your write-up.",
+  "setup_files": [],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "ci/run-specs.luau",
+      "text": "The task script exists at ci/run-specs.luau"
+    },
+    {
+      "type": "file_exists",
+      "path": ".github/workflows/specs.yml",
+      "text": "The workflow exists at .github/workflows/specs.yml"
+    },
+    {
+      "type": "file_matches",
+      "path": "ci/run-specs.luau",
+      "pattern": "runCLI",
+      "text": "The task script runs Jest through runCLI"
+    },
+    {
+      "type": "file_matches",
+      "path": "ci/run-specs.luau",
+      "pattern": "\\berror\\s*\\(",
+      "text": "The task script raises an error (so a failing run fails the task)"
+    },
+    {
+      "type": "any_file_matches",
+      "dir": ".",
+      "ext": ".json",
+      "pattern": "\"LoadStringEnabled\"\\s*:\\s*true",
+      "text": "A project file sets ServerScriptService.LoadStringEnabled to true"
+    },
+    {
+      "type": "file_matches",
+      "path": ".github/workflows/specs.yml",
+      "pattern": "^\\s*concurrency\\s*:",
+      "text": "The workflow declares a concurrency group"
+    },
+    {
+      "type": "command",
+      "run": [
+        "rojo",
+        "build",
+        "default.project.json",
+        "-o",
+        "check-build.rbxl"
+      ],
+      "expect_exit": 0,
+      "text": "default.project.json still builds"
+    }
+  ],
+  "rubric": [
+    "ci/run-specs.luau runs Jest's runCLI on ServerScriptService.Tests.Specs, waits for it, and raises an error when the run is rejected or result.results.success is false. Returning normally or only printing on failure fails this criterion: a Luau Execution task ends FAILED only when its script raises an unhandled error.",
+    "The workflow installs the toolchain and packages before building (Rokit or equivalent for rojo, and pesde install, since roblox_packages is gitignored), builds an .rbxl with rojo build, and uploads it as a new version of the CI place with the API key.",
+    "It creates one Luau Execution task for the whole suite, pinned to the uploaded version (the versions/{version_id}/luau-execution-session-tasks endpoint), polls it to a terminal state (COMPLETE, FAILED, or CANCELLED) under a deadline of its own, prints the task's logs or error, and fails the job unless the task is COMPLETE.",
+    "It respects Open Cloud's limits: a concurrency group (or equivalent) so quick pushes don't start tasks in parallel, no task-creation retry loop that ignores HTTP 429 and retry-after, and a job timeout-minutes.",
+    "The build used for CI sets ServerScriptService.LoadStringEnabled to true (in default.project.json or a CI-only project file the workflow builds), since Jest falls back to loadstring on a server; the rest of the place's mapping is unchanged.",
+    "Secrets come from ${{ secrets.* }}, are never printed or committed, and the IDs aren't hard-coded.",
+    "luau-lsp, selene, and StyLua pass on ci/run-specs.luau, and the YAML and any JSON written are valid."
+  ],
+  "judge_facts": [
+    "Jest Roblox 3.21.0 runCLI(root, options, projects) returns a roblox-lua-promise Promise resolving to { globalConfig, results } (jest-core/src/cli/init.lua, line 170); results.success is false when any test failed or any spec file failed to load (jest-core/src/TestScheduler.lua, line 345). A run with failing tests resolves; it doesn't reject. awaitStatus() returns the status string and the value.",
+    "Jest Roblox 3.21.0 loads each module with debug.loadmodule only when pcall(debug.loadmodule, Instance.new(\"ModuleScript\")) succeeds, and otherwise with loadstring(module.Source) (jest-runtime/src/init.lua, lines 67 and 1889 to 1894). On a Roblox server, loadstring works only when ServerScriptService.LoadStringEnabled is true.",
+    "Roblox Open Cloud Luau Execution (create.roblox.com/docs/cloud/reference/features/luau-execution): tasks are created at /cloud/v2/universes/{universe_id}/places/{place_id}/luau-execution-session-tasks or .../places/{place_id}/versions/{version_id}/luau-execution-session-tasks. States: QUEUED, PROCESSING, CANCELLED, COMPLETE, FAILED. An unhandled script error ends the task with error code SCRIPT_ERROR. Creation is limited to 5 per minute per API key owner and 10 incomplete tasks per place (HTTP 429). Scripts run up to 5 minutes; 450 KB of logs are kept."
+  ],
+  "notes": "No fixtures: the sandbox already has Jest at ServerScriptService.Tests.Packages and jest.config.luau. The Open Cloud fact comes from Roblox's API reference rather than package source, because the correct workflow depends on it and the judge can't look it up.",
+  "timeout_minutes": 20
+}

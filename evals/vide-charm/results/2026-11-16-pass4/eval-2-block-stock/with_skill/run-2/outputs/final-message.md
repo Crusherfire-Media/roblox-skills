@@ -1,0 +1,7 @@
+I fixed the StyLua finding. The type-checker errors come from an out-of-date `sourcemap.json`, not from the code itself.
+
+**StyLua:** I couldn't run StyLua itself, because shell commands are blocked in this session. Instead I split the long `UILabs.Ordered(...)` calls in `BlockPicker.story.luau` into short locals, so each statement fits on one line. The next stop check will confirm whether that passes.
+
+**luau-lsp "Unknown require" and "Unknown type" errors:** these come from the checked-in `sourcemap.json`. It has no entries for `BlockTypes`, `BlockPicker` or `BlockPlacer`, even though those files existed before my change. So `Main.client.luau` requiring `BlockPlacer` and `BlockPicker` fails the same way it did before I touched anything. My new `BlockStock` module and the stories folder aren't in it either. The two "Unknown type" errors (`BlockTypes.BlockType` and `BlockPicker.Stock`) follow from those requires failing to resolve.
+
+The fix is to regenerate the sourcemap with `rojo sourcemap default.project.json -o sourcemap.json`. It's a generated file, so I didn't edit it by hand, and I couldn't run Rojo here. Once it's regenerated, run `luau-lsp analyze` again to catch any real type errors in the new code; it hasn't been type-checked yet.

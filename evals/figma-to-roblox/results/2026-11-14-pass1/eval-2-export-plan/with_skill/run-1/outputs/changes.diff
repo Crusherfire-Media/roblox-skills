@@ -1,0 +1,288 @@
+diff --git a/docs/figma/export-plan.md b/docs/figma/export-plan.md
+new file mode 100644
+index 0000000..3a047ec
+--- /dev/null
++++ b/docs/figma/export-plan.md
+@@ -0,0 +1,282 @@
++# HUD Kit export plan
++
++Source: Figma page **HUD Kit** (node `30:1`, file "Block Builder - UI", version `2208815566419836712`),
++saved as [`design/figma/hud-kit.json`](../../design/figma/hud-kit.json). Node ids below refer to that file.
++
++Every visual on the page is either:
++
++- **Native**: built from Roblox UI objects (Frame, TextLabel, UICorner, UIStroke, UIGradient). Nothing to export.
++- **Baked**: exported from Figma as a PNG, uploaded, and drawn with an ImageLabel.
++
++The `Note` text layers are the designer's notes. They are never exported or built. Hide them before you export any frame that contains one (Panel / Ornate and Slot / Empty both do).
++
++## Sizes
++
++- The Figma page is 1920 x 1080, so **1 Figma px = 1 Roblox offset px** at the 1080p reference size.
++- `Screen.luau` scales UI from 1x up to **2x** (`MAX_SCALE = 2`, at 4K). So **all baked art is exported at 2x** its display size, so it stays sharp at the largest scale.
++- No image may be larger than **1024 px on either side**. Roblox shrinks anything bigger. Only the logo hits this limit (see B10).
++- Sprite sheets use equal cells with a **4 px transparent gutter** (in exported pixels) on every side of each piece, so neighbouring pieces don't bleed in when the image is scaled. A piece's `ImageRectOffset` is `(col * cell + 4, row * cell + 4)`, and its `ImageRectSize` is the piece's exported size, not including the gutter.
++- An easy way to build a sheet: make a Figma frame at **1x** with half the cell size and a 2 px gutter, place the pieces in it, and export the frame at **2x**. The 1x positions are given for each sheet.
++
++## Export rules for every image
++
++1. PNG, transparent background, no frame fill unless stated.
++2. **Alpha bleed:** Roblox turns fully transparent pixels black when you upload, which leaves dark fringes on soft edges. Run each PNG through an alpha-bleed / dilate step (e.g. the "Alpha bleed" option or a dilate filter in your image tool) so the edge colour extends into the transparent pixels.
++3. **One-colour art is exported in pure white** (fill set to `#FFFFFF`, 100% opacity). The game colours it with `ImageColor3` and fades it with `ImageTransparency`. The Figma colours are listed for each piece so the game can use them.
++4. Multicolour art keeps its colours (`ImageColor3` stays white `255,255,255`).
++5. Put the PNGs in `design/figma/exports/`, named as in the tables below. Upload them under the account or group that owns the experience. Send the asset ids back so we can record every id, sheet size, and rect in a single asset module.
++
++---
++
++## Summary
++
++| # | Visual (Figma node) | Destination | Upload |
++|---|---|---|---|
++| B1 | Icons / Currency and Stats (`40:127`), 12 icons | Baked | Sheet `HudIcons`, 288 x 216 |
++| — | Prompts / Keyboard (`40:129`), 10 keys | **Native** | — |
++| B2 | Prompts / Xbox (`40:131`), 8 buttons | Baked | Sheet `PromptsXbox`, 352 x 176 |
++| B3 | Prompts / PlayStation (`40:133`), 8 buttons | Baked | Sheet `PromptsPlayStation`, 352 x 176 |
++| B4 | Prompts / Touch (`40:135`), 4 gestures | Baked | Sheet `PromptsTouch`, 416 x 104 |
++| B5 | Panel / Ornate (`40:137`) | Baked, 9-slice | `PanelOrnate.png`, 256 x 256 |
++| B6 | Slot / Empty (`40:139`) | Baked | `SlotEmpty.png`, 256 x 256 |
++| B7 | Card / Ribbon (`40:141`): shape | Baked, 9-slice (label is native) | `CardRibbon.png`, 96 x 96 |
++| B8 | Background / Dot Grid (`40:142`) | Baked, tile | `DotGridTile.png`, 48 x 48 |
++| B9 | Badge / Legendary (`40:145`) | Baked | `BadgeLegendary.png`, 128 x 128 |
++| B10 | Logo (`40:148`) | Baked, split in two | `LogoLeft.png` + `LogoRight.png`, 704 x 512 each |
++| B11 | Glow (`40:159`) | Baked | `Glow.png`, 360 x 360 |
++| B12 | Item Portraits (`40:150`), 120+ | Baked, one image each | `ItemPortrait_<Name>.png`, 256 x 256 each |
++| — | Profile Card (`40:153`), incl. Avatar | **Native** (avatar = player headshot thumbnail) | — |
++| — | Glass Card (`40:155`) | **Native** (blur approximated) | — |
++| — | Progress Bar (`40:158`) | **Native** | — |
++| — | Page background, all `Note` layers | Not built | — |
++
++Why the sheets are split this way: a player only ever sees one device's prompts, so keyboard, Xbox, PlayStation, and touch are kept apart and only one set loads. The 12 HUD icons always appear together, so they share one sheet. Item portraits are shown one at a time, come from a large set that grows every update, and are drawn one at a time, so each is its own image. 9-slice frames and tiles have to be separate images, because `Slice` and `Tile` work on the whole image.
++
++---
++
++## B1. HUD icons sheet: `HudIcons.png`
++
++Designer note: one-colour icons, all shown together in the top bar and on stat cards, tinted per state.
++
++- Display size **32 x 32**. Each piece is exported at **64 x 64**, in white.
++- Sheet **288 x 216**, cell **72 x 72**, 4 columns x 3 rows.
++- 1x build frame: 144 x 108, cell 36, icon at `(col*36+2, row*36+2)`, exported at 2x.
++
++| Piece | Node | Col, Row | ImageRectOffset | ImageRectSize | Design colour (`ImageColor3`) |
++|---|---|---|---|---|---|
++| Coin | `40:0` | 0, 0 | 4, 4 | 64, 64 | 255, 200, 60 |
++| Gem | `40:1` | 1, 0 | 76, 4 | 64, 64 | 77, 212, 245 |
++| Heart | `40:2` | 2, 0 | 148, 4 | 64, 64 | 240, 69, 87 |
++| Star | `40:3` | 3, 0 | 220, 4 | 64, 64 | 255, 217, 77 |
++| Bolt | `40:4` | 0, 1 | 4, 76 | 64, 64 | 247, 230, 66 |
++| Shield | `40:5` | 1, 1 | 76, 76 | 64, 64 | 107, 153, 245 |
++| Clock | `40:6` | 2, 1 | 148, 76 | 64, 64 | 217, 222, 235 |
++| Trophy | `40:7` | 3, 1 | 220, 76 | 64, 64 | 245, 184, 56 |
++| Key | `40:8` | 0, 2 | 4, 148 | 64, 64 | 235, 196, 87 |
++| Hammer | `40:9` | 1, 2 | 76, 148 | 64, 64 | 191, 196, 209 |
++| Pickaxe | `40:10` | 2, 2 | 148, 148 | 64, 64 | 168, 181, 199 |
++| Flag | `40:11` | 3, 2 | 220, 148 | 64, 64 | 87, 209, 118 |
++
++ImageLabel: `Size = 32 x 32` (offset), `BackgroundTransparency = 1`, `Image = HudIcons`, `ImageRectOffset` / `ImageRectSize` from the table, `ScaleType = Fit`, `ImageColor3 =` the design colour, or the colour for the current state.
++
++## B2. Xbox prompts sheet: `PromptsXbox.png`
++
++Designer note: shown only while the player uses an Xbox controller.
++
++- Each button is the coloured circle **and** its white glyph, exported as one piece in full colour. Display size **40 x 40**, exported at **80 x 80**.
++- Sheet **352 x 176**, cell **88 x 88**, 4 columns x 2 rows.
++- 1x build frame: 176 x 88, cell 44, button at `(col*44+2, row*44+2)`, exported at 2x.
++
++| Piece | Node | Col, Row | ImageRectOffset | ImageRectSize |
++|---|---|---|---|---|
++| A | `40:34` | 0, 0 | 4, 4 | 80, 80 |
++| B | `40:37` | 1, 0 | 92, 4 | 80, 80 |
++| X | `40:40` | 2, 0 | 180, 4 | 80, 80 |
++| Y | `40:43` | 3, 0 | 268, 4 | 80, 80 |
++| LB | `40:46` | 0, 1 | 4, 92 | 80, 80 |
++| RB | `40:49` | 1, 1 | 92, 92 | 80, 80 |
++| LT | `40:52` | 2, 1 | 180, 92 | 80, 80 |
++| RT | `40:55` | 3, 1 | 268, 92 | 80, 80 |
++
++ImageLabel: `Size = 40 x 40`, `BackgroundTransparency = 1`, `Image = PromptsXbox`, rect from the table, `ScaleType = Fit`, `ImageColor3 = 255,255,255`.
++
++## B3. PlayStation prompts sheet: `PromptsPlayStation.png`
++
++Designer note: shown only while the player uses a PlayStation controller.
++
++The layout is the same as B2: each piece is the dark base and white glyph together, 80 x 80. The sheet is **352 x 176** with **88 x 88** cells.
++
++| Piece | Node | Col, Row | ImageRectOffset | ImageRectSize |
++|---|---|---|---|---|
++| Cross | `40:58` | 0, 0 | 4, 4 | 80, 80 |
++| Circle | `40:61` | 1, 0 | 92, 4 | 80, 80 |
++| Square | `40:64` | 2, 0 | 180, 4 | 80, 80 |
++| Triangle | `40:67` | 3, 0 | 268, 4 | 80, 80 |
++| L1 | `40:70` | 0, 1 | 4, 92 | 80, 80 |
++| R1 | `40:73` | 1, 1 | 92, 92 | 80, 80 |
++| L2 | `40:76` | 2, 1 | 180, 92 | 80, 80 |
++| R2 | `40:79` | 3, 1 | 268, 92 | 80, 80 |
++
++ImageLabel: the same as B2, with `Image = PromptsPlayStation`.
++
++## B4. Touch prompts sheet: `PromptsTouch.png`
++
++Designer note: shown only on touch screens.
++
++- White one-colour gestures. Display size **48 x 48**, exported at **96 x 96**.
++- Sheet **416 x 104**, cell **104 x 104**, 4 columns x 1 row.
++- 1x build frame: 208 x 52, cell 52, gesture at `(col*52+2, 2)`, exported at 2x.
++
++| Piece | Node | Col, Row | ImageRectOffset | ImageRectSize |
++|---|---|---|---|---|
++| Tap | `40:80` | 0, 0 | 4, 4 | 96, 96 |
++| Hold | `40:81` | 1, 0 | 108, 4 | 96, 96 |
++| Drag | `40:82` | 2, 0 | 212, 4 | 96, 96 |
++| Pinch | `40:83` | 3, 0 | 316, 4 | 96, 96 |
++
++ImageLabel: `Size = 48 x 48`, `BackgroundTransparency = 1`, `Image = PromptsTouch`, rect from the table, `ScaleType = Fit`, `ImageColor3 = 255,255,255` (the design colour is white).
++
++## B5. Ornate panel (9-slice): `PanelOrnate.png`
++
++Designer note: dialog background that stretches to fit its content, from 240 x 160 up to 960 x 640. The corner flourishes must not stretch.
++
++- The art contains the dark fill (33, 27, 20), the 4 px gold inside stroke (217, 172, 81), and the four 48 x 48 corner flourishes (`40:84` to `40:87`). It keeps its colours.
++- To export: duplicate the frame, hide the `Note`, and resize the copy to **128 x 128** (48 corner + 32 plain middle + 48 corner) with each flourish pinned to its corner. Export at 2x → **256 x 256**.
++- Make sure the 32 px middle of each edge is just the straight stroke over plain fill, so it can stretch.
++
++ImageLabel: `Size =` the content size, between 240 x 160 and 960 x 640. `BackgroundTransparency = 1`, `Image = PanelOrnate`, `ScaleType = Slice`, `SliceCenter = Rect.new(96, 96, 160, 160)`, `SliceScale = 0.5`, `ImageColor3 = 255,255,255`.
++
++The smallest size, 240 x 160, is larger than two corners together (96 x 96), so the corners never overlap.
++
++## B6. Empty inventory slot: `SlotEmpty.png`
++
++Designer note: slot size is a player setting from 80 to 128.
++
++Roblox can't draw a dashed stroke (2 px, dash 8 / gap 6, inside, radius 12), so it has to be an image.
++
++- To export: hide the `Note`, set the stroke to white at **100%** opacity (the 30% opacity is applied in game), keep the frame fill empty, and export the 96 x 96 frame at **width 256** (Figma export setting `256w`, i.e. 2.667x) → **256 x 256**. That covers the largest slot (128) at 2x scale.
++
++ImageLabel: `Size =` slot size x slot size (80 to 128), `BackgroundTransparency = 1`, `Image = SlotEmpty`, `ScaleType = Stretch`, `ImageColor3 = 255,255,255`, `ImageTransparency = 0.7`. Hover and drop-target states can change `ImageTransparency` / `ImageColor3`.
++
++Trade-off for the designer: because the image scales with the slot, the stroke, dashes, and corner radius scale too. At 80 px the stroke is 1.67 px and the radius 10; at 128 px they are 2.67 px and 16. A 9-slice would keep the stroke at 2 px, but it stretches the dashes along the edges to up to about twice their length. Uniform scaling looked closer to the design.
++
++## B7. Ribbon card (9-slice shape + native label): `CardRibbon.png`
++
++Each corner has a different radius (top-left 16, top-right 0, bottom-right 16, bottom-left 0). `UICorner` can't do that, so the shape is baked.
++
++- To export: make a **48 x 48** copy with the same corner radii (16 / 0 / 16 / 0), fill white, and no label. Export at 2x → **96 x 96**.
++
++ImageLabel: `Size = 240 x 56` (or automatic width with padding, so longer translated text fits), `BackgroundTransparency = 1`, `Image = CardRibbon`, `ScaleType = Slice`, `SliceCenter = Rect.new(32, 32, 64, 64)`, `SliceScale = 0.5`, `ImageColor3 = 222, 67, 82`. The minimum size is 32 x 32.
++
++Label "NEW" (`40:140`): a **native** TextLabel inside the ImageLabel, so it can be translated. Builder Sans ExtraBold (800), 22 px, line height 28, white, centred.
++
++## B8. Dot grid background (tile): `DotGridTile.png`
++
++Designer note: repeats behind every full-screen menu, at any screen size.
++
++- The pattern is a 2 x 2 white dot every 24 px, starting at (11, 11). It repeats seamlessly as a **24 x 24** tile with the dot at x 11–13, y 11–13 (11 px of space on every side).
++- To export: make a 24 x 24 frame with no fill and one 2 x 2 white ellipse at (11, 11), at **100%** opacity (the frame's 5% opacity is applied in game). Export at 2x → **48 x 48**.
++
++ImageLabel: `Size = UDim2.fromScale(1, 1)` behind the menu content, `BackgroundTransparency = 1`, `Image = DotGridTile`, `ScaleType = Tile`, `TileSize = UDim2.fromOffset(24, 24)`, `ImageColor3 = 255,255,255`, `ImageTransparency = 0.95`.
++
++## B9. Legendary badge: `BadgeLegendary.png`
++
++Roblox has no diamond gradient (`GRADIENT_DIAMOND`, 255,217,77 → 217,89,13), so the whole badge is baked: the 64 px circle and its white star together.
++
++- Export node `40:145` at 2x → **128 x 128**, in full colour, outside the circle transparent.
++- For now it is a single image. When other rarity badges are designed, put them all on one `RarityBadges` sheet (128 px pieces in 136 px cells), because they show together.
++
++ImageLabel: `Size = 64 x 64`, `BackgroundTransparency = 1`, `Image = BadgeLegendary`, `ScaleType = Fit`, `ImageColor3 = 255,255,255`. No `UICorner` (the circle is in the image).
++
++## B10. Logo: `LogoLeft.png` + `LogoRight.png`
++
++The wordmark has a 6 px outside stroke and a 24 px orange outer glow (a drop shadow with no offset, 255,153,26 at 80%), so it is baked with the glow included.
++
++- Measured bounds including stroke and glow: about 700 x 254 at 1x. To export, wrap the Logo group in a **704 x 256** frame at x 1208, y 455 (centred on the art, transparent, clip content on). Check that the glow is not cut off at any edge; if it is, enlarge the frame by an even number of pixels and tell us the new size.
++- At 2x that is 1408 x 512, which is over the 1024 limit. Split it down the middle into two **704 x 512** PNGs: `LogoLeft` (exported x 0–703) and `LogoRight` (x 704–1407). You can export the full frame at 2x and crop it in an image editor, then alpha-bleed both halves.
++
++Drawn as a 704 x 256 transparent Frame holding two ImageLabels:
++
++- Left: `Position = (0, 0)`, `Size = 352 x 256`, `Image = LogoLeft`
++- Right: `Position = (352, 0)`, `Size = 352 x 256`, `Image = LogoRight`
++- Both: `BackgroundTransparency = 1`, `ScaleType = Stretch`, `ImageColor3 = 255,255,255`
++
++Check the join at a non-integer UI scale (a 1440p screen gives 1.33x). If a hairline seam shows, use one image instead: 1024 x 373 (1.45x). It is slightly soft on 4K but has no seam.
++
++## B11. Glow: `Glow.png`
++
++A 120 px circle with a 30 px layer blur. Roblox can't blur a single layer, so it is baked.
++
++- To export: make a **180 x 180** frame (no fill) centred on the ellipse (at x 1730, y 470). Inside it, put the ellipse at (30, 30), set to white at **100%**, keeping the 30 px layer blur. Export at 2x → **360 x 360**. The outer pixels must be fully transparent; if the blur reaches the edge, enlarge the frame and tell us the new size.
++
++ImageLabel: `Size = 180 x 180` (the visible circle is the middle 120), `BackgroundTransparency = 1`, `Image = Glow`, `ScaleType = Fit`, `ImageColor3 = 255, 200, 60`, `ImageTransparency = 0.4`.
++
++## B12. Item portraits: `ItemPortrait_<Name>.png`, one per item
++
++Designer note: 120 portraits, more every update, and the detail pane shows one at a time at 128 x 128.
++
++- They are shown one at a time and the set keeps growing, so each portrait is its own image and none go on a sheet.
++- Export each portrait **square, with the corner radius set to 0**, at 2x → **256 x 256**. The 12 px rounding is done in Roblox, so the same file works wherever it is shown.
++- The page has six examples: Torch `40:120`, Ladder `40:121`, Door `40:122`, Fence `40:123`, Chest `40:124`, Bed `40:125`. Export the rest of the 120 the same way.
++
++ImageLabel: `Size = 128 x 128`, `BackgroundTransparency = 1`, `Image =` the item's portrait, `ScaleType = Fit`, plus a `UICorner` with `CornerRadius = UDim.new(0, 12)`.
++
++---
++
++## Native visuals (nothing to export)
++
++### Keyboard prompts (`40:129`): B, I, E, Q, 1, 2, 3, Esc, Tab, Shift
++
++Each key is a plain rounded box with a stroke and a text label, which Roblox draws directly. Keeping it native means a rebound key or a new key costs nothing.
++
++- Frame: `BackgroundColor3 = 235, 237, 242`, height 40, width 40 for one character and 56 for Esc / Tab / Shift (or automatic width with a minimum of 40).
++- `UICorner`: radius 6.
++- `UIStroke`: `Thickness = 2`, `Color = 153, 157, 171`, `BorderStrokePosition = Inner`.
++- TextLabel: Builder Sans Bold (700), 18 px, line height 24, `TextColor3 = 31, 33, 41`, centred.
++
++### Profile Card (`40:153`)
++
++- Frame 360 x 190, `BackgroundColor3 = 33, 37, 54`, `UICorner` 16.
++- Avatar (`40:151`): the Figma photo is a placeholder (designer note). It is an ImageLabel 150 x 150 at (20, 20) with `Image = rbxthumb://type=AvatarHeadShot&id=<UserId>&w=352&h=352`. 352 is the next thumbnail size above 300 px, which is what 150 becomes at 2x. `UICorner` `CornerRadius = UDim.new(0.5, 0)` makes it a circle. **Do not export the placeholder.**
++
++### Glass Card (`40:155`)
++
++- Frame 320 x 200, `UICorner` 16.
++- `UIStroke`: `Thickness = 1`, white, `Transparency = 0.8`, `BorderStrokePosition = Inner`.
++- Title (`40:154`): TextLabel, Builder Sans Bold (700), 22 px, line height 28, white.
++- **Gap:** the design uses a 20 px background blur over a 10% white fill. Roblox can't blur what is behind a single frame (`BlurEffect` blurs the whole 3D view). We will use a darker, more opaque fill instead, starting with `BackgroundColor3 = 33, 37, 54` and `BackgroundTransparency = 0.15`. **The designer should review this.**
++
++### Progress Bar (`40:158`)
++
++- Track: Frame 300 x 12, white, `BackgroundTransparency = 0.88`, `UICorner` 6.
++- Fill (`40:156`): Frame with `BackgroundColor3 = 87, 209, 118`, `UICorner` 6, `Size = UDim2.new(progress, 0, 1, 0)` (the designer note says its width follows quest progress). Below 12 px wide the rounded ends distort, so hide the fill at 0 progress or give it a minimum width of 12.
++
++### Not built
++
++- The page background (`30:1` fill, 18, 20, 29) is only the canvas.
++- All `Note` text layers.
++
++---
++
++## Checks after upload
++
++- Every image loads in game (`ImageLabel.IsLoaded`) and looks sharp at UI scale 2 (a 4K window or the device emulator).
++- Every sprite rect lands on its piece. Also check the sheets on a real phone: some phones and consoles have been reported to draw rects on the wrong piece.
++- With a UI scale above 1, the dot grid still spaces its dots one tile apart (24 px x scale). If the spacing stays at 24 physical px, `TileSize` has to be multiplied by the scale.
++- There are no dark fringes on soft edges (logo glow, Glow, badge, item portraits). Fringes mean alpha bleed was skipped.
++- The logo halves meet without a seam at 1.33x.
++
++## Upload budget
++
++| Upload | Pixels | Loaded when |
++|---|---|---|
++| HudIcons | 288 x 216 | Always (HUD) |
++| PromptsXbox / PromptsPlayStation / PromptsTouch | 352 x 176 / 352 x 176 / 416 x 104 | Only the active device's sheet |
++| PanelOrnate | 256 x 256 | Dialogs |
++| SlotEmpty | 256 x 256 | Inventory |
++| CardRibbon | 96 x 96 | Cards |
++| DotGridTile | 48 x 48 | Full-screen menus |
++| BadgeLegendary | 128 x 128 | Legendary items |
++| LogoLeft + LogoRight | 704 x 512 x 2 | Title / menus |
++| Glow | 360 x 360 | Where used |
++| ItemPortrait_* | 256 x 256 each | One at a time, in the detail pane |

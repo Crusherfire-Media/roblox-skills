@@ -1,0 +1,1357 @@
+diff --git a/docs/inventory-screen.md b/docs/inventory-screen.md
+new file mode 100644
+index 0000000..63fd6f9
+--- /dev/null
++++ b/docs/inventory-screen.md
+@@ -0,0 +1,100 @@
++# Inventory screen
++
++The inventory screen shows all ten block types and how many of each the player has. It shows
++which blocks are still locked and the level that unlocks each one, and it lets the player pick
++the block to build with. Most players are kids on phones, so the screen is built for touch first,
++with big targets, short words and pictures before text. Mouse and keyboard, and controllers, get
++the same screen with their own shortcuts.
++
++Code: `src/StarterPlayer/StarterPlayerScripts/UI/`, started from `Main.client.luau` by
++`InventoryScreen.start()`.
++
++## What's on screen
++
++**Blocks button.** This button is always on screen at the right edge, halfway up. That keeps it
++clear of the phone thumbstick (bottom left) and the jump button (bottom right). It shows a 3D cube
++of the block you're building with and how many you have left, so it is also the "current block"
++display.
++
++**Panel.** The panel opens over a dimmed backdrop. It has:
++
++- A header with "My Blocks", the player's level (⭐ Level 3) and a red ✕ close button.
++- A grid of tiles, one per block type, in hotbar order. Each tile has a 3D preview, the name, and
++  then either a count (×48) or a padlock with the unlocking level (🔒 Level 6).
++  - The block in use has a green border and a ✓ badge.
++  - Locked tiles are darker and the preview is greyed out.
++  - Blocks you have none of show ×0 in red, but you can still pick them.
++- A footer that says how to pick a block on the device you're using. It briefly turns yellow to
++  explain why a locked block can't be picked, for example "🔒 Ice unlocks at Level 4".
++
++The grid has five columns on wide screens and drops to as few as two on narrow ones, so tiles never
++get smaller than a thumb. It scrolls when the tiles don't all fit, as on a landscape phone. All
++sizes scale with screen height, so text is readable on a phone and on a TV across the room. The
++button and panel stay inside the device's safe area and below the Roblox top bar.
++
++## Opening and closing
++
++| | Touch | Mouse and keyboard | Controller |
++|---|---|---|---|
++| Open | Tap the Blocks button | Click the Blocks button, or press **E** | Press **Y** |
++| Close | Tap ✕, or tap the dimmed area outside the panel | Click ✕ or outside the panel, or press **E** again | Press **B** (or **Y** again) |
++| Close by picking | Tap an unlocked block | Click an unlocked block | Press **A** on an unlocked block |
++
++Picking a block always closes the screen, so building again takes one tap. Opening the Roblox
++menu (Esc, or the Roblox button) also closes the screen.
++
++While the screen is open:
++
++- Tapping or clicking the world doesn't place blocks. Placing comes back on close, unless something
++  else had turned it off.
++- The mouse is freed from first person and shift lock.
++- The character can still walk; the screen doesn't pause the game.
++
++## Actions on each input
++
++### Touch
++
++- **Pick a block:** tap its tile. The whole tile is the button, never less than about 88 points
++  wide, twice Apple's 44-point minimum touch target.
++- **Locked block:** tapping it doesn't pick it. The footer says which level unlocks it.
++- **See more blocks:** drag the grid up and down when it doesn't all fit.
++- The screen shows no key or button hints on touch.
++
++### Mouse and keyboard
++
++- **Pick a block:** click its tile. Hovering a tile gives it a white border and makes it a little
++  bigger.
++- **Shortcuts:** an **E** chip on the Blocks button and on ✕ shows the open and close key.
++- **Number keys:** keys **1–9** and **0** still pick hotbar slots directly, as before. Each
++  unlocked tile shows its number in the top-left corner.
++- **Hints:** the footer reads "Click a block to build with it · E to close".
++
++### Controller
++
++- **When the screen opens:** the tile of the block in use is focused (white border, a little
++  bigger). Pressing **A** straight away keeps the current block.
++- **Move around:** use the D-pad or left stick. Focus stays inside the panel and the grid scrolls
++  to follow it.
++- **Pick or close:** **A** picks the focused block. **B** closes without changing anything.
++- **Button hints:** the Blocks button and ✕ show the **Y** and **B** glyphs, and the footer shows
++  **A** Choose / **B** Close. Glyphs come from `UserInputService:GetImageForKeyCode`, so
++  PlayStation controllers get their own symbols.
++- **On close:** focus is cleared, so **A** goes back to jumping.
++
++The hints follow the device the player last used. Picking up a controller mid-game switches every
++hint to controller glyphs at once, and the screen focuses a tile if it is open.
++
++## Accessibility
++
++- Locked, selected and empty states never rely on color alone. Each also has a symbol or text
++  (🔒, ✓, ×0).
++- The open and close pop animations are skipped when Reduced Motion is on in Roblox settings.
++
++## Known gaps
++
++- `BlockPlacer`'s number keys can still select a locked block, because it doesn't know about
++  `BlockInventory`. The screen hides the number hint on locked tiles, but the keys themselves
++  aren't blocked.
++- `BlockPlacer` only places blocks with a mouse click or a tap. Controllers can pick a block here
++  but can't place it yet.
++- The server doesn't check locks or counts when placing.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index d6fde35..aa699d9 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,8 +1,11 @@
+ local Players = game:GetService("Players")
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local InventoryScreen = require(script.Parent.UI.InventoryScreen)
+ 
+ local localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
+ 
++-- Mount the UI first: BlockPlacer.start() yields until the server's remotes exist.
++InventoryScreen.start()
+ BlockPlacer.start()
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/BlockPreview.luau b/src/StarterPlayer/StarterPlayerScripts/UI/BlockPreview.luau
+new file mode 100644
+index 0000000..a4d1a13
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/BlockPreview.luau
+@@ -0,0 +1,65 @@
++--[[
++	A small 3D cube of a block type, so players see its material (brick, glass, grass) and not only
++	its color.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local Props = require(script.Parent.Props)
++
++local create = Vide.create
++
++type BlockType = BlockTypes.BlockType
++
++local CAMERA_POSITION = Vector3.new(3.1, 2.5, 3.1)
++
++local function BlockPreview(props: {
++	blockType: () -> BlockType,
++	dimmed: (() -> boolean)?,
++	[any]: any,
++})
++	local dimmed = props.dimmed or function()
++		return false
++	end
++
++	local camera = create("Camera")({
++		FieldOfView = 40,
++		CFrame = CFrame.lookAt(CAMERA_POSITION, Vector3.zero),
++	})
++
++	return create("ViewportFrame")(Props.merge({
++		BackgroundTransparency = 1,
++		CurrentCamera = camera,
++		Ambient = Color3.fromRGB(160, 160, 170),
++		LightColor = Color3.fromRGB(255, 255, 255),
++		LightDirection = Vector3.new(-1, -2, -0.5),
++		ImageColor3 = function()
++			return if dimmed() then Color3.fromRGB(90, 90, 100) else Color3.new(1, 1, 1)
++		end,
++		ImageTransparency = function()
++			return if dimmed() then 0.35 else 0
++		end,
++
++		camera,
++		create("Part")({
++			Anchored = true,
++			Size = Vector3.one * 2,
++			CFrame = CFrame.new(),
++			Color = function()
++				return props.blockType().Color
++			end,
++			Material = function()
++				return props.blockType().Material
++			end,
++			-- Keep see-through blocks visible against the dark panel.
++			Transparency = function()
++				return math.min(props.blockType().Transparency, 0.35)
++			end,
++		}),
++	}, props, { "blockType", "dimmed" }))
++end
++
++return BlockPreview
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/BlockTile.luau b/src/StarterPlayer/StarterPlayerScripts/UI/BlockTile.luau
+new file mode 100644
+index 0000000..6a3649a
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/BlockTile.luau
+@@ -0,0 +1,213 @@
++--[[
++	One block type in the inventory grid: a 3D preview, its name, and how many the player has, or a
++	padlock and the level that unlocks it. The whole tile is one button, so a tap, a click, or the
++	controller's A button on it all pick the block. The grid layout sizes it.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local BlockPreview = require(script.Parent.BlockPreview)
++local InputHint = require(script.Parent.InputHint)
++local InventoryState = require(script.Parent.InventoryState)
++local Motion = require(script.Parent.Motion)
++local Theme = require(script.Parent.Theme)
++
++local create = Vide.create
++local source = Vide.source
++local derive = Vide.derive
++
++type BlockType = BlockTypes.BlockType
++
++-- Keys BlockPlacer already maps to the hotbar slots, shown on the tile as a shortcut.
++local SLOT_KEYS = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" }
++local MAX_SHOWN_COUNT = 999
++
++local function formatCount(count: number): string
++	if count > MAX_SHOWN_COUNT then
++		return `×{MAX_SHOWN_COUNT}+`
++	end
++	return `×{count}`
++end
++
++local function BlockTile(props: {
++	blockType: BlockType,
++	layoutOrder: number,
++	onButton: (TextButton) -> (),
++})
++	local name = props.blockType.Name
++	local hovered = source(false)
++	local gamepadFocused = source(false)
++
++	local unlocked = derive(function()
++		return InventoryState.isUnlocked(name, InventoryState.inventory())
++	end)
++	local count = derive(function()
++		return InventoryState.inventory().counts[name] or 0
++	end)
++	local isSelected = derive(function()
++		return InventoryState.selected() == name
++	end)
++	local focused = derive(function()
++		return hovered() or gamepadFocused()
++	end)
++	local scale = Motion.spring(function()
++		return if focused() then 1.06 else 1
++	end, 0.18)
++
++	local statusText = derive(function()
++		if not unlocked() then
++			return `🔒 Level {InventoryState.getUnlockLevel(name)}`
++		end
++		return formatCount(count())
++	end)
++
++	local button = create("TextButton")({
++		Name = name,
++		LayoutOrder = props.layoutOrder,
++		Text = "",
++		AutoButtonColor = false,
++		Selectable = true,
++		BackgroundColor3 = function()
++			return if unlocked() then Theme.Tile else Theme.TileLocked
++		end,
++		-- Our own focus ring replaces the default controller selection box.
++		SelectionImageObject = create("Frame")({ BackgroundTransparency = 1 }),
++
++		Activated = function()
++			InventoryState.choose(name)
++		end,
++		MouseEnter = function()
++			hovered(true)
++		end,
++		MouseLeave = function()
++			hovered(false)
++		end,
++		SelectionGained = function()
++			gamepadFocused(true)
++		end,
++		SelectionLost = function()
++			gamepadFocused(false)
++		end,
++
++		create("UICorner")({ CornerRadius = Theme.Corner }),
++		create("UIScale")({ Scale = scale }),
++		create("UIStroke")({
++			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++			Color = function()
++				if isSelected() then
++					return Theme.Selected
++				elseif focused() then
++					return Theme.Focus
++				end
++				return Theme.TileStroke
++			end,
++			Thickness = function()
++				return if isSelected() or focused() then 4 else 1.5
++			end,
++		}),
++		create("UIPadding")({
++			PaddingTop = UDim.new(0, 8),
++			PaddingBottom = UDim.new(0, 6),
++			PaddingLeft = UDim.new(0, 6),
++			PaddingRight = UDim.new(0, 6),
++		}),
++
++		BlockPreview({
++			blockType = function()
++				return props.blockType
++			end,
++			dimmed = function()
++				return not unlocked()
++			end,
++			Name = "Preview",
++			Size = UDim2.new(1, 0, 1, -42),
++
++			create("TextLabel")({
++				Name = "Padlock",
++				AnchorPoint = Vector2.new(0.5, 0.5),
++				Position = UDim2.fromScale(0.5, 0.5),
++				Size = UDim2.fromOffset(40, 40),
++				BackgroundTransparency = 1,
++				Text = "🔒",
++				TextSize = 34,
++				Visible = function()
++					return not unlocked()
++				end,
++			}),
++		}),
++
++		create("TextLabel")({
++			Name = "BlockName",
++			AnchorPoint = Vector2.new(0, 1),
++			Position = UDim2.new(0, 0, 1, -20),
++			Size = UDim2.new(1, 0, 0, 22),
++			BackgroundTransparency = 1,
++			FontFace = Theme.FontBold,
++			TextSize = 19,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++			TextColor3 = function()
++				return if unlocked() then Theme.Text else Theme.TextDim
++			end,
++			Text = props.blockType.DisplayName,
++		}),
++
++		create("TextLabel")({
++			Name = "Status",
++			AnchorPoint = Vector2.new(0, 1),
++			Position = UDim2.fromScale(0, 1),
++			Size = UDim2.new(1, 0, 0, 20),
++			BackgroundTransparency = 1,
++			FontFace = Theme.FontBold,
++			TextSize = 17,
++			TextColor3 = function()
++				if not unlocked() then
++					return Theme.Warning
++				elseif count() == 0 then
++					return Theme.TextEmpty
++				end
++				return Theme.TextDim
++			end,
++			Text = statusText,
++		}),
++
++		create("Frame")({
++			Name = "SelectedBadge",
++			AnchorPoint = Vector2.new(1, 0),
++			Position = UDim2.new(1, 2, 0, -4),
++			Size = UDim2.fromOffset(28, 28),
++			BackgroundColor3 = Theme.Selected,
++			Visible = isSelected,
++
++			create("UICorner")({ CornerRadius = UDim.new(1, 0) }),
++			create("TextLabel")({
++				Size = UDim2.fromScale(1, 1),
++				BackgroundTransparency = 1,
++				FontFace = Theme.FontHeavy,
++				TextSize = 20,
++				TextColor3 = Theme.Chip,
++				Text = "✓",
++			}),
++		}),
++
++		-- Only on unlocked tiles: the hint shouldn't invite players to pick a block they can't use.
++		if SLOT_KEYS[props.layoutOrder]
++			then create("Frame")({
++				Name = "KeyHint",
++				Position = UDim2.fromOffset(-2, -4),
++				Size = UDim2.fromOffset(22, 22),
++				BackgroundTransparency = 1,
++				Visible = unlocked,
++
++				InputHint({ key = SLOT_KEYS[props.layoutOrder], size = 22 }),
++			})
++			else nil,
++	})
++
++	props.onButton(button)
++	return button
++end
++
++return BlockTile
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InputHint.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InputHint.luau
+new file mode 100644
+index 0000000..e715e1b
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InputHint.luau
+@@ -0,0 +1,78 @@
++--[[
++	A small chip naming the key or controller button for an action: the key's letter while the
++	player uses keyboard and mouse, the platform's own button glyph (Xbox or PlayStation) while they
++	use a controller, and nothing on touch, where the thing itself is what you tap.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local UserInputService = game:GetService("UserInputService")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local InventoryState = require(script.Parent.InventoryState)
++local Props = require(script.Parent.Props)
++local Theme = require(script.Parent.Theme)
++
++local create = Vide.create
++
++local function InputHint(props: {
++	key: string?,
++	button: Enum.KeyCode?,
++	size: number?,
++	[any]: any,
++})
++	local size = props.size or 24
++	-- Looked up again on each switch to the controller, which may be a different brand by then.
++	local glyph = Vide.derive(function()
++		if InventoryState.inputMode() == "Gamepad" and props.button then
++			return UserInputService:GetImageForKeyCode(props.button)
++		end
++		return ""
++	end)
++
++	local function mode()
++		local current = InventoryState.inputMode()
++		if current == "KeyboardMouse" and props.key then
++			return "Key"
++		elseif current == "Gamepad" and glyph() ~= "" then
++			return "Button"
++		end
++		return "None"
++	end
++
++	return create("Frame")(Props.merge({
++		Name = "InputHint",
++		Size = UDim2.fromOffset(size, size),
++		BackgroundColor3 = Theme.Chip,
++		BackgroundTransparency = function()
++			return if mode() == "Key" then 0.1 else 1
++		end,
++		Visible = function()
++			return mode() ~= "None"
++		end,
++
++		create("UICorner")({ CornerRadius = UDim.new(0, 6) }),
++		create("TextLabel")({
++			Size = UDim2.fromScale(1, 1),
++			BackgroundTransparency = 1,
++			FontFace = Theme.FontBold,
++			TextSize = math.floor(size * 0.7),
++			TextColor3 = Theme.Text,
++			Text = props.key or "",
++			Visible = function()
++				return mode() == "Key"
++			end,
++		}),
++		create("ImageLabel")({
++			Size = UDim2.fromScale(1, 1),
++			BackgroundTransparency = 1,
++			Image = glyph,
++			ScaleType = Enum.ScaleType.Fit,
++			Visible = function()
++				return mode() == "Button"
++			end,
++		}),
++	}, props, { "key", "button", "size" }))
++end
++
++return InputHint
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InventoryPanel.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryPanel.luau
+new file mode 100644
+index 0000000..47add29
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryPanel.luau
+@@ -0,0 +1,273 @@
++--[[
++	The inventory window: a header with the player's level and a close button, a scrolling grid of
++	every block type, and a footer that says how to pick a block on the current input device (or why
++	the last block couldn't be picked).
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local BlockTile = require(script.Parent.BlockTile)
++local InputHint = require(script.Parent.InputHint)
++local InventoryState = require(script.Parent.InventoryState)
++local Motion = require(script.Parent.Motion)
++local Theme = require(script.Parent.Theme)
++
++local create = Vide.create
++local derive = Vide.derive
++
++local HEADER_HEIGHT = 56
++local FOOTER_HEIGHT = 36
++local GRID_PADDING = 8
++local SCROLLBAR_WIDTH = 8
++-- Tile height as a multiple of its width.
++local TILE_ASPECT = 1.2
++
++local FOOTER_TEXT = {
++	Touch = "Tap a block to build with it",
++	KeyboardMouse = "Click a block to build with it  ·  E to close",
++	Gamepad = "",
++}
++
++local function FooterLabel(text: string, layoutOrder: number)
++	return create("TextLabel")({
++		LayoutOrder = layoutOrder,
++		AutomaticSize = Enum.AutomaticSize.X,
++		Size = UDim2.fromOffset(0, 28),
++		BackgroundTransparency = 1,
++		FontFace = Theme.FontBold,
++		TextSize = 18,
++		TextColor3 = Theme.TextDim,
++		Text = text,
++	})
++end
++
++local function InventoryPanel(
++	props: {
++		-- Size of the safe area of the screen, in pixels.
++		screenSize: () -> Vector2,
++		-- UIScale for the current screen; panel sizes below are in design units.
++		uiScale: () -> number,
++		onTileButton: (name: string, button: TextButton) -> (),
++	}
++)
++	local panelSize = derive(function()
++		local screen = props.screenSize() / props.uiScale()
++		return Vector2.new(
++			math.floor(math.min(screen.X * 0.94, Theme.MaxPanelSize.X)),
++			math.floor(math.min(screen.Y * 0.94, Theme.MaxPanelSize.Y))
++		)
++	end)
++
++	local cellSize = derive(function()
++		local gridWidth = panelSize().X - Theme.Padding * 2 - GRID_PADDING * 2 - SCROLLBAR_WIDTH
++		local columns = math.floor((gridWidth + Theme.Gap) / (Theme.MinTileWidth + Theme.Gap))
++		columns = math.clamp(columns, 2, Theme.MaxColumns)
++		local width = math.floor((gridWidth - (columns - 1) * Theme.Gap) / columns)
++		return UDim2.fromOffset(width, math.floor(width * TILE_ASPECT))
++	end)
++
++	local pop = Motion.spring(function()
++		return if InventoryState.isOpen() then 1 else 0.9
++	end, 0.22, 0.7)
++
++	local tiles = {}
++	for index, blockType in BlockTypes.List do
++		tiles[index] = BlockTile({
++			blockType = blockType,
++			layoutOrder = index,
++			onButton = function(button)
++				props.onTileButton(blockType.Name, button)
++			end,
++		})
++	end
++
++	local showGamepadHints = derive(function()
++		return InventoryState.inputMode() == "Gamepad" and InventoryState.message() == nil
++	end)
++
++	return create("Frame")({
++		Name = "Panel",
++		AnchorPoint = Vector2.new(0.5, 0.5),
++		Position = UDim2.fromScale(0.5, 0.5),
++		Size = function()
++			return UDim2.fromOffset(panelSize().X, panelSize().Y)
++		end,
++		BackgroundColor3 = Theme.Panel,
++		-- Swallows clicks so they don't fall through to the backdrop, which closes the screen.
++		Active = true,
++		Visible = InventoryState.isOpen,
++		-- Keep controller navigation inside the panel while it is open.
++		SelectionGroup = true,
++		SelectionBehaviorUp = Enum.SelectionBehavior.Stop,
++		SelectionBehaviorDown = Enum.SelectionBehavior.Stop,
++		SelectionBehaviorLeft = Enum.SelectionBehavior.Stop,
++		SelectionBehaviorRight = Enum.SelectionBehavior.Stop,
++
++		create("UIScale")({
++			Scale = function()
++				return props.uiScale() * pop()
++			end,
++		}),
++		create("UICorner")({ CornerRadius = UDim.new(0, 20) }),
++		create("UIStroke")({ Color = Theme.PanelStroke, Thickness = 2 }),
++
++		-- Header
++		create("Frame")({
++			Name = "Header",
++			Position = UDim2.fromOffset(Theme.Padding, Theme.Padding),
++			Size = UDim2.new(1, -Theme.Padding * 2, 0, HEADER_HEIGHT),
++			BackgroundTransparency = 1,
++
++			create("UIListLayout")({
++				FillDirection = Enum.FillDirection.Horizontal,
++				VerticalAlignment = Enum.VerticalAlignment.Center,
++				Padding = UDim.new(0, 12),
++			}),
++			create("TextLabel")({
++				Name = "Title",
++				LayoutOrder = 1,
++				AutomaticSize = Enum.AutomaticSize.X,
++				Size = UDim2.fromScale(0, 1),
++				BackgroundTransparency = 1,
++				FontFace = Theme.FontHeavy,
++				TextSize = 32,
++				TextColor3 = Theme.Text,
++				Text = "My Blocks",
++			}),
++			create("TextLabel")({
++				Name = "Level",
++				LayoutOrder = 2,
++				AutomaticSize = Enum.AutomaticSize.X,
++				Size = UDim2.fromOffset(0, 34),
++				BackgroundColor3 = Theme.Chip,
++				FontFace = Theme.FontBold,
++				TextSize = 19,
++				TextColor3 = Theme.Warning,
++				Text = function()
++					return `⭐ Level {InventoryState.inventory().level}`
++				end,
++
++				create("UICorner")({ CornerRadius = UDim.new(1, 0) }),
++				create("UIPadding")({
++					PaddingLeft = UDim.new(0, 12),
++					PaddingRight = UDim.new(0, 12),
++				}),
++			}),
++		}),
++
++		create("TextButton")({
++			Name = "Close",
++			AnchorPoint = Vector2.new(1, 0),
++			Position = UDim2.new(1, -Theme.Padding, 0, Theme.Padding),
++			Size = UDim2.fromOffset(Theme.TouchTarget, Theme.TouchTarget),
++			BackgroundColor3 = Theme.CloseButton,
++			FontFace = Theme.FontHeavy,
++			TextSize = 28,
++			TextColor3 = Theme.Text,
++			Text = "✕",
++			AutoButtonColor = true,
++			-- Controller players close with B; keep A-navigation on the tiles.
++			Selectable = false,
++			Activated = InventoryState.close,
++
++			create("UICorner")({ CornerRadius = Theme.Corner }),
++			InputHint({
++				key = "E",
++				button = Enum.KeyCode.ButtonB,
++				size = 22,
++				AnchorPoint = Vector2.new(0.5, 0.5),
++				Position = UDim2.fromScale(0, 1),
++			}),
++		}),
++
++		-- Grid
++		create("ScrollingFrame")({
++			Name = "Grid",
++			Position = UDim2.fromOffset(Theme.Padding, Theme.Padding + HEADER_HEIGHT + 6),
++			Size = UDim2.new(
++				1,
++				-Theme.Padding * 2,
++				1,
++				-(Theme.Padding * 2 + HEADER_HEIGHT + 6 + FOOTER_HEIGHT)
++			),
++			BackgroundTransparency = 1,
++			Selectable = false,
++			ScrollingDirection = Enum.ScrollingDirection.Y,
++			AutomaticCanvasSize = Enum.AutomaticSize.Y,
++			CanvasSize = UDim2.new(),
++			ScrollBarThickness = SCROLLBAR_WIDTH,
++			ScrollBarImageColor3 = Theme.TileStroke,
++			VerticalScrollBarInset = Enum.ScrollBarInset.Always,
++
++			create("UIPadding")({
++				PaddingTop = UDim.new(0, GRID_PADDING),
++				PaddingBottom = UDim.new(0, GRID_PADDING),
++				PaddingLeft = UDim.new(0, GRID_PADDING),
++				PaddingRight = UDim.new(0, GRID_PADDING),
++			}),
++			create("UIGridLayout")({
++				CellSize = cellSize,
++				CellPadding = UDim2.fromOffset(Theme.Gap, Theme.Gap),
++				HorizontalAlignment = Enum.HorizontalAlignment.Center,
++				SortOrder = Enum.SortOrder.LayoutOrder,
++			}),
++			tiles,
++		}),
++
++		-- Footer
++		create("Frame")({
++			Name = "Footer",
++			AnchorPoint = Vector2.new(0, 1),
++			Position = UDim2.new(0, Theme.Padding, 1, -Theme.Padding / 2),
++			Size = UDim2.new(1, -Theme.Padding * 2, 0, FOOTER_HEIGHT),
++			BackgroundTransparency = 1,
++
++			create("UIListLayout")({
++				FillDirection = Enum.FillDirection.Horizontal,
++				HorizontalAlignment = Enum.HorizontalAlignment.Center,
++				VerticalAlignment = Enum.VerticalAlignment.Center,
++				Padding = UDim.new(0, 8),
++			}),
++			create("TextLabel")({
++				Name = "Message",
++				AutomaticSize = Enum.AutomaticSize.X,
++				Size = UDim2.fromOffset(0, 28),
++				BackgroundTransparency = 1,
++				FontFace = Theme.FontBold,
++				TextSize = 18,
++				TextColor3 = function()
++					return if InventoryState.message() then Theme.Warning else Theme.TextDim
++				end,
++				Text = function()
++					return InventoryState.message() or FOOTER_TEXT[InventoryState.inputMode()]
++				end,
++				Visible = function()
++					return not showGamepadHints()
++				end,
++			}),
++			create("Frame")({
++				Name = "GamepadHints",
++				AutomaticSize = Enum.AutomaticSize.X,
++				Size = UDim2.fromOffset(0, 28),
++				BackgroundTransparency = 1,
++				Visible = showGamepadHints,
++
++				create("UIListLayout")({
++					FillDirection = Enum.FillDirection.Horizontal,
++					VerticalAlignment = Enum.VerticalAlignment.Center,
++					SortOrder = Enum.SortOrder.LayoutOrder,
++					Padding = UDim.new(0, 6),
++				}),
++				InputHint({ button = Enum.KeyCode.ButtonA, size = 28, LayoutOrder = 1 }),
++				FooterLabel("Choose", 2),
++				InputHint({ button = Enum.KeyCode.ButtonB, size = 28, LayoutOrder = 3 }),
++				FooterLabel("Close", 4),
++			}),
++		}),
++	})
++end
++
++return InventoryPanel
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InventoryScreen.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryScreen.luau
+new file mode 100644
+index 0000000..612ee5f
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryScreen.luau
+@@ -0,0 +1,182 @@
++--[[
++	Mounts the inventory screen into PlayerGui and binds its keys and controller buttons. See
++	docs/inventory-screen.md for how it behaves on each input device.
++]]
++
++local ContextActionService = game:GetService("ContextActionService")
++local GuiService = game:GetService("GuiService")
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local UserInputService = game:GetService("UserInputService")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local InventoryPanel = require(script.Parent.InventoryPanel)
++local InventoryState = require(script.Parent.InventoryState)
++local OpenButton = require(script.Parent.OpenButton)
++local Theme = require(script.Parent.Theme)
++
++local create = Vide.create
++local source = Vide.source
++local derive = Vide.derive
++local effect = Vide.effect
++
++local TOGGLE_ACTION = "InventoryToggle"
++local CLOSE_ACTION = "InventoryClose"
++local ACTION_PRIORITY = Enum.ContextActionPriority.High.Value
++
++local InventoryScreen = {}
++
++local function bindInput()
++	ContextActionService:BindActionAtPriority(TOGGLE_ACTION, function(_, inputState)
++		if inputState == Enum.UserInputState.Begin then
++			InventoryState.toggle()
++		end
++		return Enum.ContextActionResult.Sink
++	end, false, ACTION_PRIORITY, Enum.KeyCode.E, Enum.KeyCode.ButtonY)
++
++	-- B only means "close" while the screen is open, so it is bound only then.
++	effect(function()
++		if InventoryState.isOpen() then
++			ContextActionService:BindActionAtPriority(CLOSE_ACTION, function(_, inputState)
++				if inputState == Enum.UserInputState.Begin then
++					InventoryState.close()
++				end
++				return Enum.ContextActionResult.Sink
++			end, false, ACTION_PRIORITY, Enum.KeyCode.ButtonB)
++		else
++			ContextActionService:UnbindAction(CLOSE_ACTION)
++		end
++	end)
++
++	Vide.cleanup(function()
++		ContextActionService:UnbindAction(TOGGLE_ACTION)
++		ContextActionService:UnbindAction(CLOSE_ACTION)
++	end)
++end
++
++--[[
++	Controllers have no pointer, so while the screen is open on a controller something in it must
++	hold the selection: the tile of the block in use, so A on open re-picks it and the D-pad starts
++	from there. On close the selection is cleared, or A would keep pressing an invisible tile.
++]]
++local function manageGamepadSelection(screenGui: ScreenGui, tiles: { [string]: TextButton })
++	effect(function()
++		local isOpen = InventoryState.isOpen()
++		local usingGamepad = InventoryState.inputMode() == "Gamepad"
++		-- Deferred so the panel is already visible; hidden objects can't be selected.
++		task.defer(function()
++			local current = GuiService.SelectedObject
++			local ours = current ~= nil and current:IsDescendantOf(screenGui)
++			if isOpen and usingGamepad and not ours then
++				GuiService.SelectedObject = tiles[InventoryState.selected()]
++			elseif not isOpen and ours then
++				GuiService.SelectedObject = nil
++			end
++		end)
++	end)
++
++	-- Roblox's own controller navigation clears the selection on B. If it got the press before
++	-- our binding did, the player still meant "close". The input type is read fresh, not from
++	-- inputMode, so grabbing the mouse (which also drops the selection) doesn't close the screen.
++	local connection = GuiService:GetPropertyChangedSignal("SelectedObject"):Connect(function()
++		local lastInput = UserInputService:GetLastInputType()
++		if
++			GuiService.SelectedObject == nil
++			and InventoryState.isOpen()
++			and lastInput.Name:sub(1, 7) == "Gamepad"
++		then
++			InventoryState.close()
++		end
++	end)
++	Vide.cleanup(function()
++		connection:Disconnect()
++	end)
++end
++
++local function App(playerGui: PlayerGui)
++	local screenSize = source(Vector2.new(800, 450))
++	local uiScale = derive(function()
++		return math.clamp(screenSize().Y / Theme.ReferenceHeight, Theme.MinScale, Theme.MaxScale)
++	end)
++	local tiles: { [string]: TextButton } = {}
++
++	bindInput()
++
++	local backdrop = create("ScreenGui")({
++		Name = "InventoryBackdrop",
++		DisplayOrder = 10,
++		ScreenInsets = Enum.ScreenInsets.None,
++		ResetOnSpawn = false,
++		Enabled = InventoryState.isOpen,
++		Parent = playerGui,
++
++		create("TextButton")({
++			Name = "Backdrop",
++			Size = UDim2.fromScale(1, 1),
++			BackgroundColor3 = Theme.Backdrop,
++			BackgroundTransparency = Theme.BackdropTransparency,
++			Text = "",
++			Selectable = false,
++			-- Frees the mouse from first person and shift lock while the screen is open.
++			Modal = true,
++			Activated = InventoryState.close,
++		}),
++	})
++
++	local screen = create("ScreenGui")({
++		Name = "InventoryScreen",
++		DisplayOrder = 11,
++		-- Keeps the button and panel clear of notches, rounded corners and the Roblox top bar.
++		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
++		ResetOnSpawn = false,
++		Parent = playerGui,
++
++		Vide.changed("AbsoluteSize", screenSize),
++
++		OpenButton({ uiScale = uiScale }),
++		InventoryPanel({
++			screenSize = screenSize,
++			uiScale = uiScale,
++			onTileButton = function(name, button)
++				tiles[name] = button
++			end,
++		}),
++	}) :: ScreenGui
++
++	manageGamepadSelection(screen, tiles)
++
++	Vide.cleanup(function()
++		InventoryState.close()
++		backdrop:Destroy()
++		screen:Destroy()
++	end)
++end
++
++local current: (() -> ())? = nil
++
++--[[
++	Builds the screen and binds its input. Returns a function that removes it again. Calling it
++	while the screen is already up returns the same function.
++]]
++function InventoryScreen.start(): () -> ()
++	local existing = current
++	if existing then
++		return existing
++	end
++	InventoryState.start()
++	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui") :: PlayerGui
++	local stop = Vide.root(function()
++		App(playerGui)
++	end)
++	local function unmount()
++		if current == unmount then
++			current = nil
++			stop()
++		end
++	end
++	current = unmount
++	return unmount
++end
++
++return InventoryScreen
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InventoryState.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryState.luau
+new file mode 100644
+index 0000000..aeb3fb4
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InventoryState.luau
+@@ -0,0 +1,168 @@
++--[[
++	Vide sources for the inventory screen, kept in step with BlockInventory and BlockPlacer, plus
++	the actions the screen performs (open, close, choose a block). Components read from here and
++	never talk to BlockInventory or BlockPlacer directly.
++]]
++
++local GuiService = game:GetService("GuiService")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local UserInputService = game:GetService("UserInputService")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local BlockInventory = require(script.Parent.Parent.BlockInventory)
++local BlockPlacer = require(script.Parent.Parent.BlockPlacer)
++
++local source = Vide.source
++
++-- How long a "this block is locked" message stays up, in seconds.
++local MESSAGE_SECONDS = 2.5
++
++export type InputMode = "Touch" | "KeyboardMouse" | "Gamepad"
++
++export type Snapshot = {
++	level: number,
++	counts: { [string]: number },
++}
++
++local InventoryState = {}
++
++local function takeSnapshot(): Snapshot
++	local counts = {}
++	for _, blockType in BlockTypes.List do
++		counts[blockType.Name] = BlockInventory.getCount(blockType.Name)
++	end
++	return { level = BlockInventory.getLevel(), counts = counts }
++end
++
++local function inputModeFor(inputType: Enum.UserInputType): InputMode?
++	if inputType == Enum.UserInputType.Touch then
++		return "Touch"
++	elseif inputType.Name:sub(1, 7) == "Gamepad" then
++		return "Gamepad"
++	elseif
++		inputType == Enum.UserInputType.Keyboard
++		or inputType == Enum.UserInputType.TextInput
++		or inputType.Name:sub(1, 5) == "Mouse"
++	then
++		return "KeyboardMouse"
++	end
++	-- Focus, gyro and the like say nothing about how the player is playing.
++	return nil
++end
++
++local function initialInputMode(): InputMode
++	local fromLastInput = inputModeFor(UserInputService:GetLastInputType())
++	if fromLastInput then
++		return fromLastInput
++	elseif GuiService:IsTenFootInterface() then
++		return "Gamepad"
++	elseif UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
++		return "Touch"
++	end
++	return "KeyboardMouse"
++end
++
++InventoryState.isOpen = source(false)
++InventoryState.inventory = source(takeSnapshot())
++InventoryState.selected = source(BlockPlacer.getBlockType())
++InventoryState.inputMode = source(initialInputMode() :: InputMode)
++-- A short message shown in the panel footer, such as why a block can't be picked.
++InventoryState.message = source(nil :: string?)
++
++local placerWasEnabled = true
++local messageToken = 0
++
++function InventoryState.isUnlocked(name: string, snapshot: Snapshot): boolean
++	return snapshot.level >= BlockInventory.getUnlockLevel(name)
++end
++
++function InventoryState.getUnlockLevel(name: string): number
++	return BlockInventory.getUnlockLevel(name)
++end
++
++function InventoryState.showMessage(text: string)
++	messageToken += 1
++	local token = messageToken
++	InventoryState.message(text)
++	task.delay(MESSAGE_SECONDS, function()
++		if messageToken == token then
++			InventoryState.message(nil)
++		end
++	end)
++end
++
++function InventoryState.open()
++	if InventoryState.isOpen() then
++		return
++	end
++	-- Taps and clicks on the dimmed world shouldn't build anything while the screen is up.
++	placerWasEnabled = BlockPlacer.isEnabled()
++	BlockPlacer.setEnabled(false)
++	InventoryState.isOpen(true)
++end
++
++function InventoryState.close()
++	if not InventoryState.isOpen() then
++		return
++	end
++	messageToken += 1
++	InventoryState.message(nil)
++	InventoryState.isOpen(false)
++	BlockPlacer.setEnabled(placerWasEnabled)
++end
++
++function InventoryState.toggle()
++	if InventoryState.isOpen() then
++		InventoryState.close()
++	else
++		InventoryState.open()
++	end
++end
++
++--[[
++	Builds with the block type and closes the screen, or explains why it can't if the block is
++	still locked. Blocks the player has none of can still be picked.
++]]
++function InventoryState.choose(name: string)
++	local blockType = BlockTypes.ByName[name]
++	if not BlockInventory.isUnlocked(name) then
++		InventoryState.showMessage(
++			`🔒 {blockType.DisplayName} unlocks at Level {BlockInventory.getUnlockLevel(name)}`
++		)
++		return
++	end
++	BlockPlacer.setBlockType(name)
++	InventoryState.close()
++end
++
++local hasStarted = false
++
++--[[
++	Starts following BlockInventory, BlockPlacer and the player's input device. Safe to call more
++	than once.
++]]
++function InventoryState.start()
++	if hasStarted then
++		return
++	end
++	hasStarted = true
++
++	BlockInventory.Changed:Connect(function()
++		InventoryState.inventory(takeSnapshot())
++	end)
++	BlockPlacer.BlockTypeChanged:Connect(function(name: string)
++		InventoryState.selected(name)
++	end)
++	UserInputService.LastInputTypeChanged:Connect(function(inputType)
++		local mode = inputModeFor(inputType)
++		if mode then
++			InventoryState.inputMode(mode)
++		end
++	end)
++	-- The Roblox menu (Esc, or the Roblox button) takes over the screen; get out of its way.
++	GuiService.MenuOpened:Connect(InventoryState.close)
++end
++
++return InventoryState
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Motion.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Motion.luau
+new file mode 100644
+index 0000000..faed934
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Motion.luau
+@@ -0,0 +1,19 @@
++--[[
++	Springs that switch themselves off for players who turned on Reduced Motion in Roblox settings.
++]]
++
++local GuiService = game:GetService("GuiService")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local Motion = {}
++
++function Motion.spring<T>(target: () -> T, period: number?, dampingRatio: number?): () -> T
++	if GuiService.ReducedMotionEnabled then
++		return target
++	end
++	return (Vide.spring(target, period or 0.2, dampingRatio or 0.75))
++end
++
++return Motion
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/OpenButton.luau b/src/StarterPlayer/StarterPlayerScripts/UI/OpenButton.luau
+new file mode 100644
+index 0000000..df9890c
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/OpenButton.luau
+@@ -0,0 +1,110 @@
++--[[
++	The always-visible button that opens the inventory. It shows the block the player is building
++	with and how many they have left, so it doubles as a "current block" display. It sits at the
++	right edge, halfway up, clear of the phone thumbstick (bottom left) and jump button (bottom
++	right).
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local BlockPreview = require(script.Parent.BlockPreview)
++local InputHint = require(script.Parent.InputHint)
++local InventoryState = require(script.Parent.InventoryState)
++local Theme = require(script.Parent.Theme)
++
++local create = Vide.create
++local source = Vide.source
++
++local SIZE = 84
++
++local function OpenButton(props: { uiScale: () -> number })
++	local hovered = source(false)
++
++	return create("TextButton")({
++		Name = "OpenInventory",
++		AnchorPoint = Vector2.new(1, 0.5),
++		Position = UDim2.new(1, -12, 0.5, -30),
++		Size = UDim2.fromOffset(SIZE, SIZE + 20),
++		BackgroundColor3 = Theme.Panel,
++		BackgroundTransparency = 0.1,
++		Text = "",
++		-- Controller players open the screen with Y; don't park the selection here.
++		Selectable = false,
++		Visible = function()
++			return not InventoryState.isOpen()
++		end,
++		Activated = InventoryState.open,
++		MouseEnter = function()
++			hovered(true)
++		end,
++		MouseLeave = function()
++			hovered(false)
++		end,
++
++		create("UIScale")({ Scale = props.uiScale }),
++		create("UICorner")({ CornerRadius = Theme.Corner }),
++		create("UIStroke")({
++			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++			Color = function()
++				return if hovered() then Theme.Focus else Theme.PanelStroke
++			end,
++			Thickness = 2,
++		}),
++
++		BlockPreview({
++			blockType = function()
++				return BlockTypes.ByName[InventoryState.selected()]
++			end,
++			Position = UDim2.fromOffset(10, 6),
++			Size = UDim2.fromOffset(SIZE - 20, SIZE - 26),
++		}),
++		create("TextLabel")({
++			Name = "Count",
++			AnchorPoint = Vector2.new(1, 0),
++			Position = UDim2.new(1, -6, 0, SIZE - 34),
++			AutomaticSize = Enum.AutomaticSize.X,
++			Size = UDim2.fromOffset(0, 22),
++			BackgroundColor3 = Theme.Chip,
++			FontFace = Theme.FontBold,
++			TextSize = 16,
++			TextColor3 = function()
++				local inventory = InventoryState.inventory()
++				return if (inventory.counts[InventoryState.selected()] or 0) == 0
++					then Theme.TextEmpty
++					else Theme.Text
++			end,
++			Text = function()
++				return `×{InventoryState.inventory().counts[InventoryState.selected()] or 0}`
++			end,
++
++			create("UICorner")({ CornerRadius = UDim.new(1, 0) }),
++			create("UIPadding")({
++				PaddingLeft = UDim.new(0, 6),
++				PaddingRight = UDim.new(0, 6),
++			}),
++		}),
++		create("TextLabel")({
++			Name = "Label",
++			AnchorPoint = Vector2.new(0, 1),
++			Position = UDim2.new(0, 0, 1, -6),
++			Size = UDim2.new(1, 0, 0, 22),
++			BackgroundTransparency = 1,
++			FontFace = Theme.FontHeavy,
++			TextSize = 19,
++			TextColor3 = Theme.Text,
++			Text = "Blocks",
++		}),
++		InputHint({
++			key = "E",
++			button = Enum.KeyCode.ButtonY,
++			size = 26,
++			AnchorPoint = Vector2.new(0.5, 0.5),
++			Position = UDim2.fromOffset(4, 4),
++		}),
++	})
++end
++
++return OpenButton
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Props.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Props.luau
+new file mode 100644
+index 0000000..48fcb31
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Props.luau
+@@ -0,0 +1,24 @@
++--[[
++	Lets a component accept ordinary instance properties and children (Position, LayoutOrder, extra
++	children) alongside its own options.
++]]
++
++local Props = {}
++
++--[[
++	Copies every entry of `props` whose key isn't in `own` onto `base`, so the caller's properties
++	win, and appends the caller's children after base's own. Returns `base`.
++]]
++function Props.merge(base: { [any]: any }, props: { [any]: any }, own: { string }): { [any]: any }
++	for key, value in props do
++		if type(key) == "string" and not table.find(own, key) then
++			base[key] = value
++		end
++	end
++	for _, child in ipairs(props) do
++		table.insert(base, child)
++	end
++	return base
++end
++
++return Props
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau
+new file mode 100644
+index 0000000..83e47ab
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau
+@@ -0,0 +1,43 @@
++--[[
++	Colors, fonts and sizes shared by the inventory UI. Sizes are design units: each top-level
++	element carries a UIScale, so one unit is one point on a phone and grows on big screens.
++]]
++
++local Theme = table.freeze({
++	Font = Font.fromEnum(Enum.Font.BuilderSans),
++	FontBold = Font.fromEnum(Enum.Font.BuilderSansBold),
++	FontHeavy = Font.fromEnum(Enum.Font.BuilderSansExtraBold),
++
++	Backdrop = Color3.fromRGB(0, 0, 0),
++	BackdropTransparency = 0.45,
++	Panel = Color3.fromRGB(32, 36, 48),
++	PanelStroke = Color3.fromRGB(70, 78, 100),
++	Tile = Color3.fromRGB(52, 58, 76),
++	TileLocked = Color3.fromRGB(38, 41, 52),
++	TileStroke = Color3.fromRGB(80, 88, 112),
++	Text = Color3.fromRGB(255, 255, 255),
++	TextDim = Color3.fromRGB(175, 182, 200),
++	TextEmpty = Color3.fromRGB(255, 140, 120),
++	Selected = Color3.fromRGB(90, 220, 110),
++	Focus = Color3.fromRGB(255, 255, 255),
++	Warning = Color3.fromRGB(255, 205, 80),
++	Chip = Color3.fromRGB(20, 22, 30),
++	CloseButton = Color3.fromRGB(210, 70, 70),
++
++	-- Smallest edge of anything a finger has to hit.
++	TouchTarget = 56,
++	Corner = UDim.new(0, 14),
++	Padding = 14,
++	Gap = 10,
++	-- Tiles are at least this wide; the grid drops columns on narrow screens to keep it.
++	MinTileWidth = 104,
++	MaxColumns = 5,
++	-- Largest panel, in design units.
++	MaxPanelSize = Vector2.new(680, 560),
++	-- Screen height that gets a UIScale of 1, and the range the scale is clamped to.
++	ReferenceHeight = 420,
++	MinScale = 0.85,
++	MaxScale = 1.6,
++})
++
++return Theme

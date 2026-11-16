@@ -1,0 +1,127 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts move ghost drawing onto the clients, send only on change at up to 20 a second, and batch the server's relay. A uses UnreliableRemoteEvents in both directions and handles dropped and out-of-order updates with sequence and tick numbers plus snapshots. B keeps ghost traffic on reliable RemoteEvents, which the rubric marks down. B's idle behaviour, join snapshot and tests are good, but A's transport design is closer to what the task asks for.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Change-only, capped client sends",
+          "score": 4,
+          "note": "`sendOwnGhost` sends on a state change at most every `SEND_INTERVAL` (1/20 s), independent of frame rate, but an idle client still sends one refresh a second (`REFRESH_INTERVAL = 1`)."
+        },
+        {
+          "criterion": "Client-built ghosts, server relays",
+          "score": 5,
+          "note": "The server keeps only a `ghosts` table and relays it through `GhostUpdates:FireAllClients`; each client builds its own parts with `createGhostPart` and glides them in `glideRemoteGhosts`."
+        },
+        {
+          "criterion": "Own ghost drawn locally every frame",
+          "score": 5,
+          "note": "`updateOwnGhost` raycasts from the cursor in `BindToRenderStep` at `Camera.Value + 1`, so the ghost uses this frame's camera with no server round trip."
+        },
+        {
+          "criterion": "Unreliable transport, PlaceBlock unchanged",
+          "score": 5,
+          "note": "Both `SendGhost` and `GhostUpdates` are UnreliableRemoteEvents; per-player sequence numbers and the batch tick drop stale updates; periodic snapshots and refreshes recover lost ones; batches are kept under the 1,000-byte limit; PlaceBlock is untouched."
+        },
+        {
+          "criterion": "Server validation and lifecycle",
+          "score": 4,
+          "note": "`decodeClientState` checks the buffer type and length and the block index, and i16 cells cannot be NaN; but there is no explicit per-player rate limit (only overwrite-latest), and the builder's own entry is broadcast back and ignored by the client. Leave and hide are handled."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 4,
+          "note": "Detailed before/after tables built from rates, player count and bytes, with a solid player-facing list; it cites byte costs as measured in an empty place from a reference, which is borderline, though it says the numbers were not measured in this game."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "All checks pass; the code is typed and readable, and the only extra file is the shared GhostCodec."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Change-only, capped client sends",
+          "score": 5,
+          "note": "`updateOwnGhost` sends only when the type or cell differs from what was last sent, at most every `SEND_INTERVAL`, retries throttled changes on later frames, and sends nothing when idle."
+        },
+        {
+          "criterion": "Client-built ghosts, server relays",
+          "score": 5,
+          "note": "The server stores a state buffer per player and batches changed states every 1/20 s; clients create local parts and smooth them in `moveRemoteGhosts`."
+        },
+        {
+          "criterion": "Own ghost drawn locally every frame",
+          "score": 5,
+          "note": "`updateOwnGhost` sets `ownGhost.CFrame` from `getCursorCell` every RenderStepped frame."
+        },
+        {
+          "criterion": "Unreliable transport, PlaceBlock unchanged",
+          "score": 2,
+          "note": "Both `MoveGhost` and `GhostUpdates` are reliable `RemoteEvent`s, so ghost traffic still shares the reliable ordered stream with PlaceBlock; placement itself is unchanged."
+        },
+        {
+          "criterion": "Server validation and lifecycle",
+          "score": 4,
+          "note": "`isValidState` checks the type, length and block index, and i16 cells cannot be NaN; there is no per-player rate limit (overwrite only), and the client filters out its own echo. Leave and hide are handled."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 5,
+          "note": "States its assumptions explicitly, gives formulas and three scenarios, labels the numbers as estimates, and includes a clear list of what players will notice."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "Checks pass and specs are added; the GetGhosts RemoteFunction is extra surface, and the raycast filter table is rebuilt every frame."
+        }
+      ],
+      "overall_score": 7
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Unreliable remotes both ways, with sequence and tick ordering",
+        "Self-healing through 1 s snapshots and client refreshes",
+        "Raycast runs after the camera update, so the own ghost is more responsive than before",
+        "Thorough, honest write-up"
+      ],
+      "weaknesses": [
+        "An idle client still sends 1 message a second",
+        "No explicit per-player rate limit on the server",
+        "Echoes the builder's own state in the batch"
+      ]
+    },
+    "B": {
+      "score": 7,
+      "strengths": [
+        "Truly zero traffic when idle",
+        "Join snapshot through GetGhosts, with handling for snapshots that arrive late",
+        "Unit tests for the protocol",
+        "Clear write-up based on formulas"
+      ],
+      "weaknesses": [
+        "Ghost traffic stays on reliable RemoteEvents, contrary to criterion 4",
+        "No per-player rate limit",
+        "Write-up does not discuss reliability or head-of-line blocking"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8.5,
+    "without_skill": 7
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

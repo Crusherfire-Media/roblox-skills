@@ -1,0 +1,5 @@
+I fixed the three luau-lsp errors from the stop hook. The script itself didn't need changes: `sourcemap.json` was out of date and didn't list `BlockTypes` or `PlacementRules`, so luau-lsp couldn't resolve the `@game/ReplicatedStorage/Shared/...` requires. I regenerated it with `rojo sourcemap`. With the requires resolving, the `BlockTypes.BlockType` type error goes away too.
+
+When I re-ran luau-lsp myself, those three errors were gone. That run still printed many "Unknown global/type" errors (`Instance`, `Vector3`, `Color3`, `Player`, ...) in all three Luau files. Those come from how I ran it, not from the code: I didn't pass the Roblox definitions file, as its own warning says. The stop hook's check didn't report them.
+
+One more thing: `sourcemap.json` is tracked in git, so it now shows as changed alongside the new script. Neither change is committed.

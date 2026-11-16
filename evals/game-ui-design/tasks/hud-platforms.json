@@ -1,0 +1,73 @@
+{
+  "id": 3,
+  "name": "hud-platforms",
+  "skill": "game-ui-design",
+  "prompt": "Our HUD was built for PC only (src/StarterPlayer/StarterPlayerScripts/UI/Hud.luau and Main.client.luau). We're launching on phones, tablets, and Xbox next week. Adapt the HUD so it works with touch and with a controller on a TV, without making PC worse. Players switch input in the middle of a session (picking up a controller on PC, for example), so it has to keep up.\n\nPlacing blocks with a controller is handled by another dev, so you only need the HUD side: switching blocks, turning build mode on and off, and opening the inventory (the inventory screen itself is still a stub).",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacement.server.luau",
+      "to": "src/ServerScriptService/BlockPlacement.server.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacer.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+    },
+    {
+      "from": "fixtures/hud-platforms/UI/Hud.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/UI/Hud.luau"
+    },
+    {
+      "from": "fixtures/hud-platforms/Main.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "any_file_matches",
+      "dir": "src",
+      "ext": ".luau",
+      "pattern": "PreferredInput",
+      "text": "The HUD reads UserInputService.PreferredInput"
+    },
+    {
+      "type": "any_file_matches",
+      "dir": "src",
+      "ext": ".luau",
+      "pattern": "KeyCode\\.(ButtonL1|ButtonR1|ButtonL2|ButtonR2|ButtonX|ButtonY|DPad\\w+)",
+      "text": "The HUD binds at least one gamepad button"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\"),p=require(\"path\");const re=new RegExp(process.argv[1]);const hits=[];const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(f.endsWith(\".luau\")&&re.test(fs.readFileSync(f,\"utf8\")))hits.push(f.split(p.sep).join(\"/\"))}};walk(\"src\");if(hits.length){console.log(\"matched in \"+hits.join(\", \"));process.exit(1)}console.log(\"no file matched\")",
+        "MouseButton1Click"
+      ],
+      "expect_exit": 0,
+      "text": "No file under src uses MouseButton1Click (buttons fire on Activated)"
+    }
+  ],
+  "rubric": [
+    "The layout and prompts follow the player's current input: chosen from UserInputService.PreferredInput (Touch, Gamepad, KeyboardAndMouse) and updated live when it changes, with TV detection from GuiService.ViewportDisplaySize where used; not from TouchEnabled alone or the deprecated IsTenFootInterface.",
+    "Prompts match the input: the keyboard hints ('1' to '0', '[B]', '[I]') are hidden or swapped on touch and gamepad, and gamepad prompts come from UserInputService:GetImageForKeyCode or GetStringForKeyCode (or are otherwise right for both Xbox and PlayStation), not hardcoded to one console's buttons.",
+    "Every HUD action has a controller path: a binding to cycle blocks (for example LB/RB or the D-pad) and buttons for build mode and the inventory, through ContextActionService or input handling; on-screen buttons fire on Activated rather than MouseButton1Click.",
+    "Touch: build mode and the inventory get on-screen buttons about 44 px or larger, block slots are tappable at about 44 px or larger, and nothing interactive sits in the bottom-left thumbstick or bottom-right jump corners (the inventory button and build toggle move out of them; the ten-slot hotbar clears both thumb regions or changes shape on phones).",
+    "No hover-only information: the block name that appeared only in a mouse-over tooltip is visible without a mouse too (for example the selected block's name always shown, or shown on gamepad selection or tap).",
+    "Readable on a TV and a phone: the 14 px labels grow noticeably for TV and touch, key UI keeps a margin from the screen edges on TVs, and nothing sits under Roblox's top bar.",
+    "Correct and in scope: PC works as before, the Vide code stays valid (changing values are bound, outside connections cleaned up), placement and the server are untouched, and luau-lsp, selene, and StyLua pass on the attempt's own files. Supporting files such as a preview story or specs count neither for nor against."
+  ],
+  "judge_facts": [
+    "Roblox engine API in this sandbox's type definitions (globalTypes.d.luau), all real and current: UserInputService.PreferredInput (Enum.PreferredInput: KeyboardAndMouse, Gamepad, Touch, MicroGamepad); GuiService.ViewportDisplaySize (Enum.DisplaySize: Small, Medium, Large); GuiService.TopbarInset (Rect); GuiService.PreferredTextSize; GuiService.PreferredTransparency (number); GuiService.ReducedMotionEnabled (boolean); ScreenGui.ScreenInsets (Enum.ScreenInsets: CoreUISafeInsets, DeviceSafeInsets, TopbarSafeInsets, None)."
+  ],
+  "timeout_minutes": 25
+}

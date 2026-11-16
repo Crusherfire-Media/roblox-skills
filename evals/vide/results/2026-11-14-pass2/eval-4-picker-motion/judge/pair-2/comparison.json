@@ -1,0 +1,115 @@
+{
+  "pair": 2,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both are solid and pass every check. A's persistent spring with a derived mount is clever and handles spamming well, but its press release misses touches that end off the tile, and its removal depends on exact spring settling. B uses the rubric's own pattern (a show removal delay with the slide driven by present) and has clearly more robust press feedback for mouse and touch. B wins narrowly.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Vide springs in component bodies",
+          "score": 5,
+          "note": "Slide spring is in the blockPicker body; tile and selection-ring springs are in component bodies inside the show builder; all are bound to properties."
+        },
+        {
+          "criterion": "Closing slide plays / opening slides panel",
+          "score": 4,
+          "note": "`isMounted = Open() or offset() ~= hiddenOffset` keeps the panel in the tree until the spring settles, and the panel's Position (not the UIScale) slides; removal relies on the spring landing exactly on its target."
+        },
+        {
+          "criterion": "Spam robustness",
+          "score": 5,
+          "note": "The persistent offset spring just retargets on each toggle, the derive stops show from building a second picker, and `Interactable = props.Open` blocks clicks while it slides out."
+        },
+        {
+          "criterion": "Highlight glide in offset units",
+          "score": 5,
+          "note": "`PANEL_PADDING - RING_OUTSET + (selectedIndex()-1) * TILE_STRIDE` uses offset units only."
+        },
+        {
+          "criterion": "Press feedback mouse/touch",
+          "score": 3,
+          "note": "InputBegan/InputEnded/MouseLeave cover mouse, but a touch released off the tile may never fire InputEnded, leaving it squashed."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Selection, placement and scaling are kept; the removed UIPadding is replaced by an offset Tiles frame; all checks pass."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Vide springs in component bodies",
+          "score": 5,
+          "note": "The position, highlight and faceScale springs are created in component bodies and bound to Position and Scale."
+        },
+        {
+          "criterion": "Closing slide plays / opening slides panel",
+          "score": 4,
+          "note": "The show builder returns `BlockPicker.ExitDuration` and drives the slide from `present`, moving the panel's Position; the opening slide depends on `present` starting false."
+        },
+        {
+          "criterion": "Spam robustness",
+          "score": 4,
+          "note": "Relies on show's delay to reuse the leaving picker, and `Interactable = props.Present` blocks clicks while it slides out."
+        },
+        {
+          "criterion": "Highlight glide in offset units",
+          "score": 5,
+          "note": "`tilePosition(index)` = `(index-1)*(TILE_SIZE+TILE_GAP)` inside the padded panel, all in offset units."
+        },
+        {
+          "criterion": "Press feedback mouse/touch",
+          "score": 5,
+          "note": "Watches the input's UserInputState for End/Cancel, so mouse and touch both release even off the tile, and the hit area stays fixed."
+        },
+        {
+          "criterion": "Correct and in scope",
+          "score": 5,
+          "note": "Main is updated to `BlockPicker.new` with `present` and the delay; selection, placement and scaling are intact; all checks pass."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "The persistent slide spring makes reopening mid-slide seamless",
+        "The ring sits slightly outside the tile, so a squashed tile still reads as selected",
+        "Clear comments and constants"
+      ],
+      "weaknesses": [
+        "Removal depends on the spring settling exactly on hiddenOffset",
+        "Release on touch-drag-off is not handled robustly",
+        "Moves show() ownership into BlockPicker, changing its API"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Uses the idiomatic show removal-delay and present pattern",
+        "Robust press release through UserInputState tracking",
+        "The hidden-position margin keeps leftover spring travel off screen"
+      ],
+      "weaknesses": [
+        "The exit delay is tied to SLIDE_PERIOD rather than the spring actually settling",
+        "The opening slide depends on present's initial value",
+        "The module's return shape changed to a table"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-2",
+    "B": "with_skill/run-2"
+  }
+}

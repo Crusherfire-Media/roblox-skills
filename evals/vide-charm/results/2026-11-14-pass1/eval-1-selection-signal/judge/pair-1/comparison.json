@@ -1,0 +1,112 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts work. A puts `useSignalState` in the mounted `app()` body and leaves BlockPicker untouched as a pure view, as the rubric asks. B moves the bridge into BlockPicker, so the view now depends on Charm and its `Selected` prop must be a Charm getter. B also renames `getBlockType` without need. A is the cleaner change to merge.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns selection as Charm signal",
+          "score": 5,
+          "note": "`Charm.signal` with the setter kept private, `getBlockType = getSelectedName`, and `setBlockType` still asserts on unknown names; number keys and tiles go through it."
+        },
+        {
+          "criterion": "Hotbar bridges Charm to Vide state inside the mounted scope",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockPlacer.getBlockType)` is called in the `app()` body passed to `mount`."
+        },
+        {
+          "criterion": "Single copy of the selection; BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirrored source and the BindableEvent are both deleted."
+        },
+        {
+          "criterion": "PlacementPreview follows the selection through Charm",
+          "score": 5,
+          "note": "`Charm.effect` wraps `applyBlockType(BlockPlacer.getBlockType())`."
+        },
+        {
+          "criterion": "BlockPicker unchanged; props interface minimal",
+          "score": 5,
+          "note": "BlockPicker is untouched and still receives a Vide source from its caller."
+        },
+        {
+          "criterion": "Correct, in scope, and checks pass",
+          "score": 5,
+          "note": "All checks pass, the diff is minimal, and the API name is kept."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns selection as Charm signal",
+          "score": 5,
+          "note": "The setter is private, `selectedBlockType = getSelectedName` is exported, and `setBlockType` validates names."
+        },
+        {
+          "criterion": "Hotbar bridges Charm to Vide state inside the mounted scope",
+          "score": 4,
+          "note": "`useSignalState(props.Selected)` runs in the BlockPicker body inside the mounted scope, so it works, but the bridge sits in the view rather than in its caller."
+        },
+        {
+          "criterion": "Single copy of the selection; BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirror and the event are both removed."
+        },
+        {
+          "criterion": "PlacementPreview follows the selection through Charm",
+          "score": 5,
+          "note": "`Charm.effect` reads `BlockPlacer.selectedBlockType()`."
+        },
+        {
+          "criterion": "BlockPicker unchanged; props interface minimal",
+          "score": 3,
+          "note": "BlockPicker now depends on VideCharm and `Selected` must be a Charm getter, so callers such as stories that pass a Vide source would no longer update."
+        },
+        {
+          "criterion": "Correct, in scope, and checks pass",
+          "score": 4,
+          "note": "Checks pass, but it renames `getBlockType` to `selectedBlockType` without need."
+        }
+      ],
+      "overall_score": 7.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "Bridges the signal correctly inside the mounted app component",
+        "Leaves BlockPicker untouched, so it stays a pure view",
+        "Keeps the `getBlockType` API name"
+      ],
+      "weaknesses": [
+        "The Charm effect's disposer is not stored (harmless for an effect that lives as long as the client)"
+      ]
+    },
+    "B": {
+      "score": 7.5,
+      "strengths": [
+        "Working Charm signal with private writes",
+        "PlacementPreview effect is correct",
+        "BlockTypeChanged fully removed"
+      ],
+      "weaknesses": [
+        "Changes what BlockPicker's `Selected` prop means and couples the view to Charm",
+        "Renames the public getter without need"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 7.5
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

@@ -1,0 +1,415 @@
+diff --git a/docs/ui-review.md b/docs/ui-review.md
+new file mode 100644
+index 0000000..1257036
+--- /dev/null
++++ b/docs/ui-review.md
+@@ -0,0 +1,409 @@
++# UI review: HUD and daily reward popup
++
++**Reviewed:** `UI/Hud.luau`, `UI/DailyReward.luau`, and `Main.client.luau`, read from code. No
++screenshots were taken. The review covers the state right after joining (popup open), the HUD after
++the popup closes, and the claim moment. It looks at a landscape phone first, then tablet, PC, and
++Xbox.
++
++**Player and moment:** players aged roughly 6-12 on a landscape phone, who have just joined and want
++to start building. PC and Xbox ship too, so every action needs a mouse, touch, and gamepad path.
++
++**Not checked from code, verify in the Device Emulator:** the real pixel positions next to Roblox's
++top bar and touch controls, how text renders at `PreferredTextSize` Largest, how the screens look
++on a 4K TV, and contrast against this game's actual skybox and terrain.
++
++### Evidence labels
++
++Each finding carries a label from our UI design guidelines. Labels are never upgraded.
++
++- `[study]`: controlled or peer-reviewed research
++- `[standard]`: Roblox docs, Xbox Accessibility Guidelines (XAG), WCAG
++- `[practitioner]`: design systems and community practice
++- `[inference]`: a conclusion drawn from the labeled facts
++- `[unverified]`: not confirmed
++
++The guidelines rank principles by priority (P1 = play comes first, P2 = young readers, P3 = thumb
++sizes, P4 = read the engine, P5 = every input, P6 = readability, P7 = consistency, P8 = feedback
++and motion, P9 = respect the player, P10 = measure). Findings cite them by number.
++
++### Severity scale
++
++| Severity | Meaning |
++|---|---|
++| **Blocker** | Breaks a platform rule, or a whole group of players can't use the feature. Fix before the next release. |
++| **High** | Most players are hurt every session: play is blocked, text can't be read, or a control is hard to hit. |
++| **Medium** | Some players or some sessions are hurt, or the cost is real but small. |
++| **Low** | Polish, or something to fix while the file is already open. |
++
++---
++
++## Summary
++
++| # | Finding | Severity | Platforms |
++|---|---|---|---|
++| 1 | Discord link in the HUD breaks Community Standards | Blocker | All |
++| 2 | Menu buttons are blank orange squares, and their names show only on hover | Blocker | Touch, Xbox |
++| 3 | No gamepad path to the HUD or the popup | Blocker | Xbox |
++| 4 | Menu rail sits in the jump-button corner | High | Phone, tablet |
++| 5 | Daily reward popup blocks play as soon as the player joins | High | All |
++| 6 | 59-second countdown and "lose your streak" threat aimed at kids | High | All |
++| 7 | Coin counter sits under Roblox's top bar | High | All |
++| 8 | Touch targets are well under the minimum size | High | Phone, tablet |
++| 9 | Popup text and buttons fail contrast | High | All |
++| 10 | `TextScaled` everywhere: ignores the player's text size, and the streak paragraph shrinks to tiny text | High | All |
++| 11 | Day tiles show state by color only and don't show the reward | Medium | All |
++| 12 | Claim never switches to a claimed state, so it can be claimed again | Medium | All |
++| 13 | Rewards button pulses forever | Medium | All |
++| 14 | Reward toast lasts 1.5 s, sits mid-screen, and is the only feedback | Medium | All |
++| 15 | Inventory and Settings buttons do nothing when pressed | Medium | All |
++| 16 | Coin counter has no backplate and a fixed-width box | Medium | All |
++| 17 | Layout is chosen with `TouchEnabled`, and sizes don't adapt to TVs | Medium | Touch laptops, Xbox |
++| 18 | Small items: removed font, tooltip position, transparency setting, tap outside | Low | All |
++
++---
++
++## Findings
++
++### 1. Discord link in the HUD breaks Community Standards. Blocker
++
++**Where:** `Hud.luau:135-145`, the `Community` label: "Join our Discord for free codes!
++discord.gg/blockbuilders".
++
++**What goes wrong:** Experience UI "may not link to, share, or display URLs of any external websites
++or services", and other efforts to send users off Roblox are prohibited [standard]. That puts the
++whole experience at risk of moderation, and the audience is mostly children. The label is also 20 px
++tall and uses `TextScaled`, so on a phone it's unreadable, and it sits at the bottom middle between
++the player's thumbs (P9).
++
++**Fix:** Delete the label. The only allowed route is Social Links on the experience or group page,
++which needs an owner age-checked 16+ [standard]. If codes stay a feature, announce them in-game,
++for example through a codes field in Settings. Don't gate on
++`PolicyService.AllowedExternalLinkReferences`: it always returns an empty array [standard].
++
++### 2. Menu buttons are blank orange squares, and their names show only on hover. Blocker
++
++**Where:** `Hud.luau:27-31` (`Icon = "rbxassetid://0"` for all three) and `Hud.luau:62-69` and
++`117-133` (the name appears only in a hover tooltip).
++
++**What goes wrong:** The three buttons look the same, and their names appear only on
++`MouseEnter`. Touch and gamepad have no hover, so phone and Xbox players have to guess what each
++button does. That's most of the audience. Children recover from confusion by leaving [study], and
++players should be challenged by the game, "not in trying to figure out what icons mean"
++[practitioner]. Even with icons, an icon alone is weaker than an icon with a word (P2, P5).
++
++**Fix:**
++- Give every button an icon and a short word that are always visible: "Bag", "Settings",
++  "Rewards". Put the label under or beside the icon, using a fixed `TextSize` (see #10).
++- Until the art is uploaded, ship text-only buttons. Don't ship blank squares.
++- Make the tooltip a PC-only extra, or drop it. Hover should only preview something a tap or
++  gamepad focus also shows [inference].
++
++### 3. No gamepad path to the HUD or the popup. Blocker
++
++**Where:** `Hud.luau:70` and `DailyReward.luau:113, 159` use `MouseButton1Click`. Nothing sets a
++selection, a `SelectionGroup`, or a Back binding.
++
++**What goes wrong:** `MouseButton1Click` is mouse-only, and gamepad A doesn't fire it. `Activated`
++covers mouse, touch, and gamepad A [standard]. No screen sets a default selection either. On Xbox
++the popup opens on join with nothing focused, so the player can't claim or close it without
++finding Roblox's UI-navigation toggle. The menu rail can't be reached at all. XAG requires UI that
++is "fully navigable by keyboard and controller digital input alone" [standard] (P5).
++
++**Fix:**
++- Switch every button to `Activated`.
++- **Popup:** when it opens, call `GuiService:Select` on the panel with Claim as the first pick
++  (`SelectionOrder`). Wrap the panel in a `SelectionGroup` with `SelectionBehavior = Stop` so focus
++  stays inside. Map B to Close. Check that the B binding wins over Roblox's own B in the Controller
++  Emulator; the docs don't say [unverified]. When the popup closes, return focus to the element
++  that opened it (for example the Rewards button).
++- **HUD:** bind one gamepad button (for example ButtonY or DPadUp) through `ContextActionService`
++  to open a menu hub, or to move focus onto the rail with a `SelectionGroup` set to `Escape`. Show
++  the glyph next to the rail on gamepad, taken from `UserInputService:GetImageForKeyCode`. Don't
++  hardcode Xbox art.
++- Give every selectable a visible focus state (`SelectionImageObject` or a stroke).
++
++### 4. Menu rail sits in the jump-button corner. High
++
++**Where:** `Hud.luau:102-106`, with `AnchorPoint (1, 1)` at `(1, -12, 1, -12)`, which is the
++bottom-right corner.
++
++**What goes wrong:** On touch, the bottom-right corner belongs to the jump button and the player's
++right thumb [standard]. Players will hit Rewards or Settings when they mean to jump, and jump when
++they mean to open a menu. A bottom-right rail also lands near Roblox's `SendNotification` toasts
++[standard] (P3, P7).
++
++**Fix:**
++- **Phone:** a vertical rail on the right edge, centered around 40-50% of the screen height, clear
++  of the jump button. Roblox's sample puts a custom action button 20 px left of jump, so check the
++  real jump position from `TouchGui` in the emulator.
++- **Tablet:** the same rail moved lower, but still above the jump button. A button 40% down from
++  the top is hard to reach on a tablet [standard].
++- **PC and Xbox:** a right-edge or bottom-middle rail is fine there.
++- Choose the layout from `PreferredInput` (see #17).
++
++### 5. Daily reward popup blocks play as soon as the player joins. High
++
++**Where:** `Main.client.luau:22`, `rewardOpen = source(true)`, plus the full-screen dim frame with
++`Active = true` at `DailyReward.luau:71-77`.
++
++**What goes wrong:** The first thing a new player sees is a modal, not the game. Players try 24 or
++more experiences a month and decide "within minutes" [standard]. A popup before any play costs some
++of those players, and new players have no streak to care about anyway (P1).
++
++**Fix:**
++- Don't auto-open. When a reward is waiting, put a badge on the Rewards button (a dot or "1", see
++  #13) and optionally show a short toast at the top: "Daily reward ready!".
++- If design wants the popup to open by itself, open it at a natural pause: after the first block is
++  placed, or on the second session onward. Never open it in a new player's first seconds.
++- Test this as an Experiment that compares the badge with auto-open on D1 retention and claim rate
++  (see the playtest and funnel questions).
++
++### 6. 59-second countdown and "lose your streak" threat aimed at kids. High
++
++**Where:** `Main.client.luau:16, 24, 74-79` (a 59-second countdown) and the copy at
++`DailyReward.luau:142`: "Claim in 0:59 or lose your 6-day streak! Come back every day so you don't
++lose your progress."
++
++**What goes wrong:** A ticking clock plus loss wording is the pressure pattern our guidelines rule
++out for a young audience. ICO Standard 13 is the working bar, and it forbids nudges that work
++against a child's interests [standard; inference]. The timer also misleads: it reaches 0:00 and
++nothing happens, and Claim still works. The paragraph is two sentences and over 100 characters,
++which children skip [study] (P9, P2).
++
++**Fix:**
++- Remove the countdown and the loss wording.
++- Replace the copy with one line: "Day 7: 50 coins!" After the claim, show "Next reward tomorrow".
++  A time-until-next is fine if it's informative and not a threat, for example "Next reward in 14h".
++- As a design change, consider streaks that pause instead of reset when a day is missed
++  [inference]. That keeps the goal-gradient pull of the 7-day row [study] without the threat.
++
++### 7. Coin counter sits under Roblox's top bar. High
++
++**Where:** `Main.client.luau:53` sets `IgnoreGuiInset = true` (which switches the ScreenGui to
++`DeviceSafeInsets`), and `Hud.luau:90` puts Coins at `(8, 8)`, the top-left corner.
++
++**What goes wrong:** The top-left is where Roblox draws its menu and chat buttons. With the inset
++ignored, "Coins: 250" renders under them, so the one number the player tracks is partly covered
++(P4).
++
++**Fix:**
++- Remove `IgnoreGuiInset` and set `ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets` on the HUD
++  ScreenGui. Give the dim backdrop its own ScreenGui with `ScreenInsets = None` so it still covers
++  the whole screen.
++- Move coins to the top middle or top right, below `GuiService.TopbarInset`. Read the inset and its
++  changed signal live. Never hardcode 36 or 58 px: the height "may vary based on device and screen
++  size" [standard].
++
++### 8. Touch targets are well under the minimum size. High
++
++**Where:** `Hud.luau:18` (36 px on touch, 32 px otherwise, with 6 px gaps), `DailyReward.luau:105`
++(Close is 24 x 24), and `DailyReward.luau:151` (Claim is 120 x 36).
++
++**What goes wrong:** Children aged 7-11 miss touch targets 46% of the time, against 32% for adults
++[study]. Our floor is 10 mm for any tap target and 15-20 mm for primary actions [study;
++practitioner], which is 44 or more in our 1080-tall design units with a root `UIScale`
++[practitioner]. A 24 px Close in the corner of a panel is the hardest target on the screen. Small
++targets at screen edges should be avoided for children [study] (P3).
++
++**Fix:**
++- Rail buttons: about 64 x 64 on touch (icon plus label), with 8-12 px gaps.
++- Claim, the primary action: about 220 x 72.
++- Close: at least 56 x 56 hit area. The visible "X" can stay smaller inside a larger transparent
++  button.
++- Size everything in 1080-tall design units under one root `UIScale`. The Vide skill's
++  `references/screens.md` owns that module.
++
++### 9. Popup text and buttons fail contrast. High
++
++**Where:** `DailyReward.luau:16-21`. Ratios computed with the WCAG formula:
++
++| Element | Colors | Ratio | Needed |
++|---|---|---|---|
++| Streak text and Close "X" | grey 150 on panel 240 | about 2.6:1 | 4.5:1 |
++| "DAILY REWARD!" title | orange (255,170,0) on panel 240 | about 1.7:1 | 3:1 (large text) |
++| "CLAIM" and today's day number | white on green (80,200,90) | about 2.2:1 | 3:1 (large text) |
++| Future day numbers | white on grey 200 | about 1.7:1 | 3:1 |
++| Claimed day numbers | white on grey 130 | about 3.9:1 | passes for large text only |
++
++**What goes wrong:** Most of the popup fails XAG 102 [standard]. The title and future days are close
++to invisible for low-vision players and on dim phone screens outdoors (P6).
++
++**Fix:**
++- Body text: dark grey (around 60,60,60) on the light panel, about 7:1.
++- Title: a darker orange (around 200,100,0), or keep the bright orange and give it a dark
++  `UIStroke`.
++- Claim button: a darker green (around 30,130,50) with white text, or keep the green and use dark
++  text.
++- Day numbers: dark text on light tiles.
++- Re-check every pair with a contrast checker after the change.
++
++### 10. `TextScaled` everywhere: ignores the player's text size, and the streak paragraph shrinks to tiny text. High
++
++**Where:** every TextLabel and TextButton in both files.
++
++**What goes wrong:** `TextScaled` opts a label out of `GuiService.PreferredTextSize`, the Roblox
++setting players use to make text bigger [standard]. It also sizes each label to its own box, so
++labels end up at different sizes [practitioner]. The streak sentence (`DailyReward.luau:132-145`) is
++crammed into a 64 px box with `TextWrapped`, so it shrinks to whatever fits, which is tiny on a
++phone. The coin label shrinks as the number grows (P6).
++
++**Fix:**
++- Define one `TextSize` per role, for example title 40, body 24, label 20 and caption 18 in
++  1080-tall units. Body text should be at least 26 at 1080p on console [standard].
++- Use `AutomaticSize` on containers so text at Largest grows them instead of clipping.
++- Cut the paragraph to one line (see #6).
++- Verify at `PreferredTextSize = Largest` in the emulator.
++
++### 11. Day tiles show state by color only and don't show the reward. Medium
++
++**Where:** `DailyReward.luau:37-63`. Claimed, today, and future are grey, green, and light grey,
++with nothing else to tell them apart.
++
++**What goes wrong:** Color never carries meaning alone [standard] (XAG 103). Claimed grey (130) and
++future grey (200) are also easy to confuse. Each tile shows only its day number, not what the
++player gets, so the 7-day row doesn't show the goal it's meant to pull toward. Seeing progress
++toward a reward is what makes people speed up [study] (P6, P2).
++
++**Fix:**
++- Claimed tiles get a checkmark.
++- Today's tile is larger, gets a thick outline, and is labeled "Today".
++- Future tiles stay plain or get a small lock.
++- Every tile shows a reward icon and amount ("50"). Make day 7 visibly bigger if its reward is.
++
++### 12. Claim never switches to a claimed state, so it can be claimed again. Medium
++
++**Where:** `Main.client.luau:35-48`. The Rewards button reopens the popup, and Claim always pays out
++and increments the streak. After day 7, the row has no day 8 and every tile goes grey.
++
++**What goes wrong:** The button has no claimed or disabled state, so the player gets no clear
++"done", and pressing Rewards again pays out again. After day 7 the row stops making sense. A
++progression button should never change what it does or seem to work when it shouldn't [standard,
++secondary] (P7, P8).
++
++**Fix:**
++- Give the popup two states:
++  - Reward ready: Claim is enabled.
++  - Claimed: the button is disabled and reads "Claimed!", with a checkmark on today's tile and
++    "Next reward tomorrow" below.
++- Define what happens after day 7: either the row restarts at day 1 with "Week 2", or day 7 repeats.
++- Separately, outside this UI review: claiming has to be server-authoritative. Right now coins and
++  the streak live only on the client.
++
++### 13. Rewards button pulses forever. Medium
++
++**Where:** `Hud.luau:48-53`, where a `Heartbeat` connection scales the button every frame, whether
++or not a reward is waiting.
++
++**What goes wrong:** Motion pulls the eye [study], so a button that never stops moving competes with
++building. It keeps pulsing after the reward is claimed, which teaches players to ignore it. It
++ignores `ReducedMotionEnabled` [standard]. It also redraws the whole HUD ScreenGui every frame
++[practitioner, measured in our performance guidance] (P8).
++
++**Fix:**
++- Replace the pulse with a static badge (a red dot or "1") shown only while a reward is ready.
++- When the reward becomes available, play one pop (about 200 ms, ease out). With
++  `ReducedMotionEnabled`, skip the pop and just show the badge.
++- Remove the `Heartbeat` connection.
++
++### 14. Reward toast lasts 1.5 s, sits mid-screen, and is the only feedback. Medium
++
++**Where:** `Main.client.luau:15` (`TOAST_SECONDS = 1.5`) and `Hud.luau:147-163` (orange text with no
++backplate at 40% from the top, in the center).
++
++**What goes wrong:**
++- 1.5 s is too short for young readers. Our toast floor is about 6 s [practitioner].
++- Orange text over the 3D world has no guaranteed contrast.
++- The center of the screen is where the player is looking to build.
++- Claiming is the game's reward moment, and right now it is just the popup vanishing plus a brief
++  line of text. Rewards should use two or three channels [inference from study], and medium juice
++  beats none [study] (P8, P6).
++
++**Fix:**
++- Toast: at the top or upper middle, below the coins. Use a dark backplate with white text, at
++  least 6 s on screen, and one toast at a time. Merge repeats, so two "+50" toasts become one
++  "+100".
++- Claim moment:
++  - Today's tile pops and gets its checkmark (about 200 ms).
++  - Coin icons fly to the coin counter, and the counter ticks up with a short scale bump.
++  - A coin sound plays.
++- The whole claim moment lasts under 500 ms. With `ReducedMotionEnabled`: no flying coins, just a
++  fade and the sound.
++
++### 15. Inventory and Settings buttons do nothing when pressed. Medium
++
++**Where:** `Main.client.luau:45-46`, which only calls `print`.
++
++**What goes wrong:** A press that gives no response reads as broken, and children recover from
++errors by leaving [study] (P8).
++
++**Fix:** Hide the buttons until their screens exist. If they have to ship, have a press show a toast
++such as "Coming soon!" within 100 ms.
++
++### 16. Coin counter has no backplate and a fixed-width box. Medium
++
++**Where:** `Hud.luau:88-100`, white "Coins: 250" with a transparent background in a 140 px box.
++
++**What goes wrong:** White text over the 3D world fails contrast over sky, snow, or a light
++baseplate. It has to pass against the least-contrasting part of the background [standard]. The
++word "Coins:" takes room the number needs, and large numbers will shrink the text (P6).
++
++**Fix:**
++- Show a coin icon plus the number, on a semi-opaque dark pill. Alternatively, white text with a
++  2 px dark `UIStroke`.
++- Use `AutomaticSize = X` on the pill.
++- Abbreviate large numbers to about three significant digits ("12.5K"), using one suffix table for
++  the whole game [inference].
++
++### 17. Layout is chosen with `TouchEnabled`, and sizes don't adapt to TVs. Medium
++
++**Where:** `Hud.luau:17-18`, plus fixed pixel offsets throughout, with no root `UIScale`.
++
++**What goes wrong:** `TouchEnabled` is true on touch laptops and handhelds, so it doesn't mean
++"phone" [standard]. It's also read once at load. `PreferredInput` changes at runtime, for example
++when a PC player picks up a controller. On Xbox, at 8-10 feet, 32 px buttons and `TextScaled` text
++are too small, and key UI has to stay inside the TV-safe area [standard] (P4).
++
++**Fix:**
++- Choose the touch, gamepad, or mouse layout from `UserInputService.PreferredInput`, and
++  re-evaluate when it changes.
++- Detect TVs with `GuiService.ViewportDisplaySize == Large` (not the deprecated
++  `IsTenFootInterface`). On TVs, scale up and keep a margin of about 5% from the edges. The 5% is
++  industry habit; Roblox gives no figure [inference].
++- Author in 1080-tall units under one root `UIScale`, per the Vide skill's `references/screens.md`.
++
++### 18. Small items. Low
++
++- **Fonts:** Gotham was removed in May 2024 and replaced with Montserrat [standard]. Switch to
++  Builder Sans, the platform font, so the text looks the way you intended.
++- **Tooltip position** (`Hud.luau:123`): it's always placed by the bottom row, whichever button is
++  hovered. If the PC tooltip stays, anchor it to the hovered button.
++- **Dim backdrop** (`DailyReward.luau:75`): multiply its transparency by
++  `GuiService.PreferredTransparency` and update on change [standard].
++- **Tap outside:** the popup isn't destructive, so a tap on the dim area could close it, the same as
++  Close [inference]. Test whether kids expect this.
++- **Popup entrance:** none today. Add a 200-300 ms ease-out scale or fade in and a shorter exit,
++  with a fade-only version for reduced motion [practitioner].
++
++---
++
++## What works (keep it)
++
++- The 7-day row is a strong goal shape. Visible progress toward a reward makes people speed up
++  [study]. Keep it and make it richer (#11).
++- Claiming takes one tap, the HUD is small (coins plus three buttons), and only one toast shows at
++  a time. Keep all three while fixing the rest.
++
++## Questions for a playtest or funnel
++
++1. **Auto-open vs badge:** run an Experiment (roughly 1,000 daily users or more are needed to read
++   it [standard]) comparing the popup opening on join with a badge on the Rewards button. Measure
++   D1 and D7 retention and daily claim rate.
++2. **Can players find menus?** In a playtest with about 5 new players aged 7-12 on phones, ask them
++   to "open your rewards" and "change a setting". Note mis-taps on the rail and accidental jumps.
++3. **Xbox:** in the Controller Emulator and on hardware, can a player claim, close the popup, and
++   open each menu with the D-pad, A, and B alone, without a hint?
++4. **Funnel events:** `reward_popup_shown`, `reward_claimed`, `reward_closed_unclaimed`,
++   `menu_opened{name}`. These show whether the popup is claimed or dismissed, and which rail
++   buttons get used at all. Cut any button players don't use every session.
++5. **Streak design:** compare pause-on-miss with reset-on-miss on 7-day return rate, once the threat
++   copy is gone.

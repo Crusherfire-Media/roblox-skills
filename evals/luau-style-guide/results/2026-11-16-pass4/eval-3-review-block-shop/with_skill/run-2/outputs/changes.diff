@@ -1,0 +1,260 @@
+diff --git a/docs/review.md b/docs/review.md
+new file mode 100644
+index 0000000..c7fc89c
+--- /dev/null
++++ b/docs/review.md
+@@ -0,0 +1,254 @@
++# Review: `src/ServerScriptService/BlockShop.server.luau`
++
++Findings are ordered by how much they matter. The first four are exploits or
++data loss and should be fixed before anything is built on this script. Line
++numbers refer to the file as it is at commit `bedeaad`.
++
++This review comes from reading the code. stylua, selene, and luau-lsp were not
++run (see the end of the file).
++
++---
++
++## 1. Client arguments are trusted, and a NaN amount gives unlimited blocks
++
++**Where:** `buyRemote` handler (lines 84-103), `placeRemote` handler
++(105-125), `removeRemote` handler (127-140).
++
++**What's wrong:** The handlers annotate client arguments as `bt: string`,
++`amt: number`, `pos: Vector3`, `part: Instance`, but a client can send anything.
++The annotations make the type checker trust values it should be checking.
++
++- **NaN amount (the serious one).** `amt < 1` and `amt > MAX_PURCHASE` are both
++  false for NaN, so NaN passes the range check. `price` becomes NaN, and
++  `coins < price` is false, so the purchase goes through. `setCoins` saves
++  `coins - NaN`, and `playerStock[bt]` becomes NaN. In the place handler
++  `(NaN) < 1` is false, so that player can now place unlimited blocks. Their
++  saved coin value is also broken: either the DataStore call fails, or it
++  stores a value that passes every later `coins < price` check.
++- **Fractional amounts.** `amt = 1.5` passes, so coins and stock end up as
++  fractions.
++- **Unknown block type.** `PRICES[bt]` is `nil` for any string that isn't a
++  block, so `PRICES[bt] * amt` errors. That only crashes the handler, but any
++  client can trigger it whenever it wants.
++- **Bad position.** A non-Vector3 `pos` errors in `PlacementRules.snap`. A
++  Vector3 with NaN parts passes every check in `PlacementRules.check`, because
++  every comparison with NaN is false, and puts a block at a NaN position.
++- **Bad part.** `part` can be `nil` or not an Instance, and then `part.Parent`
++  errors.
++
++**What to do instead:** Type every argument after the player as `unknown` and
++narrow it before use, returning early when a check fails. Shape the checks so
++they reject NaN:
++
++```lua
++buyRemote.OnServerEvent:Connect(function(player: Player, blockType: unknown, amount: unknown)
++	if not BlockTypes.isBlockType(blockType) then
++		return
++	end
++	if
++		typeof(amount) ~= "number"
++		or amount ~= math.floor(amount) -- also rejects NaN
++		or amount < 1
++		or amount > MAX_PURCHASE
++	then
++		return
++	end
++	...
++```
++
++`BlockTypes.isBlockType` already exists and isn't used yet. For `pos`, check
++`typeof(pos) == "Vector3"` and that each part is finite (`x == x` and
++`math.abs(x) ~= math.huge`). For `part`, check `typeof(part) == "Instance"`
++before reading `part.Parent`. Adding `--!strict` (finding 9) makes the checker
++require these checks once the arguments are `unknown`.
++
++---
++
++## 2. Coins are read and written straight to the DataStore on every purchase
++
++**Where:** `getCoins` / `setCoins` (lines 42-48), used at lines 90 and 94.
++
++**What's wrong:**
++
++- **Double spending.** `GetAsync` yields. If two `BuyBlocks` requests arrive
++  together, both read the same balance, both pass the check, and both write
++  `coins - price`. The player pays once and gets both batches. A client can do
++  this on purpose by firing the remote twice in one frame.
++- **No error handling.** `GetAsync` and `SetAsync` throw when the DataStore is
++  down or throttled. Nothing catches the error, so the handler dies partway
++  through.
++- **Rate limits.** Every purchase costs two DataStore requests. A client
++  spamming the remote uses up the server's request budget, and saves for every
++  other player on that server start to queue or fail.
++- **Player leaves mid-request.** If the player leaves during `GetAsync`,
++  `stock[plr]` is `nil` by line 96. That errors after `SetAsync` has already
++  taken the coins.
++- **No save on shutdown.** Nothing saves in `BindToClose`. That doesn't matter
++  today, but it will once finding 3 is fixed.
++
++**What to do instead:** Load the player's data once in `PlayerAdded`, keep it
++in a server-side table, and spend from that table synchronously, so the check
++and the deduction have no yield between them. Save in `PlayerRemoving`, in
++`game:BindToClose`, and on a periodic autosave. Use `UpdateAsync` inside
++`pcall`, with a comment on which errors you expect, and retry on failure. A
++session-locking library such as ProfileStore handles all of this and also stops
++two servers from writing the same player's data. Name the functions that yield
++`loadCoinsAsync` / `saveCoinsAsync`.
++
++---
++
++## 3. Bought blocks are lost when the player leaves
++
++**Where:** `stock` (line 40), `PlayerRemoving` (lines 146-148).
++
++**What's wrong:** Coins are saved, but stock only lives in memory and is
++cleared when the player leaves. Anyone who buys blocks and leaves (or loses
++connection, or is on a server that shuts down) before placing them loses both
++the coins and the blocks.
++
++**What to do instead:** Save stock in the same record as coins, under one key,
++so that one save covers both and they can't drift apart. Fix this together
++with finding 2. The other option is to refund unplaced stock on leave, but
++saving it is simpler and matches what players expect.
++
++---
++
++## 4. Removing someone else's abandoned block gives you a free block, and the "owner left" path errors
++
++**Where:** `getOwnerName` (lines 50-57), `removeRemote` handler (lines
++127-140).
++
++**What's wrong:**
++
++- **Free blocks.** Line 139 refunds one block to whoever removed the part,
++  not to its owner. The comment on line 132 says anyone may clear a block
++  whose owner has left, so any player can walk around clearing abandoned
++  blocks and collect them as stock.
++- **The abandoned-block path is broken anyway.** When no player matches,
++  `getOwnerName` falls off its end and returns no values, not `nil`.
++  `tostring(getOwnerName(part))` then errors with "missing argument #1 to
++  'tostring'", so clearing an abandoned block throws instead of working.
++- **Names instead of UserIds.** Ownership is decided by comparing names, and
++  "owner left" is detected with the string `"nil"`. A player whose username is
++  `nil` (a legal 3-letter name) would have their blocks treated as abandoned.
++
++**What to do instead:** Compare UserIds directly and drop `getOwnerName`:
++
++```lua
++local ownerId = part:GetAttribute("OwnerId")
++local isOwner = ownerId == player.UserId
++local isAbandoned = typeof(ownerId) == "number" and Players:GetPlayerByUserId(ownerId) == nil
++if not isOwner and not isAbandoned then
++	return
++end
++
++part:Destroy()
++if isOwner then
++	-- refund only the owner
++end
++```
++
++Decide whether an abandoned block refunds no one or refunds the owner's saved
++stock. Either is fine, but the person clearing it shouldn't get it.
++
++---
++
++## 5. `stock[plr]` can be `nil`, and the type hides it
++
++**Where:** `stock` declaration (line 40), reads at lines 96, 106, 139;
++`PlayerAdded` (lines 142-144).
++
++**What's wrong:** `stock[plr]` is `nil` for a player who joined before the
++`PlayerAdded` connection was made (common in Studio play-solo), and for a
++remote that is still being handled after `PlayerRemoving` ran. Every handler
++indexes the result straight away and errors. The type `{ [Player]: {...} }`
++tells the checker the lookup always succeeds, so nothing warns about this.
++
++**What to do instead:** Type the map as `{ [Player]: { [BlockTypes.BlockType]:
++number }? }` and return early when the lookup is `nil`. After connecting
++`PlayerAdded`, loop over `Players:GetPlayers()` to set up players who are
++already in the game. With finding 2's session data in place, this map becomes
++part of that per-player record.
++
++---
++
++## 6. Players can't turn receipts off
++
++**Where:** line 99.
++
++**What's wrong:** `plr:GetAttribute("ShowReceipts") or DEFAULT_SHOW_RECEIPTS`
++replaces `false` with `true`, so a player who sets `ShowReceipts = false` still
++gets receipts. `AutoAnchor` at lines 118-121 gets this right.
++
++**What to do instead:** Use the same `== nil` default as `AutoAnchor`, and
++pull both into one small helper, for example
++`getBooleanSetting(player, name, default)`, so the two settings can't drift
++apart again.
++
++---
++
++## 7. Clients can flood the server output
++
++**Where:** `warn` at line 114, `print` at line 79.
++
++**What's wrong:** Every rejected placement warns and every placement prints.
++A client firing `PlaceBlock` in a loop fills the server log and hides real
++errors. More generally, none of the remotes are rate-limited.
++
++**What to do instead:** Drop the `warn`, or return the reason to the client
++through a remote for UI feedback. Remove the placement `print`, or put it
++behind a debug flag. Add a simple per-player rate limit (a timestamp or token
++bucket per remote) once the shop is in active use.
++
++---
++
++## 8. `placeBlock` takes five positional arguments, two of them boolean switches
++
++**Where:** `placeBlock` (lines 59-82), called at line 124.
++
++**What's wrong:** `placeBlock(plr, center, bt, autoAnchor, true)` doesn't say
++what `true` means at the call site. `log` is always `true`, the returned `Part`
++is never used, and the function mixes creating the part with logging.
++
++**What to do instead:** Remove `log` (see finding 7) and pass the rest as an
++options table, `placeBlock(player, center, blockType, { Anchored = autoAnchor })`,
++or keep `anchored` as the only extra argument. Type `blockType` as
++`BlockTypes.BlockType` so the `::` cast on line 66 goes away. Finding 1's
++validation produces that type.
++
++---
++
++## 9. Style and typing cleanup
++
++These are small, but they're cheap to fix now and harder later.
++
++- **No `--!strict`** (line 1). The Shared modules use it. Without it, the
++  `unknown` checks in finding 1 aren't enforced. Add it as the first line,
++  above the header comment.
++- **Abbreviated names**: `plr`, `amt`, `bt`, `p`, `pos` should be `player`,
++  `amount`, `blockType`, `otherPlayer` (or remove the loop, see finding 4),
++  `position`.
++- **`PRICES` is keyed by `string`** (line 14). Type it as
++  `{ [BlockTypes.BlockType]: number }` so a block type without a price is a
++  type error. Better still, move prices into `ReplicatedStorage/Shared` (for
++  example a `Price` field on each `BlockTypes.Styles` entry) so the client shop
++  UI shows the same numbers the server charges.
++- **Functions that yield are missing the `Async` suffix**: `getCoins` /
++  `setCoins` (handled by finding 2).
++- **Anonymous handlers.** Name them for when they run (`onBuyBlocks`,
++  `onPlaceBlock`, `onRemoveBlock`, `onPlayerAdded`, `onPlayerRemoving`) and
++  connect them by name. This also makes them easier to test later.
++- **`getOwnerName` has no return type and returns nothing on one path**
++  (handled by finding 4, which removes it).
++- **Remotes are created at runtime** (lines 24-34). That works, but client
++  scripts need `WaitForChild` and can race on startup. Consider defining them
++  in `default.project.json` or putting them in a `Remotes` folder so they're
++  all in one place.
++
++---
++
++## Not checked
++
++`stylua --check`, `selene`, and `luau-lsp analyze` (the commands in
++`README.md`) weren't run during this review because shell commands needed
++approval in this session. Run them before and after the fixes.

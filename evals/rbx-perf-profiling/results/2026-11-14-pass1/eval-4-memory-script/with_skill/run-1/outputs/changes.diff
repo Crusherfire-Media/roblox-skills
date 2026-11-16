@@ -1,0 +1,177 @@
+diff --git a/tools/profiling/memory.luau b/tools/profiling/memory.luau
+new file mode 100644
+index 0000000..aca542a
+--- /dev/null
++++ b/tools/profiling/memory.luau
+@@ -0,0 +1,171 @@
++--!strict
++-- Usage: lute memory.luau <file.gprx> [topN]
++-- Frames print as id/abs: id for LibMP scripts, abs for the MicroProfiler UI.
++local process = require("@lute/process")
++local LibMP = require("./LibMP")
++
++type Summary = {
++	First: number,
++	Last: number,
++	Peak: number,
++	PeakFrame: number,
++	Growth: number,
++}
++
++type CounterRow = {
++	Path: string,
++	Summary: Summary?,
++}
++
++type MeasuredRow = {
++	Path: string,
++	Summary: Summary,
++}
++
++local path = process.args[2]
++local topN = tonumber(process.args[3]) or 10
++
++local session = LibMP.Session.OpenFromFile(path)
++assert(session, "could not open the dump")
++
++local minId: number = session:GetFrameIdMin()
++local maxId: number = session:GetFrameIdMax()
++print(("frames %d..%d (%d)"):format(minId, maxId, maxId - minId + 1))
++
++local rootId: number = session:FindCounterId("/memory")
++if rootId == 0 then
++	rootId = session:FindCounterId("memory")
++end
++if rootId == 0 then
++	session:Dispose()
++	error(`no memory counter in {path}`)
++end
++
++local absIds: { [number]: number } = {}
++local function frameLabel(frameId: number): string
++	local abs = absIds[frameId]
++	if abs == nil then
++		abs = if frameId >= minId and frameId <= maxId
++			then session:FetchFrameDesc(frameId).FrameAbsoluteId
++			else -1
++		absIds[frameId] = abs
++	end
++	return ("%d/%d"):format(frameId, abs)
++end
++
++-- The dump stores no unit for counters, so values are scaled without naming one
++local function fmt(value: number): string
++	local magnitude = math.abs(value)
++	if magnitude >= 1e9 then
++		return ("%.2fG"):format(value / 1e9)
++	elseif magnitude >= 1e6 then
++		return ("%.2fM"):format(value / 1e6)
++	elseif magnitude >= 1e3 then
++		return ("%.1fK"):format(value / 1e3)
++	end
++	return ("%.0f"):format(value)
++end
++
++local function fmtSigned(value: number): string
++	return (if value >= 0 then "+" else "-") .. fmt(math.abs(value))
++end
++
++local function summarize(counterId: number): Summary?
++	local samples: { { FrameId: number, Value: number } } = session:FetchCounterSamples(counterId)
++	if #samples == 0 then
++		return nil
++	end
++	table.sort(samples, function(a, b)
++		return a.FrameId < b.FrameId
++	end)
++	local peak = samples[1]
++	for _, sample in samples do
++		if sample.Value > peak.Value then
++			peak = sample
++		end
++	end
++	local first, last = samples[1], samples[#samples]
++	return {
++		First = first.Value,
++		Last = last.Value,
++		Peak = peak.Value,
++		PeakFrame = peak.FrameId,
++		Growth = last.Value - first.Value,
++	}
++end
++
++local paths: { [number]: string } = {}
++local subsystems: { CounterRow } = {}
++local leaves: { MeasuredRow } = {}
++
++local iter = session:CreateCounterIterator()
++local state = iter:GetState()
++iter:Configure({ RootCounterIds = { rootId } })
++while iter:Step() do
++	local id: number = state:CounterId()
++	local name: string = session:FetchCounterDesc(id).CounterName
++	local parentPath = paths[state:ParentId()]
++	paths[id] = if parentPath and id ~= rootId then `{parentPath}/{name}` else name
++
++	local level: number = state:RelativeLevel()
++	if level >= 1 then
++		local summary = summarize(id)
++		if level == 1 then
++			table.insert(subsystems, { Path = paths[id], Summary = summary })
++		end
++		if summary and state:IsLeaf() then
++			table.insert(leaves, { Path = paths[id], Summary = summary })
++		end
++	end
++end
++iter:Dispose()
++
++local function growthOf(row: CounterRow): number
++	return if row.Summary then row.Summary.Growth else -math.huge
++end
++
++local ROW = "  %-32s %10s %10s %10s %10s  %s"
++
++table.sort(subsystems, function(a, b)
++	return growthOf(a) > growthOf(b)
++end)
++print(`\nmemory subsystems under {paths[rootId]}, by growth (first -> last):`)
++print(ROW:format("subsystem", "first", "last", "peak", "growth", "peak frame id/abs"))
++for _, row in subsystems do
++	local summary = row.Summary
++	if summary then
++		print(
++			ROW:format(
++				row.Path,
++				fmt(summary.First),
++				fmt(summary.Last),
++				fmt(summary.Peak),
++				fmtSigned(summary.Growth),
++				frameLabel(summary.PeakFrame)
++			)
++		)
++	else
++		print(("  %-32s (no samples, container only)"):format(row.Path))
++	end
++end
++
++table.sort(leaves, function(a, b)
++	return a.Summary.Growth > b.Summary.Growth
++end)
++print(`\ntop {topN} counters under {paths[rootId]} by growth:`)
++for i = 1, math.min(topN, #leaves) do
++	local row = leaves[i]
++	local summary = row.Summary
++	print(
++		("  %10s  %s  (%s -> %s, peak %s at frame %s)"):format(
++			fmtSigned(summary.Growth),
++			row.Path,
++			fmt(summary.First),
++			fmt(summary.Last),
++			fmt(summary.Peak),
++			frameLabel(summary.PeakFrame)
++		)
++	)
++end
++
++session:Dispose()

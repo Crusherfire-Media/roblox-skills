@@ -1,0 +1,76 @@
+{
+	"id": 4,
+	"name": "settings-menu",
+	"skill": "game-ui-design",
+	"prompt": "Add a settings menu to the block game, built with Vide. It needs music volume and sound effects volume (GameAudio in StarterPlayerScripts has the getters and setters) and a button that deletes every block the player has built (BlockPlacer.clearMyBlocks; the server can't undo it). Saving settings between sessions comes later.\n\nSome players told us our menus are too see-through to read over the world and that sliding animations make them feel sick, so make sure the menu works for them too. It opens from a button on screen and has to work on phones, PC, and with a controller.\n\nPut the UI under src/StarterPlayer/StarterPlayerScripts/UI/ and start it from Main.client.luau.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacement.server.luau",
+			"to": "src/ServerScriptService/BlockPlacement.server.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacer.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+		},
+		{
+			"from": "fixtures/settings-menu/GameAudio.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/GameAudio.luau"
+		},
+		{
+			"from": "fixtures/settings-menu/Main.client.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "(?<!function )GameAudio\\.set(Music|Effects)Volume\\(",
+			"text": "The menu calls GameAudio's volume setters"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "(?<!function )BlockPlacer\\.clearMyBlocks\\(",
+			"text": "The menu calls BlockPlacer.clearMyBlocks"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "PreferredTransparency",
+			"text": "The menu reads GuiService.PreferredTransparency"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "ReducedMotionEnabled",
+			"text": "The menu reads GuiService.ReducedMotionEnabled"
+		}
+	],
+	"rubric": [
+		"Separate music and effects volume controls that call GameAudio and work with touch, mouse, and a controller: for example step buttons, or a slider that also moves with the D-pad or thumbstick while selected. A control that only works by dragging with a mouse or finger fails this.",
+		"The delete action is confirmed safely: the confirmation names what will be lost and says it can't be undone, its buttons name their outcomes (for example 'Delete my blocks' and 'Keep them') instead of Yes/No, the safe option gets the first gamepad selection, and B/Back or tapping outside the dialog cancels, never confirms.",
+		"Honors the player's Roblox settings: panel backgrounds follow GuiService.PreferredTransparency and the menu's motion follows GuiService.ReducedMotionEnabled (no sliding, or zero-time tweens, when it is on), both read live. A game-owned toggle on top is fine as long as the Roblox settings are respected.",
+		"Controller navigation: opening the menu selects a default control, focus stays in the menu while it is open and inside the dialog while the dialog is open, and B closes the dialog first, then the menu. Buttons fire on Activated.",
+		"Touch and placement: buttons and controls are about 44 px or larger at the 1080p reference size, and the open button sits clear of the bottom-left thumbstick and bottom-right jump corners and of Roblox's top bar.",
+		"Feedback: each change shows at once (the volume value or fill updates, pressed controls change state), clearing shows a result message, and any open or close animation is short (roughly 300 ms or less in, shorter out).",
+		"Correct and in scope: works as described, the menu survives a respawn, placement and the server keep working, and luau-lsp, selene, and StyLua pass on the attempt's own files. Supporting files such as a preview story or specs count neither for nor against."
+	],
+	"judge_facts": [
+		"Roblox engine API in this sandbox's type definitions (globalTypes.d.luau), all real and current: UserInputService.PreferredInput (Enum.PreferredInput: KeyboardAndMouse, Gamepad, Touch, MicroGamepad); GuiService.ViewportDisplaySize (Enum.DisplaySize: Small, Medium, Large); GuiService.TopbarInset (Rect); GuiService.PreferredTextSize; GuiService.PreferredTransparency (number); GuiService.ReducedMotionEnabled (boolean); ScreenGui.ScreenInsets (Enum.ScreenInsets: CoreUISafeInsets, DeviceSafeInsets, TopbarSafeInsets, None)."
+	],
+	"timeout_minutes": 25
+}

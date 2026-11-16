@@ -1,0 +1,75 @@
+{
+  "id": 3,
+  "name": "fix-frame-report",
+  "skill": "rbx-perf-profiling",
+  "prompt": "Our debug panel's \"Frame report\" button runs FrameReport.run() (src/ReplicatedStorage/Shared/Dev/FrameReport.luau) during playtests, and it's causing problems:\n\n- After someone presses it, the FPS overlay (FpsOverlay.luau, same folder) starts throwing errors every frame and stops updating.\n- The on-screen MicroProfiler (Ctrl+F6) freezes after a report and stays frozen until we rejoin.\n- One time the overlay survived a report, and from then on its \"last second\" numbers covered about four seconds.\n- Physics time for some frames comes out longer than the whole frame, and the frame before such a frame often shows less physics than it should.\n- The GPU column is nonsense: sometimes negative, sometimes many times the frame time.\n\nPlease fix these, plus anything else in FrameReport.luau that uses LibMP wrong. Keep the report's fields and what they mean the same, and leave FpsOverlay working as it is.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/LibMPLoader.luau",
+      "to": "src/ReplicatedStorage/Shared/Dev/LibMPLoader.luau"
+    },
+    {
+      "from": "fixtures/fix-frame-report/FpsOverlay.luau",
+      "to": "src/ReplicatedStorage/Shared/Dev/FpsOverlay.luau"
+    },
+    {
+      "from": "fixtures/fix-frame-report/FrameReport.luau",
+      "to": "src/ReplicatedStorage/Shared/Dev/FrameReport.luau"
+    },
+    {
+      "from": "fixtures/fix-frame-report/Main.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "file_not_matches",
+      "path": "src/ReplicatedStorage/Shared/Dev/FrameReport.luau",
+      "pattern": "FpsOverlay\\.getSession\\(\\)\\s*or",
+      "text": "The report no longer borrows (and then disposes) the overlay's live session"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ReplicatedStorage/Shared/Dev/FrameReport.luau",
+      "pattern": "\\(frame\\.TickEndGpu - frame\\.TickStartGpu\\) \\* global\\.TickToMsCpu",
+      "text": "GPU ticks are no longer converted with the CPU tick rate"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ReplicatedStorage/Shared/Dev/FrameReport.luau",
+      "pattern": "local group = session:FetchGroupDesc\\(timer:GroupId\\(\\)\\)\\s*return `\\{timer:TimerName\\(\\)\\}",
+      "text": "Scope names no longer read a Get*** view after another LibMP call invalidated it"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ReplicatedStorage/Shared/Dev/FrameReport.luau",
+      "pattern": "local ms = \\(state:Timestamp\\(\\) - element:EnterTimestamp\\(\\)\\)",
+      "text": "Scope time is no longer measured from the unclamped enter time in the exit frame"
+    }
+  ],
+  "rubric": [
+    "Stops breaking the overlay: the report opens and disposes its own session (from a snapshot via CaptureToBufferSync and OpenFromBuffer, or CaptureToSlotSync and OpenFromSlot, or its own live session read while capture is briefly paused) and never disposes the overlay's session.",
+    "Leaves the shared profiler as it found it: capture is not left paused (either the report snapshots instead of pausing, or it resumes capture on every path, including errors), and the frame limit the overlay relies on is not changed, or is set back to FpsOverlay.FrameLimit afterwards (LibMP cannot read back the current limit).",
+    "Per-frame physics and scope times count only the part of each scope inside that frame: scopes that cross a frame boundary are split across the frames they overlap (for example EmitThreadFrameEnd with EnterTimestampFrameLocal, and the frame start for an exit whose enter came before the range), so no frame gets more scope time than it lasted.",
+    "Physics time counts nested Physics-group scopes once: only the outermost Physics scope on the stack is added (or self times are summed), since scope times are inclusive and physicsStepped-style scopes contain other Physics scopes.",
+    "GPU time uses GPU ticks with TickToMsGpu and copes with frames whose GPU span is invalid (end before start, or far wider than the frame): it skips or flags them, or measures GPU time from the GPU thread's scopes instead.",
+    "Also fixes the unreported misuses: scopeName no longer reads a GetTimerDesc view after FetchGroupDesc has invalidated it (it uses FetchTimerDesc or reads the fields first), the GetCounterSamples array is disposed (or FetchLastCounterSample is used instead), and FindGroupId (and other Find*** calls) run once outside the loop instead of on every scope exit.",
+    "Keeps the report's fields and their meaning, leaves FpsOverlay working unchanged, keeps changes to FrameReport.luau (plus anything strictly needed), and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files count neither for nor against."
+  ],
+  "judge_facts": [
+    "LibMP (Roblox/libmp upstream api-reference.md; LibMP is not in the sandbox): LibMP.Control drives the engine's single MicroProfiler, shared by every script in the session. Control:SetFrameLimit(n) (max 256) sets the rolling frame limit for all readers and stays in effect; changing it clears counter history. Control:EnableCapture(false) pauses capture, freezing the on-screen MicroProfiler too, until EnableCapture(true). Control has no method that reads back the current frame limit or capture state.",
+    "LibMP (upstream api-reference.md and guide): Control:CaptureToBufferSync() returns a Luau buffer snapshot of the live frames, opened with Session.OpenFromBuffer(buf); Control:CaptureToSlotSync(slot) saves one to slot 1-4, opened with Session.OpenFromSlot(slot). Snapshot sessions are frozen. Session.OpenFromLiveData() follows the live profiler and resyncs while capture runs; the upstream guide recommends pausing capture (then resuming it) for in-game analysis done within one frame, and a snapshot otherwise. Session.OpenFrom*** returns nil on failure.",
+    "LibMP (upstream api-reference.md, Memory Management): every Session, LogIterator, and CounterIterator, and every array returned by a Get*** method (GetCounterSamples, GetTimerIds, ...), must be released with :Dispose(); undisposed ones leak memory inside LibMP's WASM instance (LibMP.GetMemUsed() keeps rising). Fetch*** methods (FetchCounterSamples, FetchLastCounterSample, FetchFrameDesc, ...) return plain Luau copies that need no disposal. A disposed Session can no longer be used by any code holding it.",
+    "LibMP (upstream api-reference.md, Fetch vs Get): Get*** methods such as GetTimerDesc, GetGroupDesc, and GetFrameDesc return a view read through getter methods (view:TimerName()); a view is invalidated by any later Get*** or Fetch*** call on the same session and then reads garbage. Fetch*** methods return deep-copied tables with plain fields (desc.TimerName). The iterator state from iter:GetState() is the exception: it stays valid for the iterator's life.",
+    "LibMP (upstream api-reference.md and guide): FetchFrameDesc(id) has FrameId, FrameAbsoluteId, TickStartCpu, TickEndCpu, TickStartGpu, TickEndGpu, IsIncomplete. FetchGlobalDesc() gives TickToMsCpu and TickToMsGpu. CPU and GPU timestamps have different origins and scales and must not be mixed. A frame's GPU start and end can be too broad or even end before they start; continuous scope sections on the GPU thread (session:GetThreadIdGpu()) give the reliable GPU time.",
+    "LibMP log iterator (upstream api-reference.md and guide): iter:Configure{ThreadIds, TimerIds, GroupIds, SkipEvents, SkipGpuThreads, EmitThreadFrameEnd}; iter:RewindTo(min, max); state = iter:GetState(). A scope instance can span frame boundaries, and its exit entry appears only in the frame where it ends. With EmitThreadFrameEnd = true, state:IsThreadFrameEnd() fires when a thread's log ends in a frame; for each element still on its stack (iter:GetCurrentThreadStackElement(level), 0-based), element:EnterTimestampFrameLocal() is its enter time clamped to that frame's start.",
+    "LibMP log iterator (upstream guide): on an exit (state:IsExit()), iter:GetCurrentThreadStackElement(state:ThreadStackDepth()) is the scope just closed; element:EnterTimestamp() is its original enter time, not clamped to the frame, while EnterTimestampFrameLocal() is clamped. state:ThreadStackIsUnderflowed() means the enter happened before the iterated range (the frame's start is then the in-frame start). Starting one frame early warms up the stack. Scope times are inclusive: a scope's time includes the scopes nested in it, which may be in the same group.",
+    "LibMP (upstream api-reference.md): Find*** methods (FindThreadId, FindGroupId, FindTimerIds, FindCounterId) take name masks, return 0 when nothing matches, and are slow, so the guide says to call them once and store the result. FetchTimerDesc(id) has TimerId, TimerName, GroupId, IsUserTimer; FetchGroupDesc(id) has GroupId, GroupName, IsGpu. CounterSampleArray (from GetCounterSamples) has FetchLastSample() and must be disposed; FetchLastCounterSample(id) returns the last sample as a plain table."
+  ],
+  "timeout_minutes": 25
+}

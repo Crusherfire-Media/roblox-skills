@@ -1,0 +1,126 @@
+diff --git a/src/ReplicatedStorage/Shared/StarterKit.model.json b/src/ReplicatedStorage/Shared/StarterKit.model.json
+new file mode 100644
+index 0000000..ffb152d
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/StarterKit.model.json
+@@ -0,0 +1,10 @@
++{
++  "className": "Configuration",
++  "attributes": {
++    "Brick": 20,
++    "Dirt": 20,
++    "Grass": 10,
++    "Window": 0,
++    "Wood": 10
++  }
++}
+diff --git a/src/ServerScriptService/StarterKit.server.luau b/src/ServerScriptService/StarterKit.server.luau
+new file mode 100644
+index 0000000..aba8591
+--- /dev/null
++++ b/src/ServerScriptService/StarterKit.server.luau
+@@ -0,0 +1,35 @@
++--!strict
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++-- Searched recursively so designers can move the Configuration anywhere
++-- under ReplicatedStorage.
++local starterKit = ReplicatedStorage:FindFirstChild("StarterKit", true)
++assert(
++	starterKit and starterKit:IsA("Configuration"),
++	"ReplicatedStorage needs a Configuration named StarterKit"
++)
++
++local function getStarterCount(blockName: string): number
++	local count = starterKit:GetAttribute(blockName)
++	if typeof(count) ~= "number" then
++		warn(`StarterKit has no number attribute {blockName}; giving 0`)
++		return 0
++	end
++	return math.max(0, math.floor(count))
++end
++
++local function onPlayerAdded(player: Player)
++	-- Read at join time so counts tuned during a playtest apply to the next
++	-- player who joins.
++	for _, blockType in BlockTypes.List do
++		player:SetAttribute(blockType.Name, getStarterCount(blockType.Name))
++	end
++end
++
++Players.PlayerAdded:Connect(onPlayerAdded)
++for _, player in Players:GetPlayers() do
++	task.spawn(onPlayerAdded, player)
++end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/StarterKit.client.luau b/src/StarterPlayer/StarterPlayerScripts/StarterKit.client.luau
+new file mode 100644
+index 0000000..4e422b7
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/StarterKit.client.luau
+@@ -0,0 +1,63 @@
++--!strict
++local Players = game:GetService("Players")
++local StarterGui = game:GetService("StarterGui")
++
++local BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++
++local NOTIFICATION_TITLE = "Starter kit"
++local NOTIFICATION_DURATION = 8 -- seconds
++local SET_CORE_RETRY_DELAY = 0.5 -- seconds
++local SET_CORE_MAX_ATTEMPTS = 20
++
++local localPlayer = Players.LocalPlayer
++
++local function hasAllCounts(): boolean
++	for _, blockType in BlockTypes.List do
++		if typeof(localPlayer:GetAttribute(blockType.Name)) ~= "number" then
++			return false
++		end
++	end
++	return true
++end
++
++local function waitForCountsAsync()
++	while not hasAllCounts() do
++		localPlayer.AttributeChanged:Wait()
++	end
++end
++
++local function describeKit(): string
++	local lines = {}
++	for _, blockType in BlockTypes.List do
++		local count = localPlayer:GetAttribute(blockType.Name) :: number
++		if count > 0 then
++			table.insert(lines, `{count} {blockType.DisplayName}`)
++		end
++	end
++	if #lines == 0 then
++		return "No blocks this time."
++	end
++	return table.concat(lines, ", ")
++end
++
++local function sendNotificationAsync(text: string)
++	for _ = 1, SET_CORE_MAX_ATTEMPTS do
++		-- SetCore errors until the CoreScripts register SendNotification,
++		-- which can happen after this script starts.
++		local success = pcall(function()
++			StarterGui:SetCore("SendNotification", {
++				Title = NOTIFICATION_TITLE,
++				Text = text,
++				Duration = NOTIFICATION_DURATION,
++			})
++		end)
++		if success then
++			return
++		end
++		task.wait(SET_CORE_RETRY_DELAY)
++	end
++	warn("Could not show the starter kit notification")
++end
++
++waitForCountsAsync()
++sendNotificationAsync(describeKit())

@@ -1,0 +1,74 @@
+{
+	"id": 1,
+	"name": "block-inventory",
+	"skill": "luau-style-guide",
+	"prompt": "Players are getting a limited supply of each block type instead of unlimited blocks. Write the server module that keeps track of it at src/ServerScriptService/BlockInventory.luau. The block types are in src/ReplicatedStorage/Shared/BlockTypes.luau. Don't wire it into placement yet; the placement script will require it next.\n\n- When a player joins, load their counts from the DataStore named \"BlockInventory\" under the key \"player_<UserId>\" (a table of block type name to count). New players, and players whose load fails, start with 20 of each type.\n- Placement will take one block of a type each time a player places one and give one back when they remove one. Running out is normal gameplay, so placement needs to know when taking a block failed and why, so it can tell the player.\n- A player can hold at most 99 of each type. The daily reward and admin commands will also give blocks, and those are allowed to go past 99.\n- A way to read how many of a type a player has, for the UI later.\n- When a player leaves, drop their counts. Saving comes in a later change.\n\nPlacement requests arrive over a remote, so expect calls for players whose counts haven't loaded yet or who just left.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "file_exists",
+			"path": "src/ServerScriptService/BlockInventory.luau",
+			"text": "The module is at src/ServerScriptService/BlockInventory.luau"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/BlockInventory.luau",
+			"pattern": "GetDataStore\\(\\s*\"BlockInventory\"",
+			"text": "It uses the BlockInventory DataStore"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/BlockInventory.luau",
+			"pattern": "\\bpcall\\(",
+			"text": "It calls pcall (the DataStore load can throw)"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/BlockInventory.luau",
+			"pattern": "^--!strict",
+			"flags": "",
+			"text": "Convention: --!strict is the first line"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/BlockInventory.luau",
+			"pattern": "^const \\w+ = game:GetService\\(",
+			"text": "Convention: services are bound with const"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/ServerScriptService/BlockInventory.luau",
+			"pattern": "^local Module = \\{\\}[\\s\\S]*^return Module\\s*$",
+			"text": "Convention: the returned table is named Module"
+		},
+		{
+			"type": "file_not_matches",
+			"path": "src/ServerScriptService/BlockInventory.luau",
+			"pattern": "\\brequire\\(\\s*[^\"'\\s]",
+			"text": "Convention: every require uses a string path"
+		}
+	],
+	"rubric": [
+		"Implements the rules: loads from the BlockInventory DataStore under player_<UserId>, starts new players and failed loads at 20 of each type, a take never goes below 0, giving a block back and ordinary gives stop at 99, the daily reward and admin path can go past 99, a count can be read, and a player's counts are dropped when they leave.",
+		"Handles timing: calls for a player whose counts haven't loaded or who already left return a failure or a safe default instead of erroring; a player who leaves while their load is still in flight doesn't get counts stored after they left; if the module listens for PlayerAdded itself, players already in the server are loaded too; requiring the module never yields.",
+		"Reports expected failures to the caller: running out of a type, or a player not loaded yet, comes back as a return value that tells placement what went wrong, not as a thrown error or a silent no-op. Errors, if any, are kept for caller mistakes such as a non-positive amount. Load failures from the DataStore are caught (pcall) and fall back to the starting counts.",
+		"Types catch mistakes: every public function has typed parameters and a typed return; block types use the closed BlockType set from BlockTypes, so a misspelled type is a type error; the per-player table's value type is optional (for example { [Player]: Counts? }), so a lookup for a player who isn't there has to be handled instead of being typed as always present.",
+		"Call sites read clearly: going past the 99 cap is asked for through a named option, a separate function, or a named reason, not a bare positional true/false; names are spelled out; the function that yields on the DataStore is recognizable as yielding from its name (as with Roblox's own ...Async APIs).",
+		"Stays in scope and is ready to merge: one module at src/ServerScriptService/BlockInventory.luau, no remotes, placement wiring, saving, or UI, BlockTypes reused rather than duplicated, and luau-lsp, selene, and StyLua pass. Supporting files such as specs or stories count neither for nor against."
+	],
+	"judge_facts": [
+		"luau-lsp 1.70.1, the project's type checker (verified by running luau-lsp analyze in this project, not a package fact): the loop variable of a generic for over a { BlockType } array, such as BlockTypes.Order, is typed as string, so code that uses it as a BlockType needs a cast such as blockType :: BlockType. Indexing the array (Order[i]) keeps the BlockType type. A cast there is a workaround for the checker, not a mistake."
+	],
+	"notes": "Write branch: typing (closed BlockType set, { [Player]: Counts? }), failure reporting (return values for out of stock and not loaded), readable call sites (cap override as an options table or separate function), Async naming for the DataStore load, and timing (player leaves during the load, players already in the server). Convention checks cover --!strict, const services, local Module / return Module, and string requires; the rubric leaves them out. With-skill trials also load game-architecture (new module with a require); the prompt pins the path so a system folder layout is out of scope.",
+	"timeout_minutes": 20
+}

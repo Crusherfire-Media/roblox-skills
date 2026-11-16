@@ -1,0 +1,336 @@
+diff --git a/docs/figma/export-plan.md b/docs/figma/export-plan.md
+new file mode 100644
+index 0000000..e57c808
+--- /dev/null
++++ b/docs/figma/export-plan.md
+@@ -0,0 +1,330 @@
++# HUD Kit export plan
++
++Source: Figma page **HUD Kit** (node `30:1`), exported to `design/figma/hud-kit.json`
++(file version `2208815566419836712`, last modified 2026-11-02). Every visual on the page is listed
++below. Each one is either **Native** (we build it from Roblox UI objects, so the artist exports
++nothing) or **Image** (the artist exports it from Figma and uploads it).
++
++## Ground rules for every image
++
++- **Scale.** The page is a 1920 x 1080 frame, so Figma pixels map 1:1 to our 1080p reference size.
++  `Screen.luau` grows the UI with one `UIScale` up to **2x** on a 4K screen and never shrinks it.
++  Every image is therefore exported at **2x** its Figma size. All sizes in this document are
++  the final PNG sizes at 2x unless marked "@1x".
++- **Format.** PNG with a transparent background. Turn off the page/frame background fill before
++  exporting.
++- **Max side 1024 px.** Roblox shrinks larger uploads. Only the logo goes over this limit, so it is
++  split into two images (see below).
++- **Alpha bleed.** Roblox sets fully transparent pixels to black on upload, which shows up as a
++  dark fringe around soft edges. After exporting from Figma, run every PNG through an alpha-bleed /
++  dilate step (an alpha-bleed tool, or Photoshop "Solidify"). This matters most for the glow, the
++  logo, the dot tile, and all white icons.
++- **One-color art is exported in white** (`#FFFFFF`, fully opaque) and colored in game with
++  `ImageColor3` / `ImageTransparency`. The designer's colors are listed in this plan as tint values.
++  Multicolor art keeps its colors.
++- **Sprite sheets.** Build each sheet in Figma as a frame at @1x on a regular grid, then export the
++  frame at 2x. Each cell has a 4 px transparent margin (2 px @1x) around the art so neighboring
++  pieces don't bleed into each other when scaled. The sprite rect covers the art only, not the
++  margin: `ImageRectOffset = (col * cell + 4, row * cell + 4)`, `ImageRectSize = art size`.
++  Columns and rows start at 0.
++- **Common ImageLabel properties** (apply everywhere unless a row says otherwise):
++  `BackgroundTransparency = 1`, `Image = "rbxassetid://<id>"`, `Size` = the @1x display size in
++  offsets (the `UIScale` does the rest), `ImageColor3 = 255,255,255` for multicolor art.
++- **Upload** under the group/account that owns the experience. Record every asset id, sheet
++  size, cell size and sprite rect in one asset module when code starts. The id columns
++  below are there to fill in as uploads finish.
++- Keep the exported PNGs next to the design data in `design/figma/exports/` (new folder) so a
++  re-export starts from the same files.
++
++## Summary
++
++| Visual (node) | Destination | Delivered as |
++|---|---|---|
++| Icons / Currency and Stats, 12 icons (`40:127`) | Image | Sheet `HudIcons`, 288 x 216 |
++| Prompts / Keyboard, 10 keys (`40:129`) | **Native** | none |
++| Prompts / Xbox, 8 buttons (`40:131`) | Image | Sheet `PromptsXbox`, 352 x 176 |
++| Prompts / PlayStation, 8 buttons (`40:133`) | Image | Sheet `PromptsPlayStation`, 352 x 176 |
++| Prompts / Touch, 4 gestures (`40:135`) | Image | Sheet `PromptsTouch`, 208 x 208 |
++| Panel / Ornate (`40:137`) | Image | 9-slice `PanelOrnate`, 224 x 224 |
++| Slot / Empty (`40:139`) | Image | 9-slice `SlotEmpty`, 192 x 192 |
++| Card / Ribbon shape (`40:141`) | Image | 9-slice `CardRibbon`, 96 x 96 |
++| Card / Ribbon "NEW" label (`40:140`) | **Native** | none |
++| Background / Dot Grid (`40:142`) | Image | Tile `DotGridTile`, 48 x 48 |
++| Badge / Legendary (`40:145`) | Image | Single `BadgeLegendary`, 128 x 128 |
++| Logo (`40:148`) | Image | Two halves `LogoLeft` + `LogoRight`, 704 x 512 each |
++| Item Portraits, 120+ (`40:150`) | Image | One image each, 256 x 256 |
++| Profile Card (`40:153`) | **Native** | none (avatar is the player's headshot thumbnail) |
++| Glass Card (`40:155`) | **Native** | none (blur approximated, see gaps) |
++| Progress Bar (`40:158`) | **Native** | none |
++| Glow (`40:159`) | Image | Single `Glow`, 360 x 360 |
++| `Note` text layers, page background | Not built | Designer notes and canvas only |
++
++That makes 4 sprite sheets, 3 nine-slice images, 1 tile, 4 single images (badge, glow, two logo halves)
++and the item portraits.
++
++---
++
++## Sprite sheets
++
++The pieces are grouped by **when they show on screen**. A player only ever sees one device's prompts,
++so each controller/touch set gets its own sheet. Keyboard keys don't need a sheet because they're native.
++
++### Sheet `HudIcons`: currency and stat icons
++
++Designer note: *"One-color HUD icons, all shown together in the top bar and on stat cards. Tinted
++per state in game."* All 12 show together, so they go on one sheet. They're one-color, so export them
++in white.
++
++- Art: 32 x 32 @1x → **64 x 64** px per icon.
++- Cell: 36 x 36 @1x → **72 x 72** px (4 px margin on every side).
++- Grid: 4 columns x 3 rows → **sheet 288 x 216** px (Figma frame 144 x 108 @1x).
++
++| Piece | Node | Col, Row | ImageRectOffset | ImageRectSize | Default tint `ImageColor3` (from design) |
++|---|---|---|---|---|---|
++| Icon/Coin | `40:0` | 0, 0 | 4, 4 | 64, 64 | 255, 200, 60 |
++| Icon/Gem | `40:1` | 1, 0 | 76, 4 | 64, 64 | 77, 212, 245 |
++| Icon/Heart | `40:2` | 2, 0 | 148, 4 | 64, 64 | 240, 69, 87 |
++| Icon/Star | `40:3` | 3, 0 | 220, 4 | 64, 64 | 255, 217, 77 |
++| Icon/Bolt | `40:4` | 0, 1 | 4, 76 | 64, 64 | 247, 230, 66 |
++| Icon/Shield | `40:5` | 1, 1 | 76, 76 | 64, 64 | 107, 153, 245 |
++| Icon/Clock | `40:6` | 2, 1 | 148, 76 | 64, 64 | 217, 222, 235 |
++| Icon/Trophy | `40:7` | 3, 1 | 220, 76 | 64, 64 | 245, 184, 56 |
++| Icon/Key | `40:8` | 0, 2 | 4, 148 | 64, 64 | 235, 196, 87 |
++| Icon/Hammer | `40:9` | 1, 2 | 76, 148 | 64, 64 | 191, 196, 209 |
++| Icon/Pickaxe | `40:10` | 2, 2 | 148, 148 | 64, 64 | 168, 181, 199 |
++| Icon/Flag | `40:11` | 3, 2 | 220, 148 | 64, 64 | 87, 209, 118 |
++
++ImageLabel: `Size = UDim2.fromOffset(32, 32)`, `ScaleType = Fit`, `ImageRectOffset` / `ImageRectSize`
++from the table, `ImageColor3` = the tint for the current state (the table gives the default
++colors).
++
++### Sheet `PromptsXbox`: Xbox controller buttons
++
++Designer note: *"Shown only while the player uses an Xbox controller."* Each button is a colored
++circle with a white glyph. That's multicolor art, so export each whole button (Base + Glyph) in its
++own colors.
++
++- Art: 40 x 40 @1x → **80 x 80** px.
++- Cell: 44 x 44 @1x → **88 x 88** px.
++- Grid: 4 x 2 → **sheet 352 x 176** px (Figma frame 176 x 88 @1x).
++
++| Piece | Node | Col, Row | ImageRectOffset | ImageRectSize |
++|---|---|---|---|---|
++| Prompt/Xbox/A | `40:34` | 0, 0 | 4, 4 | 80, 80 |
++| Prompt/Xbox/B | `40:37` | 1, 0 | 92, 4 | 80, 80 |
++| Prompt/Xbox/X | `40:40` | 2, 0 | 180, 4 | 80, 80 |
++| Prompt/Xbox/Y | `40:43` | 3, 0 | 268, 4 | 80, 80 |
++| Prompt/Xbox/LB | `40:46` | 0, 1 | 4, 92 | 80, 80 |
++| Prompt/Xbox/RB | `40:49` | 1, 1 | 92, 92 | 80, 80 |
++| Prompt/Xbox/LT | `40:52` | 2, 1 | 180, 92 | 80, 80 |
++| Prompt/Xbox/RT | `40:55` | 3, 1 | 268, 92 | 80, 80 |
++
++ImageLabel: `Size = UDim2.fromOffset(40, 40)`, `ScaleType = Fit`, rect from the table,
++`ImageColor3 = 255,255,255`.
++
++### Sheet `PromptsPlayStation`: PlayStation controller buttons
++
++Designer note: *"Shown only while the player uses a PlayStation controller."* These are dark circles with
++white glyphs. Export the whole button the same way as the Xbox set, with the same layout.
++
++- Art **80 x 80**, cell **88 x 88**, grid 4 x 2, **sheet 352 x 176** px.
++
++| Piece | Node | Col, Row | ImageRectOffset | ImageRectSize |
++|---|---|---|---|---|
++| Prompt/PlayStation/Cross | `40:58` | 0, 0 | 4, 4 | 80, 80 |
++| Prompt/PlayStation/Circle | `40:61` | 1, 0 | 92, 4 | 80, 80 |
++| Prompt/PlayStation/Square | `40:64` | 2, 0 | 180, 4 | 80, 80 |
++| Prompt/PlayStation/Triangle | `40:67` | 3, 0 | 268, 4 | 80, 80 |
++| Prompt/PlayStation/L1 | `40:70` | 0, 1 | 4, 92 | 80, 80 |
++| Prompt/PlayStation/R1 | `40:73` | 1, 1 | 92, 92 | 80, 80 |
++| Prompt/PlayStation/L2 | `40:76` | 2, 1 | 180, 92 | 80, 80 |
++| Prompt/PlayStation/R2 | `40:79` | 3, 1 | 268, 92 | 80, 80 |
++
++ImageLabel: same as Xbox.
++
++### Sheet `PromptsTouch`: touch gestures
++
++Designer note: *"Shown only on touch screens."* These are white one-color glyphs, so export them in white.
++
++- Art: 48 x 48 @1x → **96 x 96** px.
++- Cell: 52 x 52 @1x → **104 x 104** px.
++- Grid: 2 x 2 → **sheet 208 x 208** px (Figma frame 104 x 104 @1x).
++
++| Piece | Node | Col, Row | ImageRectOffset | ImageRectSize |
++|---|---|---|---|---|
++| Prompt/Touch/Tap | `40:80` | 0, 0 | 4, 4 | 96, 96 |
++| Prompt/Touch/Hold | `40:81` | 1, 0 | 108, 4 | 96, 96 |
++| Prompt/Touch/Drag | `40:82` | 0, 1 | 4, 108 | 96, 96 |
++| Prompt/Touch/Pinch | `40:83` | 1, 1 | 108, 108 | 96, 96 |
++
++ImageLabel: `Size = UDim2.fromOffset(48, 48)`, `ScaleType = Fit`, rect from the table,
++`ImageColor3 = 255,255,255` (white as designed; can be tinted later).
++
++---
++
++## 9-slice images (one image each)
++
++A 9-slice image is stretched by Roblox. Its corners keep their size, its edges stretch along one axis, and
++its middle stretches both ways. `SliceCenter` is the rectangle (in PNG pixels) that stretches.
++Since the art is exported at 2x, `SliceScale = 0.5` draws the corners at their Figma size at 1080p, and
++the `UIScale` takes them back up to full resolution on 4K.
++
++These have to be **single uploads, not sheet pieces**, because `ScaleType = Slice` works on the
++whole image.
++
++### `PanelOrnate`: dialog background (`40:137`)
++
++Designer note: *"Dialog background. Stretches to fit its content, from 240 x 160 up to 960 x 640.
++Corner flourishes must not stretch."*
++
++- Build a **112 x 112 @1x** export frame. Use the panel's fill (`#211B14`) and its 4 px inside gold stroke
++  (`#D9AC51`), and put the four 48 x 48 corner flourishes (`40:84`–`40:87`) in the four corners,
++  oriented exactly as in the design. That leaves a 16 px plain strip between the corners.
++- Export → **224 x 224** px, multicolor.
++- ImageLabel: `ScaleType = Slice`, `SliceCenter = Rect.new(96, 96, 128, 128)`, `SliceScale = 0.5`,
++  `ImageColor3 = 255,255,255`. Size the label to fit its content, kept between 240 x 160 and 960 x 640.
++  The smallest size is well over the 96 x 96 that the two corners need together, so the corners never overlap.
++
++### `SlotEmpty`: empty inventory slot (`40:139`)
++
++Designer note: *"Empty inventory slot. Slot size is a player setting from 80 to 128."* Roblox
++can't draw dashed strokes (2 px, dashes 8 / gaps 6, radius 12), so this is an image.
++
++- Export the slot frame at its design size **96 x 96 @1x** with the stroke in **opaque white**
++  (the design's 30 % opacity is set in game). Lay out the dashes symmetrically, so each corner
++  arc is the same and each side starts and ends the same way.
++- Export → **192 x 192** px.
++- ImageLabel: `ScaleType = Slice`, `SliceCenter = Rect.new(24, 24, 168, 168)` (the 12 px corners
++  stay fixed), `SliceScale = 0.5`, `ImageColor3 = 255,255,255`, `ImageTransparency = 0.7`,
++  `Size` = the player's slot size (80–128 square).
++- Why 9-slice: the corner radius (12) and stroke width (2) stay exactly as designed at every slot
++  size. The cost is that the dashes stretch along the sides (see Gaps).
++
++### `CardRibbon`: ribbon shape (`40:141`)
++
++The corners have different radii: Figma `[16, 0, 16, 0]` means top-left 16, top-right 0,
++bottom-right 16, bottom-left 0. `UICorner` can only round all four corners the same, so the shape is baked.
++
++- Export a **48 x 48 @1x** rectangle with those corner radii, filled **white**.
++- Export → **96 x 96** px.
++- ImageLabel: `Size = UDim2.fromOffset(240, 56)` (or sized to content), `ScaleType = Slice`,
++  `SliceCenter = Rect.new(32, 32, 64, 64)`, `SliceScale = 0.5`, `ImageColor3 = 222, 67, 82`
++  (design fill `#DE4352`). Exporting it in white means every ribbon color uses the same image.
++- The **"NEW" label is native**: a TextLabel child, Builder Sans ExtraBold 22, white, centered.
++
++---
++
++## Tile
++
++### `DotGridTile`: menu background pattern (`40:142`)
++
++Designer note: *"The dot grid repeats behind every full-screen menu, at any screen size."* The dots are
++2 x 2, spaced 24 px apart, and the whole layer is at 5 % opacity.
++
++- Build a **24 x 24 @1x** frame with no fill and one 2 x 2 white dot at x 11, y 11 (centered,
++  which matches the sample's 11 px offset). Set the layer opacity to 100 % for the export.
++  The tile's edges must line up, so the dots repeat exactly 24 px apart.
++- Export → **48 x 48** px, white. Use alpha bleed (a white dot on black-filled transparency gives a
++  gray fringe).
++- ImageLabel: `Size = UDim2.fromScale(1, 1)` behind the menu, `ScaleType = Tile`,
++  `TileSize = UDim2.fromOffset(24, 24)` (in **offsets**, so dot spacing stays the same at every screen size),
++  `ImageColor3 = 255,255,255`, `ImageTransparency = 0.95`.
++
++---
++
++## Single images
++
++### `BadgeLegendary` (`40:145`)
++
++The badge is a circle with a **diamond gradient** (`#FFD94D` → `#D9590D`) and a white star.
++Roblox's `UIGradient` has no diamond mode, so the badge is baked whole.
++
++- Export the 64 x 64 frame → **128 x 128** px, multicolor.
++- ImageLabel: `Size = UDim2.fromOffset(64, 64)`, `ScaleType = Fit`, `ImageColor3 = 255,255,255`.
++- It's the only rarity badge on the page, so it gets its own image. If more rarities are designed,
++  put them all on one `RarityBadges` sheet with 136 px cells (128 art + 4 px margins).
++
++### `Logo` (`40:148`)
++
++The logo is the wordmark with a 6 px outside stroke plus the block mark, all under an orange drop-shadow glow
++(radius 24, `#FF9A1A` at 80 %). A glow that follows the shape is baked into the image.
++
++- Export bounds must include the stroke and glow, not just the group's 640 x 240 box. Wrap the
++  group in a **704 x 256 @1x** frame placed at x 1208, y 456 on the page (the art plus glow
++  covers about x 1210–1910, y 456–710). Check in the export preview that the glow isn't clipped
++  on any side.
++- At 2x that's 1408 x 512, which is over the 1024 limit. **Split it down the middle** into two
++  frames of 352 x 256 @1x (page x 1208–1560 and 1560–1912):
++  - `LogoLeft` → **704 x 512** px
++  - `LogoRight` → **704 x 512** px
++- Draw them as two ImageLabels in a 704 x 256 container: left at `Position = (0, 0)`, right at
++  `Position = UDim2.fromOffset(352, 0)`, each `Size = UDim2.fromOffset(352, 256)`,
++  `ScaleType = Stretch`, `ImageColor3 = 255,255,255`. Positions must be whole pixels so no
++  seam shows.
++- Alpha bleed is required here: the soft orange glow will turn dark at the edge without it.
++
++### `Glow` (`40:159`)
++
++The glow is a 120 x 120 ellipse, `#FFC83C` at 60 %, with a 30 px layer blur. Roblox has no layer blur, so it's baked.
++
++- Build a **180 x 180 @1x** frame (the blur spreads about 30 px past the ellipse on each side)
++  with the ellipse centered, filled **opaque white**. Check that the blur isn't clipped.
++- Export → **360 x 360** px, white, alpha-bled.
++- ImageLabel: `Size = UDim2.fromOffset(180, 180)`, centered on the spot where the ellipse sits
++  (`AnchorPoint = (0.5, 0.5)`), `ScaleType = Stretch`, `ImageColor3 = 255, 200, 60`,
++  `ImageTransparency = 0.4`.
++
++### Item portraits (`40:150`)
++
++Designer note: *"120 item portraits in total, and more are added every update. The item detail
++pane shows one at a time at 128 x 128."* They show one at a time out of a big, growing set, so each
++portrait is **its own image**. A sheet would load 119 portraits nobody is looking at and would need
++re-uploading every update.
++
++- Export each portrait **square, without the rounded corners**. The 12 px rounding is done in game.
++  Size **256 x 256** px (128 @1x x 2).
++- File name `ItemPortrait_<Name>.png` (e.g. `ItemPortrait_Torch.png`). The page shows Torch
++  (`40:120`), Ladder (`40:121`), Door (`40:122`), Fence (`40:123`), Chest (`40:124`) and Bed
++  (`40:125`). All 120 and any future portraits follow the same spec.
++- ImageLabel: `Size = UDim2.fromOffset(128, 128)`, `ScaleType = Crop` (matches Figma's FILL),
++  `ImageColor3 = 255,255,255`, plus a child `UICorner` with `CornerRadius = UDim.new(0, 12)`.
++
++---
++
++## Native visuals (nothing to export)
++
++| Visual | How it's built |
++|---|---|
++| **Prompts / Keyboard** (`40:13`–`40:31`): B, I, E, Q, 1, 2, 3, Esc, Tab, Shift | One keycap component taking the key name as text. Frame `BackgroundColor3 = 235,237,242`, `UICorner` 6, `UIStroke` 2 px `#999DAB` with `BorderStrokePosition = Inner`, TextLabel Builder Sans Bold 18 `#1F2129` centered. Height 40; width 40 for one character and 56 for words (better: automatic width with 8 px side padding, so a long key name fits). Native means any key we bind later just works, with no new art. |
++| **Card / Ribbon label** | TextLabel (see `CardRibbon`). |
++| **Profile Card** (`40:153`) | Frame 360 x 190, `BackgroundColor3 = 33,37,54`, `UICorner` 16. **Avatar**: the photo is a placeholder (*"use the player's headshot"*). Use an ImageLabel 150 x 150 with `Image = "rbxthumb://type=AvatarHeadShot&id=<userId>&w=420&h=420"` (420 is the next valid size above the 300 px it shows at on 4K), plus `UICorner` `UDim.new(0.5, 0)` for the circle. Don't export the placeholder. |
++| **Glass Card** (`40:155`) | Frame 320 x 200, `UICorner` 16, `UIStroke` 1 px white `Transparency = 0.8` Inner, title TextLabel Builder Sans Bold 22 white. Roblox can't blur what's behind a frame, so the 20 px background blur becomes a darker, more opaque fill. Starting value: `BackgroundColor3 = 40,43,56`, `BackgroundTransparency = 0.2` (designer to approve). |
++| **Progress Bar** (`40:158`) | Track frame 300 x 12, white, `BackgroundTransparency = 0.88`, `UICorner` 6. Fill frame child, `BackgroundColor3 = 87,209,118`, `UICorner` 6, `Size = UDim2.new(progress, 0, 1, 0)`. The fill width changes with quest progress, so it can't be an image. |
++| **Note** text layers | Designer notes and not part of the UI. They're used only as input to this plan. |
++| Page background (`#12141D`) | The Figma canvas. Not exported. Use it as the full-screen menu backdrop color under the dot tile if the designer intended that. |
++
++---
++
++## Gaps for the designer to sign off
++
++1. **Slot dashes stretch.** With the 9-slice, the dash and gap lengths along each side scale from
++   about 0.8x (80 px slot) to 1.4x (128 px slot) of the design's 8 / 6. The radius and the 2 px stroke
++   stay exact. If that isn't acceptable, we export one image per allowed slot size instead.
++2. **Glass Card blur** is approximated with an opaque fill (see above). Roblox has no per-frame
++   background blur.
++3. **Logo is two images** to stay sharp at 4K under Roblox's 1024 px limit. The alternative is one
++   1024 x 372 image, which looks slightly soft on 4K.
++4. **Xbox LB/RB/LT/RT** are drawn as circles in the design. Real Xbox bumpers and triggers are
++   pill/trigger shapes, so the designer may want to confirm before export.
++
++## Artist checklist
++
++1. Export each sheet, 9-slice, tile and single image at the sizes above (2x, PNG, transparent).
++2. Alpha-bleed every PNG.
++3. Upload under the experience's owner and send back the asset ids. Fill them into the
++   tables above (or hand them to whoever writes the asset module).
++4. After upload, check in game at 1080p and at 4K (UIScale 2): each image loads, nothing looks blurry
++   at 4K, there's no dark fringe, every sprite rect lands on its piece, the dot tile keeps 24 px spacing,
++   and the panel and slot corners don't stretch.
++5. Check the four sheets on a real phone too. Some phones/consoles have been reported drawing sprite
++   rects on the wrong piece while desktop drew them correctly.

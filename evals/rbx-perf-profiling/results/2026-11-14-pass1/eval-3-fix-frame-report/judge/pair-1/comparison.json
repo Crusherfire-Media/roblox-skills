@@ -1,0 +1,125 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts fix the overlay breakage and the frozen MicroProfiler the same way: they take their own snapshot and never pause capture. They also both fix the invalid-view, disposal and Find*** misuses.\n\nB fixes the two hardest reported bugs properly:\n- **Scopes crossing frame boundaries:** it splits them with EmitThreadFrameEnd and EnterTimestampFrameLocal, uses the frame start for underflowed exits, and iterates one frame early to warm up the stacks.\n- **GPU column:** it measures GPU time from the GPU thread's top-level scopes.\n\nA falls short on both:\n- **Boundary splitting:** its back-distribution heuristic drops underflowed scopes and scopes still open at the last frame.\n- **GPU column:** it only clamps negative GPU spans, so spans many times the frame time still get through.\n- **Formatting:** it also fails StyLua.\n\nB's downsides are real but smaller:\n- It changes the frame limit for a while, though it restores it.\n- It changes the report's type slightly (GpuMs becomes optional and a FrameAbsoluteId field is added).\n- run() now yields for about 2 seconds.\n\nOn balance B fixes more of the reported bugs correctly, so B wins.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Stops breaking the overlay",
+          "score": 5,
+          "note": "run() uses CaptureToBufferSync + OpenFromBuffer and disposes only its own session after a pcall'd buildReport. It no longer calls FpsOverlay.getSession()."
+        },
+        {
+          "criterion": "Leaves the shared profiler as it found it",
+          "score": 5,
+          "note": "It never calls EnableCapture or SetFrameLimit, so capture and the overlay's frame limit stay untouched."
+        },
+        {
+          "criterion": "Per-frame scope times split at frame boundaries",
+          "score": 3,
+          "note": "distribute() gives the exit frame exitTs - enterLocalTs and spreads the rest back over earlier frames. However, it skips underflowed exits entirely, has no warm-up frame, and drops scopes still open at the last frame."
+        },
+        {
+          "criterion": "Physics counts nested scopes once",
+          "score": 5,
+          "note": "The ancestor loop sets insidePhysics, and only the outermost Physics scope is distributed into physicsTicks."
+        },
+        {
+          "criterion": "GPU time correct and robust",
+          "score": 3,
+          "note": "It converts with tickToMsGpu and clamps negative spans to 0. It does not catch GPU spans far wider than the frame and does not use GPU thread scopes."
+        },
+        {
+          "criterion": "Fixes unreported misuses",
+          "score": 5,
+          "note": "It uses FetchTimerDesc/FetchGroupDesc, takes the heap value from FetchCounterSamples (a plain copy), and calls FindGroupId/FindThreadId once with cached groups."
+        },
+        {
+          "criterion": "Keeps fields, scope, and checks",
+          "score": 4,
+          "note": "The report fields are unchanged and FpsOverlay is untouched, but StyLua fails on the long `if ... then remaining else` line at 106."
+        }
+      ],
+      "overall_score": 7
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Stops breaking the overlay",
+          "score": 5,
+          "note": "It captures with CaptureToBufferSync, opens with OpenFromBuffer, and disposes its own session in run(). It never disposes the overlay's session."
+        },
+        {
+          "criterion": "Leaves the shared profiler as it found it",
+          "score": 4,
+          "note": "It never pauses capture. It raises the limit to 256 and restores FpsOverlay.FrameLimit after a pcall. If the overlay isn't running, it leaves the profiler enabled with limit 256, and each limit change clears the overlay's counter history."
+        },
+        {
+          "criterion": "Per-frame scope times split at frame boundaries",
+          "score": 5,
+          "note": "It uses EmitThreadFrameEnd with EnterTimestampFrameLocal for open scopes, EnterTimestampFrameLocal on exits, the frame start for underflowed exits, and RewindTo(firstId - 1) as a warm-up."
+        },
+        {
+          "criterion": "Physics counts nested scopes once",
+          "score": 5,
+          "note": "hasPhysicsAncestor on exits and the isInsidePhysics tracking at frame ends add only the outermost Physics scope."
+        },
+        {
+          "criterion": "GPU time correct and robust",
+          "score": 5,
+          "note": "It sums the GPU thread's top-level scopes (depth 0) with tickToMsGpu, including the frame-end and underflow parts, instead of using the frame's GPU ticks."
+        },
+        {
+          "criterion": "Fixes unreported misuses",
+          "score": 5,
+          "note": "scopeName uses FetchTimerDesc, the heap value comes from FetchLastCounterSample, and the Find*** calls happen once before the loop, with a cached isPhysics."
+        },
+        {
+          "criterion": "Keeps fields, scope, and checks",
+          "score": 3,
+          "note": "All checks pass, but GpuMs becomes optional (nil without a GPU thread), it adds a FrameAbsoluteId field, and run() now yields for about 2 seconds. That changes the report's shape and behaviour slightly."
+        }
+      ],
+      "overall_score": 8
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7,
+      "strengths": [
+        "Clean snapshot approach that never touches the overlay's session or profiler state",
+        "Nested Physics scopes are counted once, and a recursing timer is counted once",
+        "All the invalid-view, disposal and Find*** misuses are fixed"
+      ],
+      "weaknesses": [
+        "GPU handling only clamps negative spans; overly wide spans still get through",
+        "Underflowed exits and scopes still open at the end are dropped, so boundary splitting is incomplete",
+        "StyLua formatting failure"
+      ]
+    },
+    "B": {
+      "score": 8,
+      "strengths": [
+        "Correct frame-boundary splitting using the documented EmitThreadFrameEnd and frame-local enter times",
+        "GPU time measured from GPU thread scopes, as the guide recommends",
+        "Frame-limit restore is protected by pcall, plus a guard against reentry"
+      ],
+      "weaknesses": [
+        "Changes the shared frame limit temporarily, which clears the overlay's counter history",
+        "Changes the report type (optional GpuMs, new field) and makes run() yield for about 2 seconds",
+        "Leaves the profiler enabled at limit 256 when the overlay isn't running"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 7,
+    "with_skill": 8
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

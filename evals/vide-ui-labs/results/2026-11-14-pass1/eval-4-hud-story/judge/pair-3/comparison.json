@@ -1,0 +1,113 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts split out a pure view, write a valid story, keep the in-game effects in the game-only wrapper, and pass all checks. The difference is criterion 3: Attempt A leaves `ReplicatedStorage:WaitForChild(\\\"BlockPlaced\\\")` inside the component body, while Attempt B moves it to a spawned thread with proper cleanup. B's weaknesses are smaller: the Number control's drag sensitivity is 0, and it uses newer syntax.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story with live controls",
+          "score": 4,
+          "note": "`UILabs.CreateVideStory({vide = Vide, controls = ...})` with Choose over `BlockTypes.List` names, `String(\"Builder\")`, and `Number(0, 0, nil, 1, true, 1)` passed straight into the view; there's no long-name preset, but the string control lets you type one."
+        },
+        {
+          "criterion": "Data via props; view free of game state",
+          "score": 5,
+          "note": "BuildModeHudView takes `playerName`/`selectedBlock`/`placedCount` sources and touches no game state; BuildModeHud wires BlockPlacer and LocalPlayer in."
+        },
+        {
+          "criterion": "No yield inside a Vide scope",
+          "score": 1,
+          "note": "The `ReplicatedStorage:WaitForChild(\"BlockPlaced\")` line is untouched and still runs inside buildModeHud's component body."
+        },
+        {
+          "criterion": "Effects gated off the story, still undone in game",
+          "score": 5,
+          "note": "Blur, FOV change, and sound stay in the game-only BuildModeHud wrapper with their existing cleanups; the story renders only the view."
+        },
+        {
+          "criterion": "Game behaviour unchanged",
+          "score": 5,
+          "note": "The wrapper keeps the same effects, cleanups, and data and just delegates the visuals to BuildModeHudView."
+        },
+        {
+          "criterion": "Story safety, typing, checks",
+          "score": 4,
+          "note": "The story never yields or requires BlockPlacer, and all checks pass; the leftover in-scope yield in the game wrapper is a code-quality miss."
+        }
+      ],
+      "overall_score": 6
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Valid UI Labs Vide story with live controls",
+          "score": 4,
+          "note": "Returns `{vide = Vide, controls = CONTROLS, story = story}` with Ordered Choose / string / Number controls feeding the view; `Number(0,0,999999,1)` gets a drag sensitivity of 0 (typing still works), and there's no long-name preset beyond a comment."
+        },
+        {
+          "criterion": "Data via props; view free of game state",
+          "score": 5,
+          "note": "BuildModeHudView takes `PlayerName`/`BlockTypeName`/`PlacedCount` as a value or a source, read with `Vide.read`, and touches no game state."
+        },
+        {
+          "criterion": "No yield inside a Vide scope",
+          "score": 5,
+          "note": "The WaitForChild now runs in a `task.spawn` thread registered with `cleanup`, and the connection is disconnected through a separate cleanup."
+        },
+        {
+          "criterion": "Effects gated off the story, still undone in game",
+          "score": 5,
+          "note": "Blur, FOV, and sound stay only in the game wrapper with `cleanup(blur)` and the FOV restore intact."
+        },
+        {
+          "criterion": "Game behaviour unchanged",
+          "score": 5,
+          "note": "Same effects, name, selection, and count updates; the count connection is still made, just asynchronously."
+        },
+        {
+          "criterion": "Story safety, typing, checks",
+          "score": 4,
+          "note": "`--!strict`, a typed StoryProps, and all checks pass; it uses newer `const` and `@game` require syntax, and the Number dragger sensitivity is 0."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 6,
+      "strengths": [
+        "Clean view/wrapper split with a typed Props table",
+        "Idiomatic CreateVideStory usage, and the Number control has a usable drag sensitivity",
+        "Game behaviour is preserved exactly"
+      ],
+      "weaknesses": [
+        "Leaves the WaitForChild yield inside the Vide scope, so a rubric requirement is unmet",
+        "No easy long-name preset"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Correctly moves the remote wait out of the Vide scope with proper cleanup",
+        "Flexible props (a value or a source) via Vide.read",
+        "Strict typing throughout and ordered controls"
+      ],
+      "weaknesses": [
+        "Number control's drag sensitivity is 0 because it relies on the default",
+        "Newer syntax (const, @game requires) depends on the toolchain"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 6,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

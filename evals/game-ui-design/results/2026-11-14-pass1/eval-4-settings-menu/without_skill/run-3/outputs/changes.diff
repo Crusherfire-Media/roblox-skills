@@ -1,0 +1,1072 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index d6fde35..b8e4284 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,8 +1,11 @@
+ local Players = game:GetService("Players")
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local UI = require(script.Parent.UI)
+ 
+ local localPlayer = Players.LocalPlayer
+ print(`client started for {localPlayer.Name}`)
+ 
++-- Mount the UI first: BlockPlacer.start() yields until the server's remotes exist.
++UI.start()
+ BlockPlacer.start()
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Button.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Button.luau
+new file mode 100644
+index 0000000..252c171
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Button.luau
+@@ -0,0 +1,126 @@
++--[[
++	A text button sized for touch. It lightens instantly when hovered or selected with a
++	controller; there is no animation.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local UserInputService = game:GetService("UserInputService")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++local Theme = require(script.Parent.Theme)
++
++local create = Vide.create
++local source = Vide.source
++
++export type Kind = "default" | "danger"
++
++export type Props = {
++	Text: string | () -> string,
++	Activated: () -> (),
++	Kind: Kind?,
++	Name: string?,
++	Size: UDim2?,
++	Position: UDim2?,
++	AnchorPoint: Vector2?,
++	LayoutOrder: number?,
++	Visible: (boolean | () -> boolean)?,
++	-- Frees a locked mouse while the button is visible.
++	Modal: boolean?,
++	TextSize: number?,
++	AutomaticSize: Enum.AutomaticSize?,
++	-- Shows the controller button glyph (Xbox or PlayStation, as the player's controller uses)
++	-- next to the text while ShowHint is true.
++	GamepadHint: Enum.KeyCode?,
++	ShowHint: (() -> boolean)?,
++	-- Extra children or Vide actions.
++	Children: { any }?,
++}
++
++local STYLES = {
++	default = { Background = Theme.Surface, Hover = Theme.SurfaceHover },
++	danger = { Background = Theme.Danger, Hover = Theme.DangerHover },
++}
++
++local function HintedContent(props: Props, hint: Enum.KeyCode): { any }
++	local textSize = props.TextSize or Theme.TextSize
++	return {
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			HorizontalAlignment = Enum.HorizontalAlignment.Center,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++			Padding = UDim.new(0, 8),
++		}),
++		create("ImageLabel")({
++			Name = "Hint",
++			LayoutOrder = 1,
++			BackgroundTransparency = 1,
++			Size = UDim2.fromOffset(28, 28),
++			Image = UserInputService:GetImageForKeyCode(hint),
++			Visible = props.ShowHint or false,
++		}),
++		create("TextLabel")({
++			Name = "Label",
++			LayoutOrder = 2,
++			BackgroundTransparency = 1,
++			AutomaticSize = Enum.AutomaticSize.X,
++			Size = UDim2.fromScale(0, 1),
++			Font = Theme.FontBold,
++			TextSize = textSize,
++			TextColor3 = Theme.Text,
++			Text = props.Text,
++		}),
++	}
++end
++
++local function Button(props: Props): TextButton
++	local style = STYLES[props.Kind or "default"]
++	local highlighted = source(false)
++	local hint = props.GamepadHint
++
++	return create("TextButton")({
++		Name = props.Name or "Button",
++		Text = if hint then "" else props.Text,
++		AutomaticSize = props.AutomaticSize or Enum.AutomaticSize.None,
++		Font = Theme.FontBold,
++		TextSize = props.TextSize or Theme.TextSize,
++		TextColor3 = Theme.Text,
++		TextWrapped = true,
++		AutoButtonColor = false,
++		Selectable = true,
++		Modal = props.Modal or false,
++		Size = props.Size or UDim2.new(1, 0, 0, Theme.MinTouchSize),
++		Position = props.Position,
++		AnchorPoint = props.AnchorPoint,
++		LayoutOrder = props.LayoutOrder or 0,
++		Visible = if props.Visible == nil then true else props.Visible,
++		BackgroundColor3 = function()
++			return if highlighted() then style.Hover else style.Background
++		end,
++
++		MouseEnter = function()
++			highlighted(true)
++		end,
++		MouseLeave = function()
++			highlighted(false)
++		end,
++		SelectionGained = function()
++			highlighted(true)
++		end,
++		SelectionLost = function()
++			highlighted(false)
++		end,
++		Activated = function()
++			props.Activated()
++		end,
++
++		create("UICorner")({ CornerRadius = Theme.CornerRadius }),
++		create("UIPadding")({
++			PaddingLeft = UDim.new(0, 12),
++			PaddingRight = UDim.new(0, 12),
++		}),
++		if hint then HintedContent(props, hint) else nil,
++		props.Children,
++	}) :: TextButton
++end
++
++return Button
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/ClearBlocksSetting.luau b/src/StarterPlayer/StarterPlayerScripts/UI/ClearBlocksSetting.luau
+new file mode 100644
+index 0000000..bf2c721
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/ClearBlocksSetting.luau
+@@ -0,0 +1,181 @@
++--[[
++	The "delete all my blocks" control. Deleting can't be undone, so the first press only asks for
++	confirmation; Cancel is the default choice and is where controller selection lands.
++]]
++
++local GuiService = game:GetService("GuiService")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++local Button = require(script.Parent.Button)
++local Theme = require(script.Parent.Theme)
++
++local create = Vide.create
++local source = Vide.source
++local effect = Vide.effect
++local untrack = Vide.untrack
++
++export type Props = {
++	LayoutOrder: number?,
++	-- The menu's open state; closing the menu backs out of the confirmation.
++	IsOpen: () -> boolean,
++	UsingGamepad: () -> boolean,
++	ClearBlocks: () -> (),
++}
++
++local function ClearBlocksSetting(props: Props): Frame
++	local confirming = source(false)
++	local status = source("")
++
++	local deleteButton: GuiObject
++	local cancelButton: GuiObject
++
++	local function selectForGamepad(target: GuiObject)
++		if not props.UsingGamepad() then
++			return
++		end
++		-- Wait for the visibility change to apply before moving selection.
++		task.defer(function()
++			if target.Visible and target:IsDescendantOf(game) then
++				GuiService.SelectedObject = target
++			end
++		end)
++	end
++
++	effect(function()
++		if not props.IsOpen() then
++			untrack(function()
++				confirming(false)
++				status("")
++			end)
++		end
++	end)
++
++	deleteButton = Button({
++		Name = "DeleteAllBlocks",
++		Kind = "danger",
++		Text = "Delete all my blocks",
++		LayoutOrder = 3,
++		Visible = function()
++			return not confirming()
++		end,
++		Activated = function()
++			status("")
++			confirming(true)
++			selectForGamepad(cancelButton)
++		end,
++	})
++
++	cancelButton = Button({
++		Name = "Cancel",
++		Text = "Cancel",
++		Size = UDim2.new(0.5, -Theme.Gap / 2, 0, Theme.MinTouchSize),
++		Position = UDim2.fromScale(0, 0),
++		Activated = function()
++			confirming(false)
++			selectForGamepad(deleteButton)
++		end,
++	})
++
++	local confirmButton = Button({
++		Name = "ConfirmDelete",
++		Kind = "danger",
++		Text = "Delete",
++		Size = UDim2.new(0.5, -Theme.Gap / 2, 0, Theme.MinTouchSize),
++		AnchorPoint = Vector2.new(1, 0),
++		Position = UDim2.fromScale(1, 0),
++		Activated = function()
++			props.ClearBlocks()
++			confirming(false)
++			status("Your blocks were deleted.")
++			selectForGamepad(deleteButton)
++		end,
++	})
++
++	local function wrappedLabel(name: string, layoutOrder: number, overrides: { [any]: any })
++		local base = {
++			Name = name,
++			LayoutOrder = layoutOrder,
++			BackgroundTransparency = 1,
++			Size = UDim2.fromScale(1, 0),
++			AutomaticSize = Enum.AutomaticSize.Y,
++			Font = Theme.Font,
++			TextSize = Theme.SmallTextSize,
++			TextColor3 = Theme.TextMuted,
++			TextWrapped = true,
++			TextXAlignment = Enum.TextXAlignment.Left,
++		}
++		for key, value in overrides do
++			base[key] = value
++		end
++		return create("TextLabel")(base)
++	end
++
++	return create("Frame")({
++		Name = "ClearBlocks",
++		BackgroundTransparency = 1,
++		Size = UDim2.fromScale(1, 0),
++		AutomaticSize = Enum.AutomaticSize.Y,
++		LayoutOrder = props.LayoutOrder or 0,
++
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Vertical,
++			Padding = UDim.new(0, 8),
++		}),
++
++		wrappedLabel("Heading", 1, {
++			Font = Theme.FontMedium,
++			TextSize = Theme.TextSize,
++			TextColor3 = Theme.Text,
++			Text = "Your blocks",
++		}),
++
++		wrappedLabel("Description", 2, {
++			Text = "Removes every block you have built in this server. This can't be undone.",
++		}),
++
++		deleteButton,
++
++		create("Frame")({
++			Name = "Confirm",
++			BackgroundTransparency = 1,
++			Size = UDim2.fromScale(1, 0),
++			AutomaticSize = Enum.AutomaticSize.Y,
++			LayoutOrder = 4,
++			Visible = confirming,
++
++			create("UIListLayout")({
++				FillDirection = Enum.FillDirection.Vertical,
++				Padding = UDim.new(0, 8),
++			}),
++
++			wrappedLabel("Question", 1, {
++				Font = Theme.FontBold,
++				TextSize = Theme.TextSize,
++				TextColor3 = Theme.Text,
++				Text = "Delete every block you built? You can't get them back.",
++			}),
++
++			create("Frame")({
++				Name = "Choices",
++				BackgroundTransparency = 1,
++				Size = UDim2.new(1, 0, 0, Theme.MinTouchSize),
++				LayoutOrder = 2,
++
++				cancelButton,
++				confirmButton,
++			}),
++		}),
++
++		wrappedLabel("Status", 5, {
++			TextColor3 = Theme.Success,
++			Font = Theme.FontMedium,
++			Text = status,
++			Visible = function()
++				return status() ~= ""
++			end,
++		}),
++	}) :: Frame
++end
++
++return ClearBlocksSetting
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/InputMode.luau b/src/StarterPlayer/StarterPlayerScripts/UI/InputMode.luau
+new file mode 100644
+index 0000000..63dbcf1
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/InputMode.luau
+@@ -0,0 +1,45 @@
++--[[
++	Tracks whether the player is currently using a controller, so menus can show controller hints
++	and move gamepad selection when they open. Call usingGamepad() inside a Vide scope.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local UserInputService = game:GetService("UserInputService")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++
++local GAMEPADS = {
++	[Enum.UserInputType.Gamepad1] = true,
++	[Enum.UserInputType.Gamepad2] = true,
++	[Enum.UserInputType.Gamepad3] = true,
++	[Enum.UserInputType.Gamepad4] = true,
++	[Enum.UserInputType.Gamepad5] = true,
++	[Enum.UserInputType.Gamepad6] = true,
++	[Enum.UserInputType.Gamepad7] = true,
++	[Enum.UserInputType.Gamepad8] = true,
++}
++
++local InputMode = {}
++
++function InputMode.isGamepad(inputType: Enum.UserInputType): boolean
++	return GAMEPADS[inputType] == true
++end
++
++--[[
++	Returns a source that is true while the last input came from a controller.
++]]
++function InputMode.usingGamepad(): Vide.Source<boolean>
++	local isGamepad = Vide.source(InputMode.isGamepad(UserInputService:GetLastInputType()))
++
++	Vide.cleanup(UserInputService.LastInputTypeChanged:Connect(function(inputType)
++		-- Ignore inputs that say nothing about the device, such as focus changes.
++		if inputType == Enum.UserInputType.Focus or inputType == Enum.UserInputType.None then
++			return
++		end
++		isGamepad(InputMode.isGamepad(inputType))
++	end))
++
++	return isGamepad
++end
++
++return InputMode
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/SettingsMenu.luau b/src/StarterPlayer/StarterPlayerScripts/UI/SettingsMenu.luau
+new file mode 100644
+index 0000000..8b06c3e
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/SettingsMenu.luau
+@@ -0,0 +1,370 @@
++--[[
++	The settings menu and the on-screen button that opens it.
++
++	Readability and comfort: the panel is fully opaque with large, high-contrast text, the world
++	behind it is dimmed, and it appears and disappears instantly with no sliding or fading.
++
++	Input:
++	- Mouse and touch: the Settings button opens it; Close or tapping outside closes it.
++	- Controller: Y (triangle) opens and closes it, B closes it. Selection moves into the menu on
++	  open, stays inside it while open, and is released on close so the character can move again.
++	While the menu is open, clicks and taps place no blocks, and a locked mouse is freed.
++]]
++
++local ContextActionService = game:GetService("ContextActionService")
++local GuiService = game:GetService("GuiService")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++local Button = require(script.Parent.Button)
++local ClearBlocksSetting = require(script.Parent.ClearBlocksSetting)
++local InputMode = require(script.Parent.InputMode)
++local Theme = require(script.Parent.Theme)
++local VolumeSetting = require(script.Parent.VolumeSetting)
++
++local create = Vide.create
++local source = Vide.source
++local effect = Vide.effect
++local cleanup = Vide.cleanup
++local untrack = Vide.untrack
++local changed = Vide.changed
++
++local TOGGLE_ACTION = "ToggleSettingsMenu"
++local CLOSE_ACTION = "CloseSettingsMenu"
++local ACTION_PRIORITY = Enum.ContextActionPriority.High.Value
++local OPEN_KEY = Enum.KeyCode.ButtonY
++local CLOSE_KEY = Enum.KeyCode.ButtonB
++
++local PANEL_MAX_WIDTH = 460
++local SCREEN_MARGIN = 12
++local HEADER_HEIGHT = Theme.MinTouchSize + Theme.Padding * 2
++
++export type Audio = {
++	getMusicVolume: () -> number,
++	setMusicVolume: (number) -> (),
++	getEffectsVolume: () -> number,
++	setEffectsVolume: (number) -> (),
++}
++
++export type Placer = {
++	isEnabled: () -> boolean,
++	setEnabled: (boolean) -> (),
++	clearMyBlocks: () -> (),
++}
++
++export type Props = {
++	GameAudio: Audio,
++	BlockPlacer: Placer,
++}
++
++local function SettingsMenu(props: Props): { ScreenGui }
++	local audio = props.GameAudio
++	local placer = props.BlockPlacer
++
++	local isOpen = source(false)
++	local usingGamepad = InputMode.usingGamepad()
++	local screenSize = source(Vector2.zero)
++	local contentHeight = source(0)
++
++	local musicVolume = source(audio.getMusicVolume())
++	local effectsVolume = source(audio.getEffectsVolume())
++
++	local panel: Frame? = nil
++	local firstControl: GuiObject? = nil
++
++	local function setOpen(open: boolean)
++		isOpen(open)
++	end
++
++	local function onToggleAction(_: string, state: Enum.UserInputState): Enum.ContextActionResult
++		if state == Enum.UserInputState.Begin then
++			setOpen(not isOpen())
++		end
++		return Enum.ContextActionResult.Sink
++	end
++
++	local function onCloseAction(_: string, state: Enum.UserInputState): Enum.ContextActionResult
++		if state == Enum.UserInputState.Begin then
++			setOpen(false)
++		end
++		return Enum.ContextActionResult.Sink
++	end
++
++	ContextActionService:BindActionAtPriority(
++		TOGGLE_ACTION,
++		onToggleAction,
++		false,
++		ACTION_PRIORITY,
++		OPEN_KEY
++	)
++	cleanup(function()
++		ContextActionService:UnbindAction(TOGGLE_ACTION)
++	end)
++
++	-- B only closes the menu while it is open, so it keeps its usual meaning otherwise.
++	effect(function()
++		if isOpen() then
++			ContextActionService:BindActionAtPriority(
++				CLOSE_ACTION,
++				onCloseAction,
++				false,
++				ACTION_PRIORITY,
++				CLOSE_KEY
++			)
++			cleanup(function()
++				ContextActionService:UnbindAction(CLOSE_ACTION)
++			end)
++		end
++	end)
++
++	-- Give a controller player a selected control whenever the menu is open, including when they
++	-- pick up the controller after opening it with the mouse or a tap.
++	effect(function()
++		if isOpen() and usingGamepad() then
++			task.defer(function()
++				if isOpen() and firstControl and GuiService.SelectedObject == nil then
++					GuiService.SelectedObject = firstControl
++				end
++			end)
++		end
++	end)
++
++	-- Pause block placement while open, and release controller selection on close.
++	local hasOpened = false
++	local placingWasEnabled = true
++	effect(function()
++		local open = isOpen()
++		untrack(function()
++			if open then
++				hasOpened = true
++				placingWasEnabled = placer.isEnabled()
++				placer.setEnabled(false)
++			elseif hasOpened then
++				placer.setEnabled(placingWasEnabled)
++				local selected = GuiService.SelectedObject
++				if selected and panel and selected:IsDescendantOf(panel) then
++					GuiService.SelectedObject = nil
++				end
++			end
++		end)
++	end)
++
++	-- Keep the volume sources and the sound groups in step.
++	local function setMusic(volume: number)
++		audio.setMusicVolume(volume)
++		musicVolume(audio.getMusicVolume())
++	end
++
++	local function setEffects(volume: number)
++		audio.setEffectsVolume(volume)
++		effectsVolume(audio.getEffectsVolume())
++	end
++
++	local backdropGui = create("ScreenGui")({
++		Name = "SettingsBackdrop",
++		ResetOnSpawn = false,
++		DisplayOrder = 10,
++		-- Cover the whole screen, notch and top bar included.
++		ScreenInsets = Enum.ScreenInsets.None,
++		Enabled = isOpen,
++
++		create("TextButton")({
++			Name = "Backdrop",
++			Text = "",
++			AutoButtonColor = false,
++			Selectable = false,
++			Size = UDim2.fromScale(1, 1),
++			BackgroundColor3 = Theme.Backdrop,
++			BackgroundTransparency = Theme.BackdropTransparency,
++			Activated = function()
++				setOpen(false)
++			end,
++		}),
++	}) :: ScreenGui
++
++	local menuGui = create("ScreenGui")({
++		Name = "Settings",
++		ResetOnSpawn = false,
++		DisplayOrder = 11,
++		-- Keep everything clear of the top bar, notches and rounded corners.
++		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
++
++		changed("AbsoluteSize", screenSize),
++
++		-- Left edge, vertically centred: clear of the mobile thumbstick and jump button, the chat
++		-- window and the player list.
++		Button({
++			Name = "OpenSettings",
++			Text = "Settings",
++			GamepadHint = OPEN_KEY,
++			ShowHint = usingGamepad,
++			AnchorPoint = Vector2.new(0, 0.5),
++			Position = UDim2.new(0, SCREEN_MARGIN, 0.5, 0),
++			Size = UDim2.fromOffset(120, Theme.MinTouchSize),
++			AutomaticSize = Enum.AutomaticSize.X,
++			Visible = function()
++				return not isOpen()
++			end,
++			Activated = function()
++				setOpen(true)
++			end,
++			Children = {
++				create("UIStroke")({
++					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++					Color = Theme.Divider,
++					Thickness = 2,
++				}),
++			},
++		}),
++
++		create("Frame")({
++			Name = "Panel",
++			Active = true,
++			Visible = isOpen,
++			AnchorPoint = Vector2.new(0.5, 0.5),
++			Position = UDim2.fromScale(0.5, 0.5),
++			BackgroundColor3 = Theme.Panel,
++			BackgroundTransparency = 0,
++			ClipsDescendants = true,
++			-- Controller selection can't wander out of the open menu.
++			SelectionGroup = true,
++			SelectionBehaviorUp = Enum.SelectionBehavior.Stop,
++			SelectionBehaviorDown = Enum.SelectionBehavior.Stop,
++			SelectionBehaviorLeft = Enum.SelectionBehavior.Stop,
++			SelectionBehaviorRight = Enum.SelectionBehavior.Stop,
++			Size = function()
++				local screen = screenSize()
++				local width = math.min(PANEL_MAX_WIDTH, screen.X - SCREEN_MARGIN * 2)
++				local fullHeight = HEADER_HEIGHT + contentHeight() + Theme.Padding * 2
++				local height = math.min(fullHeight, screen.Y - SCREEN_MARGIN * 2)
++				return UDim2.fromOffset(math.max(width, 0), math.max(height, 0))
++			end,
++
++			Vide.action(function(instance)
++				panel = instance :: Frame
++			end),
++
++			create("UICorner")({ CornerRadius = Theme.CornerRadius }),
++			create("UIStroke")({
++				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
++				Color = Theme.Divider,
++				Thickness = 2,
++			}),
++
++			create("Frame")({
++				Name = "Header",
++				BackgroundTransparency = 1,
++				Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
++
++				create("UIPadding")({
++					PaddingLeft = UDim.new(0, Theme.Padding),
++					PaddingRight = UDim.new(0, Theme.Padding),
++					PaddingTop = UDim.new(0, Theme.Padding),
++					PaddingBottom = UDim.new(0, Theme.Padding),
++				}),
++
++				create("TextLabel")({
++					Name = "Title",
++					BackgroundTransparency = 1,
++					Size = UDim2.fromScale(0.5, 1),
++					Font = Theme.FontBold,
++					TextSize = Theme.TitleSize,
++					TextColor3 = Theme.Text,
++					TextXAlignment = Enum.TextXAlignment.Left,
++					Text = "Settings",
++				}),
++
++				Button({
++					Name = "Close",
++					Text = "Close",
++					GamepadHint = CLOSE_KEY,
++					ShowHint = usingGamepad,
++					-- Frees the mouse if it is locked (first person or shift lock) while open.
++					Modal = true,
++					AnchorPoint = Vector2.new(1, 0),
++					Position = UDim2.fromScale(1, 0),
++					Size = UDim2.fromOffset(100, Theme.MinTouchSize),
++					AutomaticSize = Enum.AutomaticSize.X,
++					Activated = function()
++						setOpen(false)
++					end,
++				}),
++
++				create("Frame")({
++					Name = "Divider",
++					AnchorPoint = Vector2.new(0, 1),
++					Position = UDim2.new(0, 0, 1, Theme.Padding),
++					Size = UDim2.new(1, 0, 0, 1),
++					BackgroundColor3 = Theme.Divider,
++				}),
++			}),
++
++			create("ScrollingFrame")({
++				Name = "Body",
++				BackgroundTransparency = 1,
++				Selectable = false,
++				Position = UDim2.fromOffset(0, HEADER_HEIGHT),
++				Size = UDim2.new(1, 0, 1, -HEADER_HEIGHT),
++				ScrollingDirection = Enum.ScrollingDirection.Y,
++				AutomaticCanvasSize = Enum.AutomaticSize.Y,
++				CanvasSize = UDim2.new(),
++				ScrollBarThickness = 6,
++				ScrollBarImageColor3 = Theme.TextMuted,
++				VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
++
++				create("UIPadding")({
++					PaddingLeft = UDim.new(0, Theme.Padding),
++					PaddingRight = UDim.new(0, Theme.Padding),
++					PaddingTop = UDim.new(0, Theme.Padding),
++					PaddingBottom = UDim.new(0, Theme.Padding),
++				}),
++
++				create("UIListLayout")({
++					FillDirection = Enum.FillDirection.Vertical,
++					Padding = UDim.new(0, Theme.Padding + 4),
++
++					changed("AbsoluteContentSize", function(size: Vector2)
++						contentHeight(size.Y)
++					end),
++				}),
++
++				VolumeSetting({
++					Name = "MusicVolume",
++					Label = "Music volume",
++					LayoutOrder = 1,
++					Value = musicVolume,
++					SetValue = setMusic,
++					OnFirstButton = function(button)
++						firstControl = button
++					end,
++				}),
++
++				VolumeSetting({
++					Name = "EffectsVolume",
++					Label = "Sound effects volume",
++					LayoutOrder = 2,
++					Value = effectsVolume,
++					SetValue = setEffects,
++				}),
++
++				create("Frame")({
++					Name = "Divider",
++					LayoutOrder = 3,
++					Size = UDim2.new(1, 0, 0, 1),
++					BackgroundColor3 = Theme.Divider,
++				}),
++
++				ClearBlocksSetting({
++					LayoutOrder = 4,
++					IsOpen = isOpen,
++					UsingGamepad = usingGamepad,
++					ClearBlocks = placer.clearMyBlocks,
++				}),
++			}),
++		}),
++	}) :: ScreenGui
++
++	return { backdropGui, menuGui }
++end
++
++return SettingsMenu
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau
+new file mode 100644
+index 0000000..e755bd1
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau
+@@ -0,0 +1,41 @@
++--[[
++	Shared look for the game's menus. Panels are fully opaque and text is large and high contrast
++	so menus stay readable over any part of the world. Nothing slides or animates; state changes
++	are instant.
++]]
++
++local Theme = table.freeze({
++	Font = Enum.Font.BuilderSans,
++	FontMedium = Enum.Font.BuilderSansMedium,
++	FontBold = Enum.Font.BuilderSansBold,
++
++	TitleSize = 28,
++	TextSize = 22,
++	SmallTextSize = 18,
++
++	-- Panels are never see-through.
++	Panel = Color3.fromRGB(24, 26, 31),
++	Surface = Color3.fromRGB(46, 50, 60),
++	SurfaceHover = Color3.fromRGB(68, 74, 88),
++	Divider = Color3.fromRGB(70, 75, 88),
++
++	Text = Color3.fromRGB(245, 246, 248),
++	TextMuted = Color3.fromRGB(196, 200, 210),
++
++	Accent = Color3.fromRGB(80, 160, 255),
++	Danger = Color3.fromRGB(190, 40, 40),
++	DangerHover = Color3.fromRGB(220, 60, 60),
++	Success = Color3.fromRGB(120, 220, 140),
++
++	-- Dims the world behind an open menu.
++	Backdrop = Color3.fromRGB(0, 0, 0),
++	BackdropTransparency = 0.35,
++
++	-- Smallest size for anything tapped or clicked, in pixels.
++	MinTouchSize = 48,
++	Padding = 16,
++	Gap = 12,
++	CornerRadius = UDim.new(0, 10),
++})
++
++return Theme
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/VolumeSetting.luau b/src/StarterPlayer/StarterPlayerScripts/UI/VolumeSetting.luau
+new file mode 100644
+index 0000000..2b4ae0f
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/VolumeSetting.luau
+@@ -0,0 +1,212 @@
++--[[
++	A labelled volume control: a bar to drag or click (mouse and touch) between minus and plus
++	buttons that step by 10% (every input, including controllers, which select them with the
++	D-pad and press A).
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local UserInputService = game:GetService("UserInputService")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++local Button = require(script.Parent.Button)
++local Theme = require(script.Parent.Theme)
++
++local create = Vide.create
++local cleanup = Vide.cleanup
++
++local STEP = 0.1
++local BAR_HEIGHT = 12
++local KNOB_SIZE = 28
++
++export type Props = {
++	Name: string,
++	Label: string,
++	LayoutOrder: number?,
++	-- Volume from 0 to 1.
++	Value: () -> number,
++	SetValue: (number) -> (),
++	-- Receives the minus button, so the menu can select it for controllers.
++	OnFirstButton: ((GuiObject) -> ())?,
++}
++
++local function VolumeSetting(props: Props): Frame
++	local track: Frame? = nil
++	local dragInput: InputObject? = nil
++
++	local function setFromScreenX(x: number)
++		if not track or track.AbsoluteSize.X <= 0 then
++			return
++		end
++		local alpha = (x - track.AbsolutePosition.X) / track.AbsoluteSize.X
++		props.SetValue(math.round(math.clamp(alpha, 0, 1) * 100) / 100)
++	end
++
++	local function step(direction: number)
++		-- Snap to the 10% grid so repeated presses land on round numbers.
++		local steps = math.round(props.Value() / STEP) + direction
++		props.SetValue(math.clamp(steps * STEP, 0, 1))
++	end
++
++	cleanup(UserInputService.InputChanged:Connect(function(input)
++		if not dragInput then
++			return
++		end
++		local isMouseDrag = dragInput.UserInputType == Enum.UserInputType.MouseButton1
++			and input.UserInputType == Enum.UserInputType.MouseMovement
++		if isMouseDrag or input == dragInput then
++			setFromScreenX(input.Position.X)
++		end
++	end))
++
++	cleanup(UserInputService.InputEnded:Connect(function(input)
++		if not dragInput then
++			return
++		end
++		local isMouseRelease = dragInput.UserInputType == Enum.UserInputType.MouseButton1
++			and input.UserInputType == Enum.UserInputType.MouseButton1
++		if isMouseRelease or input == dragInput then
++			dragInput = nil
++		end
++	end))
++
++	local percentText = function()
++		return `{math.round(props.Value() * 100)}%`
++	end
++
++	local minusButton = Button({
++		Name = "Decrease",
++		Text = "−",
++		TextSize = 30,
++		Size = UDim2.fromOffset(Theme.MinTouchSize, Theme.MinTouchSize),
++		Position = UDim2.fromScale(0, 0),
++		Activated = function()
++			step(-1)
++		end,
++	})
++	if props.OnFirstButton then
++		props.OnFirstButton(minusButton)
++	end
++
++	return create("Frame")({
++		Name = props.Name,
++		BackgroundTransparency = 1,
++		Size = UDim2.fromScale(1, 0),
++		AutomaticSize = Enum.AutomaticSize.Y,
++		LayoutOrder = props.LayoutOrder or 0,
++
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Vertical,
++			Padding = UDim.new(0, 6),
++		}),
++
++		create("Frame")({
++			Name = "Header",
++			BackgroundTransparency = 1,
++			Size = UDim2.new(1, 0, 0, 28),
++			LayoutOrder = 1,
++
++			create("TextLabel")({
++				Name = "Label",
++				BackgroundTransparency = 1,
++				Size = UDim2.fromScale(0.7, 1),
++				Font = Theme.FontMedium,
++				TextSize = Theme.TextSize,
++				TextColor3 = Theme.Text,
++				TextXAlignment = Enum.TextXAlignment.Left,
++				Text = props.Label,
++			}),
++			create("TextLabel")({
++				Name = "Value",
++				BackgroundTransparency = 1,
++				AnchorPoint = Vector2.new(1, 0),
++				Position = UDim2.fromScale(1, 0),
++				Size = UDim2.fromScale(0.3, 1),
++				Font = Theme.FontBold,
++				TextSize = Theme.TextSize,
++				TextColor3 = Theme.Text,
++				TextXAlignment = Enum.TextXAlignment.Right,
++				Text = percentText,
++			}),
++		}),
++
++		create("Frame")({
++			Name = "Controls",
++			BackgroundTransparency = 1,
++			Size = UDim2.new(1, 0, 0, Theme.MinTouchSize),
++			LayoutOrder = 2,
++
++			minusButton,
++
++			-- The whole row height is the hit area, so the thin bar is easy to grab on a phone.
++			create("Frame")({
++				Name = "Track",
++				BackgroundTransparency = 1,
++				Active = true,
++				Selectable = false,
++				Position = UDim2.fromOffset(Theme.MinTouchSize + Theme.Gap + KNOB_SIZE / 2, 0),
++				Size = UDim2.new(1, -2 * (Theme.MinTouchSize + Theme.Gap + KNOB_SIZE / 2), 1, 0),
++
++				InputBegan = function(input: InputObject)
++					local inputType = input.UserInputType
++					if
++						inputType == Enum.UserInputType.MouseButton1
++						or inputType == Enum.UserInputType.Touch
++					then
++						dragInput = input
++						setFromScreenX(input.Position.X)
++					end
++				end,
++
++				Vide.action(function(instance)
++					track = instance :: Frame
++				end),
++
++				create("Frame")({
++					Name = "Bar",
++					AnchorPoint = Vector2.new(0, 0.5),
++					Position = UDim2.fromScale(0, 0.5),
++					Size = UDim2.new(1, 0, 0, BAR_HEIGHT),
++					BackgroundColor3 = Theme.Surface,
++
++					create("UICorner")({ CornerRadius = UDim.new(0.5, 0) }),
++					create("UIStroke")({ Color = Theme.Divider, Thickness = 1 }),
++
++					create("Frame")({
++						Name = "Fill",
++						Size = function()
++							return UDim2.fromScale(props.Value(), 1)
++						end,
++						BackgroundColor3 = Theme.Accent,
++						create("UICorner")({ CornerRadius = UDim.new(0.5, 0) }),
++					}),
++				}),
++
++				create("Frame")({
++					Name = "Knob",
++					AnchorPoint = Vector2.new(0.5, 0.5),
++					Position = function()
++						return UDim2.fromScale(props.Value(), 0.5)
++					end,
++					Size = UDim2.fromOffset(KNOB_SIZE, KNOB_SIZE),
++					BackgroundColor3 = Theme.Text,
++					create("UICorner")({ CornerRadius = UDim.new(0.5, 0) }),
++					create("UIStroke")({ Color = Theme.Accent, Thickness = 3 }),
++				}),
++			}),
++
++			Button({
++				Name = "Increase",
++				Text = "+",
++				TextSize = 30,
++				Size = UDim2.fromOffset(Theme.MinTouchSize, Theme.MinTouchSize),
++				AnchorPoint = Vector2.new(1, 0),
++				Position = UDim2.fromScale(1, 0),
++				Activated = function()
++					step(1)
++				end,
++			}),
++		}),
++	}) :: Frame
++end
++
++return VolumeSetting
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/init.luau b/src/StarterPlayer/StarterPlayerScripts/UI/init.luau
+new file mode 100644
+index 0000000..043cd69
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/init.luau
+@@ -0,0 +1,39 @@
++--[[
++	Entry point for the game's Vide UI. start() mounts every screen into the player's PlayerGui.
++]]
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local Vide = require(ReplicatedStorage.Packages.Vide)
++local BlockPlacer = require(script.Parent.BlockPlacer)
++local GameAudio = require(script.Parent.GameAudio)
++local SettingsMenu = require(script.SettingsMenu)
++
++local UI = {}
++
++local unmount: (() -> ())? = nil
++
++--[[
++	Mounts the UI. Calling it again does nothing. Returns a function that removes it.
++]]
++function UI.start(): () -> ()
++	if not unmount then
++		local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
++		unmount = Vide.mount(function()
++			return SettingsMenu({
++				GameAudio = GameAudio,
++				BlockPlacer = BlockPlacer,
++			})
++		end, playerGui)
++	end
++
++	return function()
++		if unmount then
++			unmount()
++			unmount = nil
++		end
++	end
++end
++
++return UI

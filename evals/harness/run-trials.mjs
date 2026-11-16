@@ -243,6 +243,7 @@ async function main() {
 			prompt: task.prompt,
 			skill: task.skill ?? null,
 			rubric: task.rubric,
+			judge_facts: task.judge_facts,
 			task_file: task.file,
 		});
 		for (const setup of setups) {

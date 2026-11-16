@@ -1,0 +1,118 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both are correct and complete, and both tear down cleanly with UnbindFromRenderStep. B wins narrowly. It uses standard instance-path requires that certainly work at runtime, guards against a nil camera and against updates after destroy, keeps its fields private instead of exposing public fields that do nothing when changed, and handles the missing PlacedBlocks folder more gracefully. A is a little more efficient and its `Vector3?` query is cleaner, but that doesn't make up for those points.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "Updates in a BindToRenderStep callback. It filters out `{ character, self.Part }`, steps out by `result.Normal * (BlockTypes.BlockSize / 2)` before `PlacementRules.snap`, unparents the part on a miss, and lerps the color toward red when `PlacementRules.check` fails against PlacedBlocks."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "`Destroy` calls `UnbindFromRenderStep(self._BindingName)` and `self.Part:Destroy()`, and an `_IsDestroyed` guard makes it safe to call twice. Because the callback is unbound, no frame update can run after teardown."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 4,
+          "note": "The full field set is declared in `typeof(setmetatable({} :: {...}, GhostPreview))` and set together in the constructor, and the part has CanCollide and CanQuery false. However, `Transparency`, `RaycastDistance` and `BlockType` are public mutable fields, and changing them directly does nothing."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "`new(blockType: BlockType, options: Options?): GhostPreview` is fully typed, and `GetPlacement(): Vector3?` returns nil both on a miss and when the spot is blocked."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "Settings come in through an `Options` table with `Transparency` and `RaycastDistance`, and the defaults are the named constants `DEFAULT_TRANSPARENCY` and `DEFAULT_RAYCAST_DISTANCE`."
+        },
+        {
+          "criterion": "Scope / merge-ready",
+          "score": 4,
+          "note": "It is one class at the given path and passes all checks. It loads modules with `require(\"@game/...\")` string paths, which pass analysis but rely on alias support at runtime. The ghost also stays red until the PlacedBlocks folder replicates."
+        }
+      ],
+      "overall_score": 8
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Works",
+          "score": 5,
+          "note": "`_update` raycasts with a filter of `{ self._part, character }` and offsets by `result.Normal * (BlockTypes.BlockSize / 2)` before `snap`. It hides the ghost by setting transparency 1 on a miss, and sets `BLOCKED_COLOR` when `check` fails, falling back to an empty folder until PlacedBlocks exists."
+        },
+        {
+          "criterion": "Tears down completely",
+          "score": 5,
+          "note": "`destroy` unbinds the render step and destroys `_part`, and `_update` also returns early when `_destroyed` is set."
+        },
+        {
+          "criterion": "Class shape",
+          "score": 5,
+          "note": "A named `Fields` type is checked through `setmetatable({...} :: Fields, GhostPreview)`, and all fields are private and set in the constructor. The part has CanCollide and CanQuery false and is slightly inset so it doesn't z-fight with neighboring blocks."
+        },
+        {
+          "criterion": "Typing",
+          "score": 5,
+          "note": "`getPlacement(): (boolean, Vector3?, string?)` returns a boolean plus an optional position, where the position is nil only on a miss, plus a reason string. `new` and `setBlockType` take `BlockType`."
+        },
+        {
+          "criterion": "Optional settings",
+          "score": 5,
+          "note": "Settings come in through an `Options` table with `Transparency` and `MaxDistance`, whose comments document the defaults, and the defaults are the named constants `DEFAULT_TRANSPARENCY` and `DEFAULT_MAX_DISTANCE`."
+        },
+        {
+          "criterion": "Scope / merge-ready",
+          "score": 5,
+          "note": "It is one class at the given path, loads modules with standard `require(ReplicatedStorage.Shared.X)` paths, and passes all checks."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8,
+      "strengths": [
+        "`GetPlacement` returns a clean `Vector3?`",
+        "The raycast filter is rebuilt only when the character changes",
+        "The look is reapplied only when placeability changes",
+        "Teardown is complete and idempotent"
+      ],
+      "weaknesses": [
+        "Public fields like `Transparency` can be changed but have no effect",
+        "The `@game` string requires are less certain to work at runtime than instance paths",
+        "There is no nil-camera guard and no destroyed guard in `_Update`",
+        "The ghost shows red until the PlacedBlocks folder exists"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Uses standard instance-path requires",
+        "Guards against a nil camera and against updates after destroy",
+        "Fields are private and the API is clear, and it exposes the placement reason",
+        "The inset avoids z-fighting, and the empty-folder fallback avoids a falsely red ghost"
+      ],
+      "weaknesses": [
+        "Rebuilds the filter table and reapplies the style every frame, which is a small cost",
+        "`getPlacement` returns a position even when the spot isn't placeable, so callers must check the boolean",
+        "The module-level fallback Folder is never cleaned up (minor)"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 8,
+    "without_skill": 8.5
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

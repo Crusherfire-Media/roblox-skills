@@ -1,0 +1,126 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts cut each block to one instance, set properties before parenting, spread work across frames with a budget, and pass all checks. The deciding difference is criterion 4: B reserves every saved cell in `occupied` before queuing the load, so nobody can place into a cell that is still loading. A only claims cells as it creates blocks, which leaves a race in which saved blocks get skipped. A's write-up even treats this as intended. A has a somewhat more efficient unload (a cursor over its own table instead of a one-frame GetChildren walk) and uses template cloning, but B's correctness while a build is loading matters more.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Fewer instances per block",
+          "score": 5,
+          "note": "Owner/PlacedAt values replaced by `part:SetAttribute(\"PlacedAt\", placedAt)` and the per-plot `blocks` table; placed time kept for saved and new blocks."
+        },
+        {
+          "criterion": "Properties set before parenting",
+          "score": 5,
+          "note": "`templates[blockType]:Clone()` gets its CFrame and attribute set, then `part.Parent = plot.folder` comes last."
+        },
+        {
+          "criterion": "Loading/unloading spread across frames",
+          "score": 5,
+          "note": "The Heartbeat `runJobs` shares a 4 ms / 500-block budget across `stepLoad` and `stepUnload` (cursor-based) and destroys the empty folder at the end."
+        },
+        {
+          "criterion": "No overlaps/half states during load",
+          "score": 2,
+          "note": "Cells are only marked in `occupied` as each block is created in `stepLoad`, so anyone in reach can place into a cell that is still loading and the saved block gets skipped. Leaving mid-load is handled well (`isClosed` plus the unload job frees cells)."
+        },
+        {
+          "criterion": "Removal/placement rules preserved",
+          "score": 5,
+          "note": "Removal requires `plot.blocks[block]` in the player's own plot plus `getReachableRoot`. Placement validation is unchanged."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 4,
+          "note": "Says builds appear over about 0.7–3 s at the budget, has a 'Not yet verified' section, and lists what players will notice, though it accepts the loading-cell race as intended behavior."
+        },
+        {
+          "criterion": "Correct, scoped, typed, checks pass",
+          "score": 5,
+          "note": "Only Builds.server.luau and the doc change, the code is fully typed, and all checks pass."
+        }
+      ],
+      "overall_score": 7
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Fewer instances per block",
+          "score": 5,
+          "note": "`blockRecords[part] = {OwnerId, PlacedAt, Cell}` replaces the value objects, and PlacedAt is kept for saved and placed blocks."
+        },
+        {
+          "criterion": "Properties set before parenting",
+          "score": 5,
+          "note": "`Instance.new(\"Part\")` has all its properties set, then `part.Parent = parent`."
+        },
+        {
+          "criterion": "Loading/unloading spread across frames",
+          "score": 4,
+          "note": "`onHeartbeat` shares 200 blocks per frame across the load and unload queue, but `onPlayerRemoving` still walks `GetChildren()` of up to 20k parts in a single frame."
+        },
+        {
+          "criterion": "No overlaps/half states during load",
+          "score": 5,
+          "note": "`reserveCells` marks every saved cell before queuing. On leaving mid-load, reservations from `NextIndex` onward are released and the created parts go to `Doomed`."
+        },
+        {
+          "criterion": "Removal/placement rules preserved",
+          "score": 5,
+          "note": "Keeps `IsDescendantOf`, compares `record.OwnerId` with UserId, and keeps the reach check. Placement validation is unchanged, and records are cleared on leave so removal is rejected during unload."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 5,
+          "note": "States about 1.7 s per full build at 200/frame and about 13 s for 8 simultaneous joins, is explicit that nothing was measured, includes a verification plan, and lists what players will notice."
+        },
+        {
+          "criterion": "Correct, scoped, typed, checks pass",
+          "score": 5,
+          "note": "Scoped to Builds.server.luau and the doc, fully typed with a PlotState union, and all checks pass."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7,
+      "strengths": [
+        "Template cloning with the attribute and parent set last",
+        "Resumable cursor unload that uses the cell keys it stored, with no GetChildren",
+        "Shared time and block budget across all jobs",
+        "Handles leaving mid-load and a full server waiting for a slot"
+      ],
+      "weaknesses": [
+        "Does not reserve a save's cells before yielding, so placements can race into cells that are still loading and saved blocks get skipped",
+        "Several waiting players all wake on slotFreed and race for the slot (harmless but untidy)"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Reserves every cell before the first yield, so no races",
+        "Clean state machine (Loading/Ready/Unloading) with correct cleanup when a player leaves mid-load",
+        "An orderly waiting-player queue hands freed slots on",
+        "Thorough, honest write-up with a verification plan"
+      ],
+      "weaknesses": [
+        "Leaving walks GetChildren over up to 20k parts in one frame",
+        "Unload uses part.Position as the cell key instead of the stored Cell",
+        "No template cloning (property writes for every part)"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 7,
+    "with_skill": 8.5
+  },
+  "mapping": {
+    "A": "without_skill/run-3",
+    "B": "with_skill/run-3"
+  }
+}

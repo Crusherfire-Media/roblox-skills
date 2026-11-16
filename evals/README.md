@@ -19,18 +19,20 @@ Nothing in `evals/` ships with the plugin: the plugin is `plugins/roblox-dev/` o
 | Path | What it is |
 |---|---|
 | `harness/build-sandbox.mjs` | Builds the sandbox project into a folder outside the repo |
-| `harness/sandbox-template/` | The sandbox's source files: Baseplate place, Vide 0.4.1 through pesde, selene, StyLua |
+| `harness/sandbox-template/` | The sandbox's source files: Baseplate place, packages through pesde (see Task files), selene, StyLua |
 | `harness/run-trials.mjs` | The runner |
 | `harness/judge.mjs`, `harness/judge-prompt.md` | The blind judge and its prompt template |
+| `harness/judge-facts.md` | Library facts every judge run gets, verified against the package source |
 | `harness/aggregate.mjs` | Benchmark summary (wraps `aggregate_benchmark.py`) |
-| `harness/export-results.mjs` | Copies a results folder into the repo with local paths removed |
+| `harness/export-results.mjs` | Copies a results folder's verdicts and diffs into the repo with local paths removed |
 | `harness/prove-isolation.mjs` | Proves what each setup loads; writes `isolation/` |
 | `harness/trigger_eval.py` | Description trigger tests (wraps skill-creator's `run_eval.py` and `run_loop.py`) |
 | `harness/fixtures/dummy-plugin/` | A throwaway `roblox-dev` plugin with two dummy skills and two dummy hooks |
 | `harness/test/` | `node --test` tests, run by `npm test` |
 | `isolation/` | Saved isolation evidence (trimmed init events) |
 | `smoke/` | The smoke task and its results |
-| `<skill>/` | Per skill, later: `tasks/*.json`, `triggers.json`, `results/<date>/` |
+| `<skill>/` | Per skill: `tasks/*.json`, `triggers.json`, `results/<date>-<pass>/` |
+| `PILOT.md`, `RESULTS.md` | The pilot's method and cost; the final results for every skill |
 
 The harness is Node (ES modules, no dependencies), matching the repo's `npm test` setup. The
 trigger tests are Python because they import skill-creator's Python modules and swap two of their
@@ -120,7 +122,8 @@ node evals/harness/judge.mjs --results <scratch>/results/vide
 node evals/harness/aggregate.mjs --results <scratch>/results/vide --skill-name vide \
   --skill-path "<worktree>/plugins/roblox-dev/skills/vide"
 
-# 5. Save to the repo without local paths (add --transcripts to keep transcripts).
+# 5. Save the verdicts and diffs to the repo without local paths (--full keeps every file,
+#    --transcripts also keeps transcripts). Copy the trigger results in as triggers.json.
 node evals/harness/export-results.mjs --results <scratch>/results/vide --dest evals/vide/results/2026-11-14
 ```
 
@@ -157,7 +160,7 @@ timeout", and a trial that breaks before grading still gets a `grading.json` tha
 
 Trials run with `--permission-mode acceptEdits` and `--permission-prompts none`: edits inside the
 project are allowed, read-only commands inside it need no prompt, and these commands are
-pre-approved: `rojo sourcemap`, `luau-lsp analyze`, `selene`, `stylua`, `git status`, `git diff`,
+pre-approved: `rojo sourcemap`, `luau-lsp analyze`, `selene`, `stylua`, `git status`, `git diff`, `git ls-files`, `git log`, `git show`, `git mv`, `git rm`,
 `WebFetch`, and `WebSearch`. Anything else that would ask for approval is denied. Chained shell
 commands (`a && b`, `cd x; y`) count as one command and are usually denied; the sandbox README tells
 the agent to run each check on its own, and in the smoke test agents recovered by doing that.
@@ -180,6 +183,7 @@ One JSON file per task, for example `evals/vide/tasks/block-picker.json`:
     { "type": "command", "run": ["lune", "run", "tools/check"], "expect_exit": 0 }
   ],
   "rubric": ["Uses Vide components and sources idiomatically", "Fits phones and monitors"],
+  "judge_facts": ["Vide 0.4.1 (vide/src/source.luau): setting a source to its current number, string, or frozen table doesn't rerun its bindings"],
   "timeout_minutes": 20
 }
 ```
@@ -194,11 +198,38 @@ One JSON file per task, for example `evals/vide/tasks/block-picker.json`:
   `pattern`, optional `flags`), `any_file_matches` (`dir`, `pattern`, optional `ext`), and `command`
   (`run` as an argument array, no shell; optional `expect_exit`, `timeout_seconds`). Paths must be
   relative and stay inside the project.
+- `judge_facts` (optional, at most 12 strings of at most 600 characters each) adds library facts
+  for this task's judge runs. They go into the judge prompt after the global facts from
+  `harness/judge-facts.md`, one bullet each, and `eval_metadata.json` keeps them. A fact is library
+  ground truth that you verified against the installed package source, named with its version and
+  source file (for example "Charm 0.11.1 `listen` (charm/src/init.luau) runs its callback once
+  right away"). Never put a skill's rules or conventions here: the judge would then grade the
+  baseline against the skill it didn't have. Facts every task needs belong in `judge-facts.md`.
 
-The sandbox is a Baseplate place: `Workspace.Baseplate` (top at Y = 0) and a `SpawnLocation`, code
-under `src/`, and Vide at `ReplicatedStorage.Packages.Vide`. Its `README.md` tells the agent the
-layout and the check commands. The demo feature for tasks is block placement on the Baseplate with a
-Vide UI to pick the block type (brick, dirt, grass, window, wood).
+The sandbox is a Baseplate place: `Workspace.Baseplate` (top at Y = 0) and a `SpawnLocation`, with
+code under `src/`. pesde installs these from Wally, and the sandbox `README.md` lists each with its
+require path:
+
+| Package | Version | In the place |
+|---|---|---|
+| `centau/vide` | 0.4.1 | `ReplicatedStorage.Packages.Vide` |
+| `littensy/charm` | 0.11.1 | `ReplicatedStorage.Packages.Charm` |
+| `littensy/vide-charm` | 0.4.1 | `ReplicatedStorage.Packages.VideCharm` |
+| `littensy/charm-sync` | 0.4.1 | `ReplicatedStorage.Packages.CharmSync` |
+| `pepeeltoro41/ui-labs` (UI Labs utilities) | 2.4.2 | `ReplicatedStorage.Packages.UILabs` |
+| `crusherfire/module-loader` | 4.0.1 | `ReplicatedStorage.Packages.ModuleLoader` |
+| `roblox/jest` | 3.20.1 | `ServerScriptService.Tests.Packages.Jest` |
+| `roblox/jest-globals` | 3.20.1 | `ServerScriptService.Tests.Packages.JestGlobals` |
+
+The Jest packages come from a pesde workspace member, `test_packages/`, so they mount in
+`ServerScriptService.Tests.Packages`, where the `roblox-testing` skill expects them, rather than in
+`ReplicatedStorage.Packages`. Their own dependencies resolve to the newest compatible release (3.21.0 for
+`jest-core` and the rest), as `wally install` would. Specs go in
+`src/ServerScriptService/Tests/Specs/` beside `jest.config.luau` (`testMatch = { "**/*.spec" }`);
+the project's `globIgnorePaths` keeps that folder from also mapping a second time through
+`src/ServerScriptService`. Specs can't run without Studio, so trials only type-check, lint, and
+format them. The demo feature for tasks is block placement on the Baseplate with a Vide UI to pick
+the block type (brick, dirt, grass, window, wood).
 
 ## Trigger tests
 

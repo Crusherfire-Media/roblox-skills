@@ -1,0 +1,154 @@
+diff --git a/PR_DESCRIPTION.md b/PR_DESCRIPTION.md
+new file mode 100644
+index 0000000..42ef92c
+--- /dev/null
++++ b/PR_DESCRIPTION.md
+@@ -0,0 +1,58 @@
++# Add t and validate PlaceBlock arguments with it
++
++## Summary
++
++- Adds the [t](https://github.com/osyrisrblx/t) runtime type checker (`osyrisrblx/t`, pinned to
++  `=3.1.1`, the latest on the Wally index) to `pesde.toml` under the alias `t`. It installs
++  through pesde's Wally support like the other packages, into `ReplicatedStorage.Packages.t`.
++- Switches the `PlaceBlock` handler in `src/ServerScriptService/BlockPlacement.server.luau` to a
++  single t check, `checkPlaceBlockArgs`, built once at load.
++- Lists t in the README's package table.
++
++## Checks kept
++
++Every argument check the handler made before is still made, now inside `checkPlaceBlockArgs`:
++
++| Before | Now |
++|---|---|
++| `typeof(blockTypeName) ~= "string"` | `t.string` |
++| `BlockTypes.ByName[blockTypeName]` is nil | `t.keyOf(BlockTypes.ByName)` |
++| `typeof(position) ~= "Vector3"` | `t.Vector3` |
++| `position ~= position` (a NaN component) | `isNotNaN`, a custom check combined with `t.Vector3` (t's `Vector3` checks only the type) |
++
++The checks after argument validation (rate limit, character and `HumanoidRootPart`, cell below
++Y = 0 or already occupied, reach) don't change. Any argument that fails a check is still dropped
++without a reply.
++
++## Before testing
++
++`pesde.lock` is **not** updated in this PR: no install was run while it was written.
++
++1. Stop `rojo serve` if it is running.
++2. From the repo root, run `pesde install`. This installs t into `roblox_packages` and updates
++   `pesde.lock`.
++3. Commit the updated `pesde.lock` to this branch. Its diff should add only the
++   `osyrisrblx/t@3.1.1` entry.
++4. Confirm that `roblox_packages/t.luau` exists, then restart `rojo serve` and reconnect the Rojo
++   plugin.
++5. Regenerate the sourcemap so luau-lsp sees the new package:
++   `rojo sourcemap default.project.json -o sourcemap.json --include-non-scripts`.
++
++Without the install, the handler errors on `require(ReplicatedStorage.Packages.t)` at server start.
++
++## Test plan
++
++- [ ] `luau-lsp analyze` (command in the README), `selene src`, and `stylua --check src` pass.
++      selene and stylua already pass on the changed script. luau-lsp has not been run, because it
++      needs the installed package.
++- [ ] Playtest: placing each block type from the client still places a block.
++- [ ] During a playtest, run `ReplicatedStorage.PlaceBlock:FireServer(blockType, position)` from
++      the client's command bar with each bad input below. Each one should place nothing and log
++      no error:
++  - a non-string block type (`123`, `nil`)
++  - an unknown block type name (`"Lava"`)
++  - a non-Vector3 position (`"0,0,0"`, `CFrame.new()`)
++  - a NaN position (`Vector3.new(0/0, 4, 0)`)
++- [ ] Rate limit, reach, occupied-cell, and below-ground placements are still rejected.
++
++🤖 Generated with [Claude Code](https://claude.com/claude-code)
+diff --git a/README.md b/README.md
+index 9e549e3..5b1bda3 100644
+--- a/README.md
++++ b/README.md
+@@ -33,6 +33,7 @@ All of them come from Wally through pesde. Require each one through its link, ne
+ | CharmSync (`littensy/charm-sync`) | 0.4.1 | `require(ReplicatedStorage.Packages.CharmSync)` |
+ | UI Labs utilities (`pepeeltoro41/ui-labs`) | 2.4.2 | `require(ReplicatedStorage.Packages.UILabs)` |
+ | Module Loader (`crusherfire/module-loader`) | 4.0.1 | `require(ReplicatedStorage.Packages.ModuleLoader)` |
++| t (`osyrisrblx/t`) | 3.1.1 | `require(ReplicatedStorage.Packages.t)` |
+ | Jest Roblox (`roblox/jest`) | 3.20.1 | `require(ServerScriptService.Tests.Packages.Jest)` |
+ | Jest globals (`roblox/jest-globals`) | 3.20.1 | `require(ServerScriptService.Tests.Packages.JestGlobals)` |
+ 
+diff --git a/pesde.toml b/pesde.toml
+index d196787..e10bc52 100644
+--- a/pesde.toml
++++ b/pesde.toml
+@@ -23,6 +23,7 @@ VideCharm = { wally = "littensy/vide-charm", version = "=0.4.1" }
+ CharmSync = { wally = "littensy/charm-sync", version = "=0.4.1" }
+ UILabs = { wally = "pepeeltoro41/ui-labs", version = "=2.4.2" }
+ ModuleLoader = { wally = "crusherfire/module-loader", version = "=4.0.1" }
++t = { wally = "osyrisrblx/t", version = "=3.1.1" }
+ 
+ [dev_dependencies]
+ scripts_rojo = { name = "pesde/scripts_rojo", version = "^0.2.0", target = "lune" }
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index 812f4f9..b6813ca 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -7,6 +7,8 @@ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local Workspace = game:GetService("Workspace")
+ 
++local t = require(ReplicatedStorage.Packages.t)
++
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ 
+ local BLOCK_SIZE = BlockTypes.BlockSize
+@@ -15,6 +17,20 @@ local MAX_REACH = 64
+ -- Shortest time between two placements by one player, in seconds.
+ local MIN_INTERVAL = 0.1
+ 
++-- t.Vector3 checks only the type, and NaN would break the grid math.
++local function isNotNaN(value: any): (boolean, string?)
++	-- NaN is the only value not equal to itself.
++	if value ~= value then
++		return false, "unexpected NaN value"
++	end
++	return true, nil
++end
++
++local checkPlaceBlockArgs = t.tuple(
++	t.intersection(t.string, t.keyOf(BlockTypes.ByName)),
++	t.intersection(t.Vector3, isNotNaN)
++)
++
+ local placeBlock = Instance.new("RemoteEvent")
+ placeBlock.Name = "PlaceBlock"
+ placeBlock.Parent = ReplicatedStorage
+@@ -35,18 +51,12 @@ local function snapToCell(position: Vector3): Vector3
+ end
+ 
+ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+-	if typeof(blockTypeName) ~= "string" or typeof(position) ~= "Vector3" then
+-		return
+-	end
+-	-- NaN is the only value not equal to itself.
+-	if position ~= position then
+-		return
+-	end
+-
+-	local blockType = BlockTypes.ByName[blockTypeName]
+-	if not blockType then
++	if not checkPlaceBlockArgs(blockTypeName, position) then
+ 		return
+ 	end
++	-- The type checker can't see t's result, so these casts state it.
++	local blockType = BlockTypes.ByName[blockTypeName :: string]
++	local validPosition = position :: Vector3
+ 
+ 	local now = os.clock()
+ 	if now - (lastPlacedAt[player] or 0) < MIN_INTERVAL then
+@@ -59,7 +69,7 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 		return
+ 	end
+ 
+-	local cell = snapToCell(position)
++	local cell = snapToCell(validPosition)
+ 	if cell.Y < 0 or occupied[cell] then
+ 		return
+ 	end

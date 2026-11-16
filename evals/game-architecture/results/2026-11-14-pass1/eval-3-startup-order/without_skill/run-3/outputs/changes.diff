@@ -1,0 +1,53 @@
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
+index 9ac9e39..3d3e04a 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
+@@ -9,7 +9,10 @@ local PlotServerService = require("../SystemPackage/PlotServerService")
+ 
+ local PlotPlacementMediator = {}
+ 
+-function PlotPlacementMediator:Init()
++-- Start, not Init: the loader gives no fixed order between modules with equal LoaderPriority,
++-- so PlotServerService:Init() (which creates the plots) may not have run yet during our Init.
++-- Every Init has finished before any Start runs.
++function PlotPlacementMediator:Start()
+ 	for _, plot in PlotServerService:GetPlots() do
+ 		PlacementServerService:AddBuildArea(plot)
+ 	end
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
+index b7b787b..5890702 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
+@@ -34,17 +34,22 @@ local function runRound()
+ end
+ 
+ function RoundServerService:Start()
+-	-- Every other system has to be running before the first round starts.
+-	while not ModuleLoader.IsServerLoaded() do
+-		task.wait()
+-	end
+-
+-	while true do
+-		if #Players:GetPlayers() == 0 then
+-			Players.PlayerAdded:Wait()
++	-- The loader runs each Start to completion before the next, and only marks the server as
++	-- loaded after every Start has returned. So the round loop has to run on its own thread;
++	-- waiting for IsServerLoaded() inside Start itself would never finish.
++	task.spawn(function()
++		-- Every other system has to be running before the first round starts.
++		while not ModuleLoader.IsServerLoaded() do
++			task.wait()
+ 		end
+-		runRound()
+-	end
++
++		while true do
++			if #Players:GetPlayers() == 0 then
++				Players.PlayerAdded:Wait()
++			end
++			runRound()
++		end
++	end)
+ end
+ 
+ return RoundServerService

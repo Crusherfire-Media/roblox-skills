@@ -1,0 +1,459 @@
+diff --git a/docs/perf/build-loading.md b/docs/perf/build-loading.md
+new file mode 100644
+index 0000000..29e16e0
+--- /dev/null
++++ b/docs/perf/build-loading.md
+@@ -0,0 +1,100 @@
++# Build loading and unloading
++
++## The problem
++
++When a player with a 20,000-block saved build joined, the server froze for about 2.1 s in one
++frame (MicroProfiler, almost all of it under `Script_Builds`) and every player rubber-banded.
++Clients then hitched in `Replicator ProcessPackets`. Leaving caused a smaller freeze.
++
++Causes, in `src/ServerScriptService/Builds.server.luau` before this change:
++
++1. **All of it ran in one frame.** `loadBuild` created every block in a single loop, and
++   `onPlayerRemoving` destroyed the whole plot folder at once. The server could not step physics
++   or send network updates until the loop finished. Then the whole build reached every client in
++   one burst, which is the `ProcessPackets` hitch.
++2. **Three instances per block.** Each block was a `Part` plus an `Owner` `StringValue` and a
++   `PlacedAt` `NumberValue`. A 20,000-block build was 60,000 instances to create, replicate,
++   keep in memory (about 600 bytes per value object), and destroy.
++3. **Parent set first.** `Instance.new("Part", parent)` parents the part before its properties
++   are set, so every later property write also goes through replication. Measured on a
++   baseplate, that costs about 1.6x as much as setting the properties first and parenting last.
++
++## What changed
++
++- **Loading and unloading run across frames.** One scheduler on `Heartbeat` creates or destroys
++  blocks until 3 ms of server time have been used that frame (`FRAME_ALLOWANCE`), then continues
++  on the next frame. The 3 ms is shared by every plot, so eight players joining at once cost no
++  more per frame than one. Plots are served first come, first served. The work shows up in the
++  MicroProfiler under the `Builds:Step` label.
++- **One instance per block.** The owner and the placed time are now attributes on the part:
++  `OwnerId` (number, the owner's UserId) and `PlacedAt` (number, Unix time, same value as
++  before). Clients can still read both, which the upcoming placed-time feature can use. The
++  server keeps its own block-to-plot table for the owner check on removal, so the check never
++  reads anything from the instance.
++- **Properties first, `Parent` last** when a block is created.
++- **Saved cells are reserved when loading starts.** The build's cells are marked occupied in the
++  first frame (a pure Luau loop with no instances), so no one can place a block into a cell the
++  build is about to fill.
++- **Unloading keeps the plot's slot until its last block is gone.** The departing player's
++  blocks are destroyed over several frames, and each cell is freed as its block is destroyed.
++  Blocks that were never created (the player left mid-load) have their reserved cells freed
++  right away.
++- **Players who join while every slot is busy wait for one.** Before, a slot was freed on the
++  same frame its owner left. Now a slot can still be unloading, so a player who joins a full
++  server right then waits in a queue and gets the slot when the unload finishes.
++- `SavedBuilds.load` may now yield (the DataStore version will). If the player leaves during
++  the load, the load stops and nothing is created.
++
++Placing and removing are unchanged: same remotes, same validation, same reach and rate limits,
++and removal still only works on your own blocks.
++
++## What players will notice
++
++- **Builds appear over about two seconds instead of all at once.** A 20,000-block build fills
++  in block by block, in saved order (bottom layer first with the current test build). The owner
++  can place and remove blocks while it loads.
++- **Builds disappear over about two seconds after their owner leaves.** No one can remove those
++  blocks or place into their cells until each one is gone.
++- **When several big builds load at once, they load one after another**, so the last one can
++  take several times as long (about 2 s per 20,000 blocks, estimated).
++- **On a full server, a player who joins just after someone with a big build leaves** can wait
++  up to about two seconds for their plot to start loading.
++- **No server-wide freeze or rubber-banding** when big builds load or unload, and no single
++  large `ProcessPackets` hitch on clients. The same blocks still replicate, but at about
++  3 ms of server work per frame.
++
++## Expected numbers (not yet measured)
++
++These are estimates from baseplate measurements of instance creation, not measurements in this
++place. Check them before calling this done.
++
++| Metric | Before | After (expected) |
++|---|---|---|
++| Worst server frame while a 20,000-block build loads | about 2,100 ms | about 3 ms in `Builds:Step`, plus normal frame cost |
++| Instances per block | 3 | 1 |
++| Time until a 20,000-block build is fully visible | one frame (frozen) | about 1.5 to 2.5 s at 60 Hz |
++| Worst server frame while it unloads | the smaller freeze from your report | about 3 ms in `Builds:Step` |
++
++## How to verify
++
++1. In Studio, start a local server with 2 or more players (Test, Clients and Servers).
++2. Open the server's MicroProfiler (Ctrl+F6 on the server view, or the Developer Console), and
++   have one player join and leave while you record.
++3. Check that no frame spikes above about 20 ms during the load and the unload, that
++   `Builds:Step` stays near 3 ms per frame, and how many frames the load spans.
++4. On a client, record during another player's join and check `ProcessPackets` for spikes.
++5. Check by hand: you can place and remove your own blocks while your build loads; you cannot
++   remove another player's blocks; leaving mid-load leaves no stray blocks behind; after a
++   departing build finishes unloading, its cells can be built on again; and `PlacedAt` and
++   `OwnerId` show in the Properties panel on a selected block.
++
++If loading takes too long, raise `FRAME_ALLOWANCE`. If server frames are still heavy, lower it.
++
++## Not changed
++
++- `SavedBuilds.load` still builds the 20,000-entry test table in one call, and reserving cells
++  walks it in one frame. Both are plain Luau work (expected a few ms) and were left alone until
++  a profile shows them.
++- Every block is still its own replicated `Part`. If joins or memory become the next problem,
++  the next step is streaming (`Workspace.StreamingEnabled`) or keeping builds as data on the
++  server and having clients build the visuals.
+diff --git a/src/ServerScriptService/Builds.server.luau b/src/ServerScriptService/Builds.server.luau
+index e6bec85..a42198b 100644
+--- a/src/ServerScriptService/Builds.server.luau
++++ b/src/ServerScriptService/Builds.server.luau
+@@ -1,11 +1,13 @@
+ --[[
+ 	Player builds. Each player gets a plot when they join and their saved build is loaded into it.
+ 	Players place blocks with PlaceBlock and remove their own blocks with RemoveBlock. A player's
+-	plot and blocks are removed when they leave.
++	plot and blocks are removed when they leave. Loading and unloading are spread across frames;
++	see docs/perf/build-loading.md.
+ ]]
+ 
+ local Players = game:GetService("Players")
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
+ local Workspace = game:GetService("Workspace")
+ 
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+@@ -19,6 +21,28 @@ local PLOT_SPACING = 256
+ local MAX_REACH = 64
+ -- Shortest time between two placements by one player, in seconds.
+ local MIN_INTERVAL = 0.1
++-- Server time per frame for creating and destroying blocks, shared by every plot, in seconds.
++local FRAME_ALLOWANCE = 0.003
++local BLOCKS_PER_CLOCK_CHECK = 8
++
++type PlotState = "Loading" | "Ready" | "Unloading"
++
++type Plot = {
++	Owner: Player,
++	Slot: number,
++	Folder: Folder,
++	State: PlotState,
++	-- Every block that exists in this plot, mapped to its cell.
++	Blocks: { [BasePart]: Vector3 },
++	-- Saved blocks not created yet. Their cells are already reserved in `occupied`, so nobody
++	-- can place into a cell the build is about to fill.
++	PendingCells: { Vector3 },
++	PendingTypes: { BlockTypes.BlockType },
++	PendingPlacedAt: { number },
++	NextPending: number,
++	Removals: { BasePart },
++	NextRemoval: number,
++}
+ 
+ local placeBlock = Instance.new("RemoteEvent")
+ placeBlock.Name = "PlaceBlock"
+@@ -34,8 +58,12 @@ plotsFolder.Parent = Workspace
+ 
+ local occupied: { [Vector3]: boolean } = {}
+ local lastPlacedAt: { [Player]: number } = {}
+-local plotSlots: { [number]: Player } = {}
+-local plotFolders: { [Player]: Folder } = {}
++local plotSlots: { [number]: Plot } = {}
++local plotsByPlayer: { [Player]: Plot } = {}
++local plotsByBlock: { [BasePart]: Plot? } = {}
++-- Plots with blocks to create or destroy, served first come, first served.
++local busyPlots: { Plot } = {}
++local waitingPlayers: { Player } = {}
+ 
+ local function snapAxis(value: number): number
+ 	return math.floor(value / BLOCK_SIZE) * BLOCK_SIZE + BLOCK_SIZE / 2
+@@ -58,13 +86,12 @@ local function getReachableRoot(player: Player, position: Vector3): BasePart?
+ end
+ 
+ local function createBlock(
+-	parent: Instance,
++	plot: Plot,
+ 	blockType: BlockTypes.BlockType,
+ 	cell: Vector3,
+-	ownerId: number,
+ 	placedAt: number
+ ): Part
+-	local part = Instance.new("Part", parent)
++	local part = Instance.new("Part")
+ 	part.Name = blockType.Name
+ 	part.Anchored = true
+ 	part.Size = Vector3.one * BLOCK_SIZE
+@@ -72,76 +99,186 @@ local function createBlock(
+ 	part.Color = blockType.Color
+ 	part.Material = blockType.Material
+ 	part.Transparency = blockType.Transparency
++	part:SetAttribute("OwnerId", plot.Owner.UserId)
++	part:SetAttribute("PlacedAt", placedAt)
++	part.Parent = plot.Folder
+ 
+-	local owner = Instance.new("StringValue")
+-	owner.Name = "Owner"
+-	owner.Value = tostring(ownerId)
+-	owner.Parent = part
++	plot.Blocks[part] = cell
++	plotsByBlock[part] = plot
++	return part
++end
+ 
+-	local placedAtValue = Instance.new("NumberValue")
+-	placedAtValue.Name = "PlacedAt"
+-	placedAtValue.Value = placedAt
+-	placedAtValue.Parent = part
++local function destroyBlock(plot: Plot, block: BasePart)
++	local cell = plot.Blocks[block]
++	if cell then
++		occupied[cell] = nil
++		plot.Blocks[block] = nil
++	end
++	plotsByBlock[block] = nil
++	block:Destroy()
++end
+ 
+-	return part
++local function findFreeSlot(): number?
++	for index = 1, MAX_PLOTS do
++		if not plotSlots[index] then
++			return index
++		end
++	end
++	return nil
+ end
+ 
+-local function loadBuild(player: Player, plotFolder: Folder, plotCorner: Vector3)
++local function startLoading(player: Player, slot: number)
++	local plotFolder = Instance.new("Folder")
++	plotFolder.Name = tostring(player.UserId)
++	plotFolder.Parent = plotsFolder
++
++	local plot: Plot = {
++		Owner = player,
++		Slot = slot,
++		Folder = plotFolder,
++		State = "Loading",
++		Blocks = {},
++		PendingCells = {},
++		PendingTypes = {},
++		PendingPlacedAt = {},
++		NextPending = 1,
++		Removals = {},
++		NextRemoval = 1,
++	}
++	plotSlots[slot] = plot
++	plotsByPlayer[player] = plot
++
++	local plotCorner = Vector3.new((slot - 1) * PLOT_SPACING, 0, 0)
+ 	local savedBlocks = SavedBuilds.load(player.UserId)
++	-- The DataStore version of load yields, and the player may leave meanwhile.
++	if plot.State ~= "Loading" then
++		return
++	end
++
+ 	for _, savedBlock in savedBlocks do
+ 		local blockType = BlockTypes.ByName[savedBlock.Type]
+ 		if blockType then
+ 			local cell = snapToCell(plotCorner + savedBlock.Cell * BLOCK_SIZE)
+ 			if not occupied[cell] then
+ 				occupied[cell] = true
+-				createBlock(plotFolder, blockType, cell, player.UserId, savedBlock.PlacedAt)
++				table.insert(plot.PendingCells, cell)
++				table.insert(plot.PendingTypes, blockType)
++				table.insert(plot.PendingPlacedAt, savedBlock.PlacedAt)
+ 			end
+ 		end
+ 	end
++	table.insert(busyPlots, plot)
+ end
+ 
+-local function onPlayerAdded(player: Player)
+-	local slot = nil
+-	for index = 1, MAX_PLOTS do
+-		if not plotSlots[index] then
+-			slot = index
+-			break
++local function assignWaitingPlayers()
++	while waitingPlayers[1] do
++		local slot = findFreeSlot()
++		if not slot then
++			return
+ 		end
++		local player = table.remove(waitingPlayers, 1) :: Player
++		task.spawn(startLoading, player, slot)
+ 	end
+-	if not slot then
+-		warn(`no free plot for {player.Name}`)
++end
++
++--[[
++	Creates or destroys one block of the plot's queued work. Returns false once the plot has none
++	left.
++]]
++local function stepPlot(plot: Plot): boolean
++	if plot.State == "Unloading" then
++		local block = plot.Removals[plot.NextRemoval]
++		if not block then
++			plot.Folder:Destroy()
++			plotSlots[plot.Slot] = nil
++			assignWaitingPlayers()
++			return false
++		end
++		plot.Removals[plot.NextRemoval] = nil
++		plot.NextRemoval += 1
++		destroyBlock(plot, block)
++		return true
++	end
++
++	local index = plot.NextPending
++	local cell = plot.PendingCells[index]
++	if not cell then
++		plot.State = "Ready"
++		plot.PendingCells = {}
++		plot.PendingTypes = {}
++		plot.PendingPlacedAt = {}
++		return false
++	end
++	plot.NextPending = index + 1
++	createBlock(plot, plot.PendingTypes[index], cell, plot.PendingPlacedAt[index])
++	return true
++end
++
++local function onHeartbeat()
++	if not busyPlots[1] then
+ 		return
+ 	end
+-	plotSlots[slot] = player
+ 
+-	local plotFolder = Instance.new("Folder")
+-	plotFolder.Name = tostring(player.UserId)
+-	plotFolder.Parent = plotsFolder
+-	plotFolders[player] = plotFolder
++	debug.profilebegin("Builds:Step")
++	local deadline = os.clock() + FRAME_ALLOWANCE
++	local handled = 0
++	while busyPlots[1] do
++		if handled % BLOCKS_PER_CLOCK_CHECK == 0 and os.clock() >= deadline then
++			break
++		end
++		if stepPlot(busyPlots[1]) then
++			handled += 1
++		else
++			table.remove(busyPlots, 1)
++		end
++	end
++	debug.profileend()
++end
++
++local function startUnloading(plot: Plot)
++	local wasLoading = plot.State == "Loading"
++	plot.State = "Unloading"
++
++	for index = plot.NextPending, #plot.PendingCells do
++		occupied[plot.PendingCells[index]] = nil
++	end
++	plot.PendingCells = {}
++	plot.PendingTypes = {}
++	plot.PendingPlacedAt = {}
+ 
+-	loadBuild(player, plotFolder, Vector3.new((slot - 1) * PLOT_SPACING, 0, 0))
++	for block in plot.Blocks do
++		table.insert(plot.Removals, block)
++	end
++
++	-- A plot still loading may already be queued; it then unloads in its current place.
++	if not wasLoading or not table.find(busyPlots, plot) then
++		table.insert(busyPlots, plot)
++	end
++end
++
++local function onPlayerAdded(player: Player)
++	local slot = findFreeSlot()
++	if not slot then
++		table.insert(waitingPlayers, player)
++		return
++	end
++	startLoading(player, slot)
+ end
+ 
+ local function onPlayerRemoving(player: Player)
+ 	lastPlacedAt[player] = nil
+ 
+-	for slot, owner in plotSlots do
+-		if owner == player then
+-			plotSlots[slot] = nil
+-		end
++	local waitingIndex = table.find(waitingPlayers, player)
++	if waitingIndex then
++		table.remove(waitingPlayers, waitingIndex)
+ 	end
+ 
+-	local plotFolder = plotFolders[player]
+-	if not plotFolder then
++	local plot = plotsByPlayer[player]
++	if not plot then
+ 		return
+ 	end
+-	plotFolders[player] = nil
+-	for _, block in plotFolder:GetChildren() do
+-		if block:IsA("BasePart") then
+-			occupied[block.Position] = nil
+-		end
+-	end
+-	plotFolder:Destroy()
++	plotsByPlayer[player] = nil
++	startUnloading(plot)
+ end
+ 
+ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+@@ -153,8 +290,8 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 		return
+ 	end
+ 	local blockType = BlockTypes.ByName[blockTypeName]
+-	local plotFolder = plotFolders[player]
+-	if not blockType or not plotFolder then
++	local plot = plotsByPlayer[player]
++	if not blockType or not plot then
+ 		return
+ 	end
+ 
+@@ -170,32 +307,29 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 
+ 	lastPlacedAt[player] = now
+ 	occupied[cell] = true
+-	createBlock(plotFolder, blockType, cell, player.UserId, os.time())
++	createBlock(plot, blockType, cell, os.time())
+ end
+ 
+ local function onRemoveBlock(player: Player, block: unknown)
+ 	if typeof(block) ~= "Instance" or not block:IsA("BasePart") then
+ 		return
+ 	end
+-	if not block:IsDescendantOf(plotsFolder) then
+-		return
+-	end
+-	local owner = block:FindFirstChild("Owner")
+-	if not owner or not owner:IsA("StringValue") or owner.Value ~= tostring(player.UserId) then
++	local plot = plotsByBlock[block]
++	if not plot or plot.Owner ~= player or plot.State == "Unloading" then
+ 		return
+ 	end
+ 	if not getReachableRoot(player, block.Position) then
+ 		return
+ 	end
+ 
+-	occupied[block.Position] = nil
+-	block:Destroy()
++	destroyBlock(plot, block)
+ end
+ 
+ placeBlock.OnServerEvent:Connect(onPlaceBlock)
+ removeBlock.OnServerEvent:Connect(onRemoveBlock)
+ Players.PlayerAdded:Connect(onPlayerAdded)
+ Players.PlayerRemoving:Connect(onPlayerRemoving)
++RunService.Heartbeat:Connect(onHeartbeat)
+ for _, player in Players:GetPlayers() do
+ 	task.spawn(onPlayerAdded, player)
+ end

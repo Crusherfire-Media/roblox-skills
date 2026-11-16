@@ -1,0 +1,126 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts get the main parts right: an owning Charm module, cloned tables on each update, a useSignalState bridge, and a Charm-reading guard. A is a bit more robust. It validates names, skips updates that change nothing, doesn't block BlockPlacer.start, and keeps the project's require style. B mixes `@game` string requires and `const` into the code and starts the stock listener in line, ahead of BlockPlacer.start.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "1. Single owning Charm signal",
+          "score": 5,
+          "note": "BlockStock.luau holds getStock/setStock privately, exposes getStock/getCount, and writes only in onStockChanged."
+        },
+        {
+          "criterion": "2. New table per update",
+          "score": 5,
+          "note": "setStock updater does table.clone(stock), sets one entry, and returns the original when the count is unchanged."
+        },
+        {
+          "criterion": "3. Shared derived values / Charm guard",
+          "score": 3,
+          "note": "The guard reads BlockStock.getCount(blockType) directly from Charm, but there's no shared computed for the selected count or can-place; the UI derives it again in BlockPicker."
+        },
+        {
+          "criterion": "4. Vide-tracked bridge",
+          "score": 5,
+          "note": "Main.client creates `VideCharm.useSignalState(BlockStock.getStock)` inside app() and passes it down as a source; tiles select by name."
+        },
+        {
+          "criterion": "5. Live updates & pre-first-update look",
+          "score": 5,
+          "note": "Count, background, text color and the 'n left' label are bound to the Stock/Selected sources; missing counts show blank and are not grayed."
+        },
+        {
+          "criterion": "6. No yields in Charm callbacks / no leaks",
+          "score": 5,
+          "note": "The updater is pure; the only listener is the useSignalState one, which Vide cleans up; start yields outside Charm."
+        },
+        {
+          "criterion": "7. Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "Only the client files plus BlockStock change; names are validated against BlockTypes.ByName; task.spawn keeps BlockPlacer.start from waiting; all checks pass."
+        }
+      ],
+      "overall_score": 8.5
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "1. Single owning Charm signal",
+          "score": 5,
+          "note": "BlockStock.luau keeps the signal private, exposes getStock and :GetCount, and writes only from onStockChanged."
+        },
+        {
+          "criterion": "2. New table per update",
+          "score": 5,
+          "note": "The updater clones the stock, sets one entry, and returns the new table."
+        },
+        {
+          "criterion": "3. Shared derived values / Charm guard",
+          "score": 3,
+          "note": "The guard calls BlockStock:GetCount(name), which reads Charm directly, but the selected count is derived separately in the UI with no shared computed."
+        },
+        {
+          "criterion": "4. Vide-tracked bridge",
+          "score": 5,
+          "note": "useSignalState(BlockStock.getStock) is created in app() and passed as a source to BlockPicker."
+        },
+        {
+          "criterion": "5. Live updates & pre-first-update look",
+          "score": 5,
+          "note": "Tile color, count text and the SelectedCount label are reactive functions of the Stock/Selected sources; they're blank before the first update."
+        },
+        {
+          "criterion": "6. No yields in Charm callbacks / no leaks",
+          "score": 5,
+          "note": "The updater is pure; StartAsync's WaitForChild is outside Charm; no stray effects."
+        },
+        {
+          "criterion": "7. Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "Checks pass, but it mixes `const` and `@game/` string requires with the existing script.Parent style (runtime alias risk), blocks BlockPlacer.start behind StartAsync, and doesn't validate block type names."
+        }
+      ],
+      "overall_score": 7.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 8.5,
+      "strengths": [
+        "Clean owning module with an immutable update and a no-op when nothing changed",
+        "Validates the remote payload against BlockTypes.ByName",
+        "Starts the stock listener without blocking BlockPlacer.start",
+        "Requires are consistent with the existing code"
+      ],
+      "weaknesses": [
+        "No single computed for the selected count or can-place shared by the placer and the UI",
+        "getCount returns nil, so callers have to remember `or 0`"
+      ]
+    },
+    "B": {
+      "score": 7.5,
+      "strengths": [
+        "Correct immutable signal module and Vide bridge",
+        "GetCount defaults to 0, so the guard is simple",
+        "Story file for previewing the UI (neutral)"
+      ],
+      "weaknesses": [
+        "Inconsistent require and syntax styles (`@game` alias, `const`) in otherwise plain-Luau files",
+        "StartAsync runs in line before BlockPlacer.start",
+        "No validation of the block type name from the remote",
+        "No shared computed for the selected count"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "without_skill": 8.5,
+    "with_skill": 7.5
+  },
+  "mapping": {
+    "A": "without_skill/run-1",
+    "B": "with_skill/run-1"
+  }
+}

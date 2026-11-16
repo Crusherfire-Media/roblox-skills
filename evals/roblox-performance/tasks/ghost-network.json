@@ -1,0 +1,62 @@
+{
+  "id": 3,
+  "name": "ghost-network",
+  "skill": "roblox-performance",
+  "prompt": "Ghost previews (src/ServerScriptService/GhostPreview.server.luau and src/StarterPlayer/StarterPlayerScripts/GhostPreview.client.luau) let everyone see where each builder is about to place a block. In a 12-player test, ping climbed to 300-400 ms once a few people were building, and other players' ghosts jumped around. The client fires MoveGhost from RenderStepped, so someone at 240 FPS sends 240 messages a second, and the server moves a replicated ghost part for every one of them.\n\nRework the ghost previews so they stay cheap on the network with 12 or more players, while everyone still sees everyone else's ghost follow their cursor smoothly. Your own ghost should feel at least as responsive as it does now. Don't change how placing blocks works. In docs/perf/ghost-network.md, estimate the ghost traffic before and after and show how you worked it out, and list anything players will notice as different.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacement.server.luau",
+      "to": "src/ServerScriptService/BlockPlacement.server.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacer.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+    },
+    {
+      "from": "fixtures/shared/Main.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+    },
+    {
+      "from": "fixtures/ghost-network/GhostPreview.server.luau",
+      "to": "src/ServerScriptService/GhostPreview.server.luau"
+    },
+    {
+      "from": "fixtures/ghost-network/GhostPreview.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/GhostPreview.client.luau"
+    }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/perf/ghost-network.md",
+      "text": "The write-up was written to docs/perf/ghost-network.md"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/GhostPreview.server.luau",
+      "pattern": "ghost\\.CFrame\\s*=",
+      "text": "The server no longer moves a replicated ghost part (planted per-message CFrame write is gone)"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/BlockPlacement.server.luau",
+      "pattern": "UnreliableRemoteEvent",
+      "text": "PlaceBlock is still a reliable RemoteEvent"
+    }
+  ],
+  "rubric": [
+    "The client sends a ghost update only when what it shows changes (the cursor cell, the block type, or shown versus hidden), at a capped rate (about 10 to 20 updates a second or fewer), instead of every rendered frame. The send rate no longer depends on the frame rate, and an idle builder sends nothing.",
+    "Ghost visuals are built on each client: the server no longer creates or moves a replicated ghost part per player. It relays each builder's ghost state to the other clients (optionally only to players near that builder), and they create and update their own local ghost parts, smoothing between updates if they like.",
+    "The builder's own ghost is drawn locally from their own cursor every frame, with no server round trip, so it is at least as responsive as before.",
+    "Ghost updates, which are continuous and replaceable, travel on an UnreliableRemoteEvent (or the design otherwise tolerates dropped and out-of-order updates without stalling other traffic), while PlaceBlock stays a reliable RemoteEvent and placement works exactly as before.",
+    "The server treats ghost messages as untrusted before relaying them: it checks types, rejects NaN or non-finite positions and unknown block types, limits each player's rate, and does not echo a builder's updates back to that builder. Remote ghosts are removed when their builder leaves and hidden when the builder stops building.",
+    "docs/perf/ghost-network.md estimates the traffic before and after from the send rates, the number of players, and the bytes per message or per replicated change, without presenting unmeasured numbers as measured, and lists what players will notice (for example other players' ghosts updating a little less often).",
+    "Correct and in scope: changes stay in the two ghost scripts and the write-up (plus anything strictly needed), the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files count neither for nor against."
+  ],
+  "timeout_minutes": 20
+}

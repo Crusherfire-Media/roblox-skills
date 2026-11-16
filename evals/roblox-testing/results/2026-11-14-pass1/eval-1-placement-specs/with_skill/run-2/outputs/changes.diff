@@ -1,0 +1,188 @@
+diff --git a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+new file mode 100644
+index 0000000..eeecb4a
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+@@ -0,0 +1,182 @@
++--!strict
++const JestGlobals = require("@game/ServerScriptService/Tests/Packages/JestGlobals")
++const describe = JestGlobals.describe
++const expect = JestGlobals.expect
++const it = JestGlobals.it
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const PlacementRules = require("@game/ReplicatedStorage/Shared/PlacementRules")
++
++-- Positions are written in block units so the cases hold for any BlockSize.
++const SIZE = BlockTypes.BlockSize
++const VALID_BLOCK = BlockTypes.List[1].Name
++
++type SnapRow = {
++	Case: string,
++	Position: Vector3,
++	Center: Vector3,
++}
++
++type BadInputRow = {
++	Case: string,
++	Name: unknown,
++	Position: unknown,
++}
++
++describe("PlacementRules", function()
++	describe("snap", function()
++		it.each({
++			{
++				Case = "inside a cell",
++				Position = Vector3.new(1.25, 0.25, 2.9),
++				Center = Vector3.new(1.5, 0.5, 2.5),
++			},
++			{
++				Case = "at negative coordinates",
++				Position = Vector3.new(-0.25, -1.75, -0.9),
++				Center = Vector3.new(-0.5, -1.5, -0.5),
++			},
++			{
++				Case = "on a cell edge, which belongs to the cell above it",
++				Position = Vector3.new(1, 0, -1),
++				Center = Vector3.new(1.5, 0.5, -0.5),
++			},
++		})("returns the center of the cell holding a position $Case", function(row: SnapRow)
++			local center = PlacementRules.snap(row.Position * SIZE)
++
++			expect(center).toEqual(row.Center * SIZE)
++		end)
++	end)
++
++	describe("validate", function()
++		const position = Vector3.new(1.25, 0.25, 1.75) * SIZE
++		const cellCenter = Vector3.new(1.5, 0.5, 1.5) * SIZE
++
++		it("accepts a placement and returns the center of its cell", function()
++			local isAllowed, center = PlacementRules.validate(VALID_BLOCK, position, position, {})
++
++			expect(isAllowed).toBe(true)
++			expect(center).toEqual(cellCenter)
++		end)
++
++		it("accepts every block type in BlockTypes", function()
++			local refused = {}
++
++			for _, blockType in BlockTypes.List do
++				local isAllowed = PlacementRules.validate(blockType.Name, position, position, {})
++				if not isAllowed then
++					table.insert(refused, blockType.Name)
++				end
++			end
++
++			expect(refused).toEqual({})
++		end)
++
++		it.each({
++			{ Case = "a block type that is not a string", Name = 1, Position = position },
++			{ Case = "an unknown block type", Name = "NotABlock", Position = position },
++			{ Case = "a position that is not a Vector3", Name = VALID_BLOCK, Position = "1, 1, 1" },
++			{
++				Case = "a NaN component",
++				Name = VALID_BLOCK,
++				Position = Vector3.new(0 / 0, SIZE, SIZE),
++			},
++			{
++				Case = "an infinite component",
++				Name = VALID_BLOCK,
++				Position = Vector3.new(SIZE, math.huge, SIZE),
++			},
++			{
++				Case = "a negative infinite component",
++				Name = VALID_BLOCK,
++				Position = Vector3.new(SIZE, SIZE, -math.huge),
++			},
++		} :: { BadInputRow })("refuses $Case", function(row: BadInputRow)
++			local isAllowed = PlacementRules.validate(row.Name, row.Position, position, {})
++
++			expect(isAllowed).toBe(false)
++		end)
++
++		-- A position's cell center lies within half a block of it, so the rows
++		-- below pick the two cells on each side of each height limit.
++		it.each({
++			{ Case = "the lowest cell on the Baseplate", Y = 0, IsAllowed = true },
++			{ Case = "a cell below the Baseplate's top", Y = -0.01, IsAllowed = false },
++			{
++				Case = "the highest cell at or below MaxHeight",
++				Y = PlacementRules.MaxHeight - SIZE / 2,
++				IsAllowed = true,
++			},
++			{
++				Case = "the lowest cell above MaxHeight",
++				Y = PlacementRules.MaxHeight + SIZE / 2,
++				IsAllowed = false,
++			},
++		})("allows $Case: $IsAllowed", function(row)
++			local target = Vector3.new(SIZE / 2, row.Y, SIZE / 2)
++
++			local isAllowed = PlacementRules.validate(VALID_BLOCK, target, target, {})
++
++			expect(isAllowed).toBe(row.IsAllowed)
++		end)
++
++		it("refuses a player with no character", function()
++			local isAllowed = PlacementRules.validate(VALID_BLOCK, position, nil, {})
++
++			expect(isAllowed).toBe(false)
++		end)
++
++		it.each({
++			{
++				Case = "just inside MaxReach",
++				Distance = PlacementRules.MaxReach - 0.01,
++				IsAllowed = true,
++			},
++			{
++				Case = "just past MaxReach",
++				Distance = PlacementRules.MaxReach + 0.01,
++				IsAllowed = false,
++			},
++		})("allows a cell $Case of the character: $IsAllowed", function(row)
++			local root = cellCenter + Vector3.new(row.Distance, 0, 0)
++
++			local isAllowed = PlacementRules.validate(VALID_BLOCK, cellCenter, root, {})
++
++			expect(isAllowed).toBe(row.IsAllowed)
++		end)
++
++		-- Fails on purpose: validate's doc comment says a cell exactly MaxReach
++		-- away is in reach, but the code refuses it because it compares with >=
++		-- instead of >.
++		it("accepts a cell exactly MaxReach from the character", function()
++			local root = cellCenter + Vector3.new(PlacementRules.MaxReach, 0, 0)
++
++			local isAllowed = PlacementRules.validate(VALID_BLOCK, cellCenter, root, {})
++
++			expect(isAllowed).toBe(true)
++		end)
++
++		it.each({
++			{ Case = "its own cell is occupied", Occupied = cellCenter, IsAllowed = false },
++			{
++				Case = "only the next cell is occupied",
++				Occupied = cellCenter + Vector3.new(SIZE, 0, 0),
++				IsAllowed = true,
++			},
++		})("allows a position when $Case: $IsAllowed", function(row)
++			local occupied = { [row.Occupied] = true }
++
++			local isAllowed = PlacementRules.validate(VALID_BLOCK, position, position, occupied)
++
++			expect(isAllowed).toBe(row.IsAllowed)
++		end)
++
++		it("leaves occupied unchanged when it accepts a placement", function()
++			local occupied = {}
++
++			PlacementRules.validate(VALID_BLOCK, position, position, occupied)
++
++			expect(occupied).toEqual({})
++		end)
++	end)
++end)

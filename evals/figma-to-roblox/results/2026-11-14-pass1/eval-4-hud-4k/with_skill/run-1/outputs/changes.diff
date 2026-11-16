@@ -1,0 +1,666 @@
+diff --git a/src/ServerScriptService/Stories/CoinCounter.story.luau b/src/ServerScriptService/Stories/CoinCounter.story.luau
+new file mode 100644
+index 0000000..dfb085a
+--- /dev/null
++++ b/src/ServerScriptService/Stories/CoinCounter.story.luau
+@@ -0,0 +1,27 @@
++--!strict
++const UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const CoinCounter = require("@game/StarterPlayer/StarterPlayerScripts/UI/CoinCounter")
++
++const CONTROLS = {
++	Coins = UILabs.Ordered(UILabs.Slider(12450, 0, 100000000, 1), 1),
++}
++
++type StoryProps = {
++	controls: {
++		Coins: () -> number,
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	return CoinCounter({ Coins = props.controls.Coins })
++end
++
++return {
++	summary = "The HUD coin pill. Drag Coins to the top for the widest amount.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/ServerScriptService/Stories/GameUI.storybook.luau b/src/ServerScriptService/Stories/GameUI.storybook.luau
+new file mode 100644
+index 0000000..dd3b6dc
+--- /dev/null
++++ b/src/ServerScriptService/Stories/GameUI.storybook.luau
+@@ -0,0 +1,5 @@
++--!strict
++return {
++	name = "Game UI",
++	storyRoots = { script.Parent },
++}
+diff --git a/src/ServerScriptService/Stories/QuestCard.story.luau b/src/ServerScriptService/Stories/QuestCard.story.luau
+new file mode 100644
+index 0000000..a6b197e
+--- /dev/null
++++ b/src/ServerScriptService/Stories/QuestCard.story.luau
+@@ -0,0 +1,78 @@
++--!strict
++const UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const QuestCard = require("@game/StarterPlayer/StarterPlayerScripts/UI/QuestCard")
++
++type Sample = {
++	Title: string,
++	Description: string,
++}
++
++const SAMPLES: { [string]: Sample } = {
++	Design = {
++		Title = "Place 10 blocks",
++		Description = "Build anywhere on the baseplate. Blocks you remove don't count.",
++	},
++	Long = {
++		Title = "Build a tower taller than the clock tower in the town square before sunset",
++		Description = "Stack blocks of any type on top of each other until your tower "
++			.. "reaches past the top of the clock tower. Blocks other players place on "
++			.. "your tower count too, so ask your friends for help. Towers that fall "
++			.. "over before you finish don't count, and you have to start again from "
++			.. "the ground. Glass blocks are worth double.",
++	},
++	NoDescription = {
++		Title = "Place 10 blocks",
++		Description = "",
++	},
++}
++
++const CONTROLS = {
++	Quest = UILabs.Ordered(
++		UILabs.ControlGroup({
++			Text = UILabs.Ordered(UILabs.Choose({ "Design", "Long", "NoDescription" }), 1),
++			Progress = UILabs.Ordered(UILabs.Slider(6, 0, 1000, 1), 2),
++			Goal = UILabs.Ordered(UILabs.Slider(10, 0, 1000, 1), 3),
++		}),
++		1
++	),
++}
++
++type StoryProps = {
++	controls: {
++		Quest: {
++			Text: () -> string,
++			Progress: () -> number,
++			Goal: () -> number,
++		},
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	const quest = props.controls.Quest
++
++	local function sample(): Sample
++		return SAMPLES[quest.Text()] or SAMPLES.Design
++	end
++
++	return QuestCard({
++		Title = function()
++			return sample().Title
++		end,
++		Description = function()
++			return sample().Description
++		end,
++		Progress = quest.Progress,
++		Goal = quest.Goal,
++	})
++end
++
++return {
++	summary = "The HUD quest card, with the design's text, long text cut at its line "
++		.. "limits, and a quest with no description.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index daf599e..9d53bfe 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -1,20 +1,53 @@
+-local Players = game:GetService("Players")
+-local ReplicatedStorage = game:GetService("ReplicatedStorage")
++--!strict
++const Players = game:GetService("Players")
+ 
+-local BlockPlacer = require(script.Parent.BlockPlacer)
+-local Screen = require(script.Parent.UI.Screen)
+-local Vide = require(ReplicatedStorage.Packages.Vide)
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
+ 
+-local create = Vide.create
+-local mount = Vide.mount
++const BlockPlacer = require("./BlockPlacer")
++const CoinCounter = require("./UI/CoinCounter")
++const HudData = require("./HudData")
++const QuestCard = require("./UI/QuestCard")
++const Screen = require("./UI/Screen")
+ 
+-local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
++const batch = Vide.batch
++const create = Vide.create
++const mount = Vide.mount
++const source = Vide.source
++
++const playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
++
++const coins = source(HudData.getCoins())
++const quest = source(HudData.getQuest())
++
++HudData.Changed:Connect(function()
++	batch(function()
++		coins(HudData.getCoins())
++		quest(HudData.getQuest())
++	end)
++end)
+ 
+ mount(function()
+ 	return create("ScreenGui")({
+ 		Name = "GameGui",
+ 
+-		Screen.uiScale(),
++		-- Widened so the old type solver accepts the Frames after it.
++		Screen.uiScale() :: Instance,
++
++		CoinCounter({ Coins = coins }),
++		QuestCard({
++			Title = function()
++				return quest().Title
++			end,
++			Description = function()
++				return quest().Description
++			end,
++			Progress = function()
++				return quest().Progress
++			end,
++			Goal = function()
++				return quest().Goal
++			end,
++		}),
+ 	})
+ end, playerGui)
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau b/src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau
+new file mode 100644
+index 0000000..1deadfb
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/CoinCounter.luau
+@@ -0,0 +1,100 @@
++--!strict
++--[[
++	The coin pill at the top center of the HUD (Figma "Coin Pill", 40:13). It
++	grows sideways with the amount and stays centered.
++]]
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const HudAssets = require("./HudAssets")
++const Theme = require("./Theme")
++
++const create = Vide.create
++const read = Vide.read
++
++const COLORS = Theme.Colors
++const SIZES = Theme.Sizes
++const TEXT = Theme.Text
++
++export type CoinCounterProps = {
++	Coins: number | () -> number,
++}
++
++-- Whole coins with thousands separators, as the design shows them: 12,450.
++local function formatCoins(amount: number): string
++	local digits = string.format("%d", math.floor(math.abs(amount)))
++	local grouped = string.reverse((string.gsub(string.reverse(digits), "(%d%d%d)", "%1,")))
++	if string.sub(grouped, 1, 1) == "," then
++		grouped = string.sub(grouped, 2)
++	end
++	return if amount < 0 then `-{grouped}` else grouped
++end
++
++local function coinCounter(props: CoinCounterProps): Frame
++	const icon = HudAssets.CoinIcon
++
++	return create("Frame")({
++		Name = "CoinCounter",
++		AnchorPoint = Vector2.new(0.5, 0),
++		Position = UDim2.new(0.5, 0, 0, SIZES.PillTop),
++		Size = UDim2.fromOffset(0, SIZES.PillHeight),
++		AutomaticSize = Enum.AutomaticSize.X,
++		BackgroundColor3 = COLORS.PillFill,
++		BackgroundTransparency = COLORS.PillFillTransparency,
++
++		create("UICorner")({ CornerRadius = UDim.new(1, 0) }),
++		create("UIPadding")({
++			PaddingLeft = UDim.new(0, SIZES.PillPaddingLeft),
++			PaddingRight = UDim.new(0, SIZES.PillPaddingRight),
++		}),
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++			Padding = UDim.new(0, SIZES.PillGap),
++		}),
++
++		create("Frame")({
++			Name = "Icon",
++			LayoutOrder = 1,
++			Size = UDim2.fromOffset(SIZES.CoinIcon, SIZES.CoinIcon),
++			BackgroundTransparency = 1,
++
++			-- Larger than its slot so the baked glow draws past the coin without
++			-- pushing the amount away.
++			create("ImageLabel")({
++				Name = "Art",
++				AnchorPoint = Vector2.new(0.5, 0.5),
++				Position = UDim2.fromScale(0.5, 0.5),
++				Size = UDim2.fromOffset(SIZES.CoinIconWithGlow, SIZES.CoinIconWithGlow),
++				BackgroundTransparency = 1,
++				Image = icon.Image,
++				ImageRectOffset = icon.RectOffset,
++				ImageRectSize = icon.RectSize,
++				ScaleType = Enum.ScaleType.Fit,
++			}),
++		}),
++
++		create("TextLabel")({
++			Name = "Amount",
++			LayoutOrder = 2,
++			Size = UDim2.fromOffset(0, TEXT.CoinAmountLineHeight),
++			AutomaticSize = Enum.AutomaticSize.X,
++			BackgroundTransparency = 1,
++			FontFace = Theme.Fonts.ExtraBold,
++			TextSize = TEXT.CoinAmountSize,
++			TextColor3 = COLORS.TextPrimary,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			Text = function()
++				return formatCoins(read(props.Coins))
++			end,
++
++			create("UIStroke")({
++				ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
++				Color = COLORS.TextOutline,
++				Thickness = TEXT.CoinAmountStroke,
++			}),
++		}),
++	})
++end
++
++return coinCounter
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/HudAssets.luau b/src/StarterPlayer/StarterPlayerScripts/UI/HudAssets.luau
+new file mode 100644
+index 0000000..d090d96
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/HudAssets.luau
+@@ -0,0 +1,36 @@
++--!strict
++--[[
++	Baked HUD art, on one sheet because both icons always show together.
++
++	The sheet is 256x128 with two 128 pixel cells, exported at 2x (the UI's
++	largest scale) in full color, edges alpha-bled:
++	- Cell 1: Coin Icon (Figma 40:11), the 64 pixel coin with its glow baked
++	  in, 96x96 centered.
++	- Cell 2: Quest Icon (Figma 40:2, scroll and seal), 48x48 centered.
++
++	SHEET is a placeholder until the sheet is uploaded.
++]]
++
++export type Sprite = {
++	Image: string,
++	RectOffset: Vector2,
++	RectSize: Vector2,
++}
++
++const SHEET = "rbxassetid://0"
++
++local Module = {}
++
++Module.CoinIcon = table.freeze({
++	Image = SHEET,
++	RectOffset = Vector2.new(16, 16),
++	RectSize = Vector2.new(96, 96),
++}) :: Sprite
++
++Module.QuestIcon = table.freeze({
++	Image = SHEET,
++	RectOffset = Vector2.new(168, 40),
++	RectSize = Vector2.new(48, 48),
++}) :: Sprite
++
++return Module
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau b/src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau
+new file mode 100644
+index 0000000..ceda464
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/QuestCard.luau
+@@ -0,0 +1,222 @@
++--!strict
++--[[
++	The current quest, docked top right on the HUD (Figma "Quest Card", 40:10).
++	The card grows down with its text, up to TITLE_MAX_LINES of title and
++	BODY_MAX_LINES of description, and cuts longer text with an ellipsis so a
++	long quest can't cover the game.
++]]
++
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const HudAssets = require("./HudAssets")
++const Theme = require("./Theme")
++
++const create = Vide.create
++const read = Vide.read
++
++const COLORS = Theme.Colors
++const SIZES = Theme.Sizes
++const TEXT = Theme.Text
++
++const TITLE_MAX_LINES = 2
++const BODY_MAX_LINES = 4
++
++export type QuestCardProps = {
++	Title: string | () -> string,
++	Description: string | () -> string,
++	Progress: number | () -> number,
++	Goal: number | () -> number,
++}
++
++local function progressFraction(progress: number, goal: number): number
++	if goal <= 0 then
++		return 0
++	end
++	return math.clamp(progress / goal, 0, 1)
++end
++
++local function shadow(offset: number, blur: number, transparency: number, zIndex: number)
++	return create("UIShadow")({
++		Offset = UDim2.fromOffset(0, offset),
++		BlurRadius = UDim.new(0, blur),
++		Color = COLORS.Shadow,
++		Transparency = transparency,
++		-- The card is slightly see-through, so a shadow behind it would tint it.
++		ShowBehindParent = false,
++		ZIndex = zIndex,
++	})
++end
++
++local function header(props: QuestCardProps)
++	const icon = HudAssets.QuestIcon
++
++	return create("Frame")({
++		Name = "Header",
++		LayoutOrder = 1,
++		Size = UDim2.fromScale(1, 0),
++		AutomaticSize = Enum.AutomaticSize.Y,
++		BackgroundTransparency = 1,
++
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++			Padding = UDim.new(0, SIZES.HeaderGap),
++		}),
++
++		create("ImageLabel")({
++			Name = "Icon",
++			LayoutOrder = 1,
++			Size = UDim2.fromOffset(SIZES.QuestIcon, SIZES.QuestIcon),
++			BackgroundTransparency = 1,
++			Image = icon.Image,
++			ImageRectOffset = icon.RectOffset,
++			ImageRectSize = icon.RectSize,
++			ScaleType = Enum.ScaleType.Fit,
++		}),
++
++		create("TextLabel")({
++			Name = "Title",
++			LayoutOrder = 2,
++			Size = UDim2.new(1, -(SIZES.QuestIcon + SIZES.HeaderGap), 0, TEXT.QuestTitleLineHeight),
++			AutomaticSize = Enum.AutomaticSize.Y,
++			BackgroundTransparency = 1,
++			FontFace = Theme.Fonts.Bold,
++			TextSize = TEXT.QuestTitleSize,
++			LineHeight = TEXT.QuestTitleLineHeight / TEXT.QuestTitleSize,
++			TextColor3 = COLORS.TextPrimary,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			TextWrapped = true,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++			Text = props.Title,
++
++			create("UISizeConstraint")({
++				MaxSize = Vector2.new(math.huge, TEXT.QuestTitleLineHeight * TITLE_MAX_LINES),
++			}),
++		}),
++	})
++end
++
++local function body(props: QuestCardProps)
++	return create("TextLabel")({
++		Name = "Description",
++		LayoutOrder = 2,
++		Size = UDim2.new(1, 0, 0, TEXT.QuestBodyLineHeight),
++		AutomaticSize = Enum.AutomaticSize.Y,
++		BackgroundTransparency = 1,
++		FontFace = Theme.Fonts.Regular,
++		TextSize = TEXT.QuestBodySize,
++		LineHeight = TEXT.QuestBodyLineHeight / TEXT.QuestBodySize,
++		TextColor3 = COLORS.TextSecondary,
++		TextXAlignment = Enum.TextXAlignment.Left,
++		TextYAlignment = Enum.TextYAlignment.Top,
++		TextWrapped = true,
++		TextTruncate = Enum.TextTruncate.AtEnd,
++		Text = props.Description,
++		-- A quest with no description has no subject for this line.
++		Visible = function()
++			return read(props.Description) ~= ""
++		end,
++
++		create("UISizeConstraint")({
++			MaxSize = Vector2.new(math.huge, TEXT.QuestBodyLineHeight * BODY_MAX_LINES),
++		}),
++	})
++end
++
++local function progressRow(props: QuestCardProps)
++	return create("Frame")({
++		Name = "Progress",
++		LayoutOrder = 3,
++		Size = UDim2.new(1, 0, 0, SIZES.ProgressRowHeight),
++		BackgroundTransparency = 1,
++
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Horizontal,
++			VerticalAlignment = Enum.VerticalAlignment.Center,
++			Padding = UDim.new(0, SIZES.ProgressGap),
++		}),
++
++		create("Frame")({
++			Name = "Track",
++			LayoutOrder = 1,
++			Size = UDim2.fromOffset(0, SIZES.TrackHeight),
++			BackgroundColor3 = COLORS.TrackFill,
++			BackgroundTransparency = COLORS.TrackFillTransparency,
++
++			create("UIFlexItem")({ FlexMode = Enum.UIFlexMode.Fill }),
++			create("UICorner")({ CornerRadius = UDim.new(0, SIZES.TrackRadius) }),
++
++			create("Frame")({
++				Name = "Fill",
++				Size = function()
++					return UDim2.fromScale(
++						progressFraction(read(props.Progress), read(props.Goal)),
++						1
++					)
++				end,
++				BackgroundColor3 = Color3.new(1, 1, 1),
++
++				create("UICorner")({ CornerRadius = UDim.new(0, SIZES.TrackRadius) }),
++				create("UIGradient")({
++					Color = ColorSequence.new(COLORS.ProgressTop, COLORS.ProgressBottom),
++					Rotation = 90,
++				}),
++			}),
++		}),
++
++		create("TextLabel")({
++			Name = "Count",
++			LayoutOrder = 2,
++			Size = UDim2.fromOffset(0, TEXT.QuestCountLineHeight),
++			AutomaticSize = Enum.AutomaticSize.X,
++			BackgroundTransparency = 1,
++			FontFace = Theme.Fonts.Bold,
++			TextSize = TEXT.QuestCountSize,
++			TextColor3 = COLORS.TextPrimary,
++			TextXAlignment = Enum.TextXAlignment.Right,
++			Text = function()
++				return `{read(props.Progress)}/{read(props.Goal)}`
++			end,
++		}),
++	})
++end
++
++local function questCard(props: QuestCardProps): Frame
++	return create("Frame")({
++		Name = "QuestCard",
++		AnchorPoint = Vector2.new(1, 0),
++		Position = UDim2.new(1, -SIZES.ScreenMargin, 0, SIZES.CardTop),
++		Size = UDim2.fromOffset(SIZES.CardWidth, 0),
++		AutomaticSize = Enum.AutomaticSize.Y,
++		BackgroundColor3 = Color3.new(1, 1, 1),
++		BackgroundTransparency = COLORS.CardFillTransparency,
++
++		create("UICorner")({ CornerRadius = UDim.new(0, SIZES.CardRadius) }),
++		create("UIGradient")({
++			Color = ColorSequence.new(COLORS.CardGradientStart, COLORS.CardGradientEnd),
++		}),
++		create("UIStroke")({
++			BorderStrokePosition = Enum.BorderStrokePosition.Center,
++			Color = COLORS.CardStroke,
++			Transparency = COLORS.CardStrokeTransparency,
++			Thickness = SIZES.CardStroke,
++		}),
++		shadow(SIZES.ShadowLargeOffset, SIZES.ShadowLargeBlur, COLORS.ShadowLargeTransparency, -2),
++		shadow(SIZES.ShadowSmallOffset, SIZES.ShadowSmallBlur, COLORS.ShadowSmallTransparency, -1),
++		create("UIPadding")({
++			PaddingLeft = UDim.new(0, SIZES.CardPadding),
++			PaddingRight = UDim.new(0, SIZES.CardPadding),
++			PaddingTop = UDim.new(0, SIZES.CardPadding),
++			PaddingBottom = UDim.new(0, SIZES.CardPadding),
++		}),
++		create("UIListLayout")({
++			Padding = UDim.new(0, SIZES.CardGap),
++		}),
++
++		header(props),
++		body(props),
++		progressRow(props),
++	})
++end
++
++return questCard
+diff --git a/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau b/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau
+new file mode 100644
+index 0000000..8d15314
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/UI/Theme.luau
+@@ -0,0 +1,89 @@
++--!strict
++--[[
++	Design tokens from the "HUD / 4K" Figma frame (design/figma/hud-4k.json).
++	The frame is 3840x2160, so every size here is the Figma value times 0.5:
++	UI units for a screen 1080 tall, which Screen.uiScale grows on larger
++	screens.
++]]
++
++const BUILDER_SANS = "rbxasset://fonts/families/BuilderSans.json"
++
++local Module = {}
++
++Module.Fonts = table.freeze({
++	Regular = Font.new(BUILDER_SANS, Enum.FontWeight.Regular),
++	Bold = Font.new(BUILDER_SANS, Enum.FontWeight.Bold),
++	ExtraBold = Font.new(BUILDER_SANS, Enum.FontWeight.ExtraBold),
++})
++
++Module.Colors = table.freeze({
++	TextPrimary = Color3.new(1, 1, 1),
++	TextSecondary = Color3.new(0.7804, 0.8, 0.8784),
++	TextOutline = Color3.new(0, 0, 0),
++
++	PillFill = Color3.new(0, 0, 0),
++	-- Figma has black at 50% over a background blur, which Roblox can't draw
++	-- behind one frame, so the fill is more opaque instead.
++	PillFillTransparency = 0.4,
++
++	CardGradientStart = Color3.new(0.0941, 0.1059, 0.1725),
++	CardGradientEnd = Color3.new(0.149, 0.1137, 0.2392),
++	CardFillTransparency = 0.06,
++	CardStroke = Color3.new(1, 1, 1),
++	CardStrokeTransparency = 0.86,
++
++	Shadow = Color3.new(0, 0, 0),
++	ShadowLargeTransparency = 0.65,
++	ShadowSmallTransparency = 0.8,
++
++	TrackFill = Color3.new(1, 1, 1),
++	TrackFillTransparency = 0.88,
++	ProgressTop = Color3.new(0.4, 0.902, 0.502),
++	ProgressBottom = Color3.new(0.2, 0.702, 0.349),
++})
++
++Module.Text = table.freeze({
++	CoinAmountSize = 24,
++	CoinAmountLineHeight = 28,
++	CoinAmountStroke = 2,
++
++	QuestTitleSize = 24,
++	QuestTitleLineHeight = 28,
++	QuestBodySize = 16,
++	QuestBodyLineHeight = 24,
++	QuestCountSize = 16,
++	QuestCountLineHeight = 20,
++})
++
++Module.Sizes = table.freeze({
++	ScreenMargin = 24,
++
++	PillHeight = 44,
++	PillPaddingLeft = 12,
++	PillPaddingRight = 16,
++	PillGap = 8,
++	PillTop = 20,
++	CoinIcon = 32,
++	-- The coin's baked glow reaches 8 past the coin on every side.
++	CoinIconWithGlow = 48,
++
++	CardWidth = 360,
++	CardTop = 80,
++	CardPadding = 16,
++	CardGap = 8,
++	CardRadius = 16,
++	CardStroke = 2,
++	QuestIcon = 24,
++	HeaderGap = 8,
++	ProgressRowHeight = 20,
++	ProgressGap = 8,
++	TrackHeight = 12,
++	TrackRadius = 6,
++
++	ShadowLargeOffset = 4,
++	ShadowLargeBlur = 12,
++	ShadowSmallOffset = 1,
++	ShadowSmallBlur = 2,
++})
++
++return Module

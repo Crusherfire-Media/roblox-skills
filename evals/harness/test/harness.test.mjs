@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
@@ -11,8 +11,8 @@ import { checkIsolation, isolationArgs } from "../lib/isolation.mjs";
 import { hooksFired, parseEvents, skillFileReads, skillsLoaded, usageTotals } from "../lib/stream.mjs";
 import { loadTask, validateTask } from "../lib/task.mjs";
 import { ancestorMemoryFiles, resolveInside } from "../lib/workspace.mjs";
-import { redact } from "../export-results.mjs";
-import { assignLabels, fillTemplate, scrub, summarizeJudgements } from "../judge.mjs";
+import { keepFile, redact } from "../export-results.mjs";
+import { assignLabels, buildJudgePrompt, fillTemplate, renderFacts, scrub, summarizeJudgements } from "../judge.mjs";
 import { redactPaths } from "../prove-isolation.mjs";
 import { trialStatus } from "../run-trials.mjs";
 
@@ -150,7 +150,7 @@ describe("claude arguments", () => {
 
 	test("child sessions don't inherit the launching session's state", () => {
 		const env = childEnv({ PATH: "x", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_EFFORT: "max", AI_AGENT: "a", CLAUDE_CONFIG_DIR: "c" });
-		assert.deepEqual(env, { PATH: "x", CLAUDE_CONFIG_DIR: "c", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" });
+		assert.deepEqual(env, { PATH: "x", CLAUDE_CONFIG_DIR: "c", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.longpaths", GIT_CONFIG_VALUE_0: "true" });
 	});
 });
 
@@ -173,6 +173,21 @@ describe("task files", () => {
 		assert.throws(() => validateTask({ ...base, checks: [{ type: "file_matches", path: "a", pattern: "(" }] }));
 		assert.throws(() => validateTask({ ...base, rubric: [] }), /rubric/);
 		assert.throws(() => validateTask({ ...base, name: "Bad Name" }), /name/);
+	});
+
+	test("judge_facts defaults to none and keeps valid facts", () => {
+		assert.deepEqual(validateTask(base).judge_facts, []);
+		const facts = ["Charm.listen runs its callback once right away.", "x".repeat(600)];
+		assert.deepEqual(validateTask({ ...base, judge_facts: facts }).judge_facts, facts);
+		assert.equal(validateTask({ ...base, judge_facts: Array(12).fill("A fact.") }).judge_facts.length, 12);
+	});
+
+	test("judge_facts rejects non-arrays, too many facts, and bad entries", () => {
+		assert.throws(() => validateTask({ ...base, judge_facts: "one fact" }), /judge_facts/);
+		assert.throws(() => validateTask({ ...base, judge_facts: Array(13).fill("A fact.") }), /at most 12/);
+		assert.throws(() => validateTask({ ...base, judge_facts: ["x".repeat(601)] }), /longer than 600/);
+		assert.throws(() => validateTask({ ...base, judge_facts: ["  "] }), /judge_facts\[0\]/);
+		assert.throws(() => validateTask({ ...base, judge_facts: [42] }), /judge_facts\[0\]/);
 	});
 });
 
@@ -241,6 +256,22 @@ describe("paths", () => {
 		assert.ok(!out.includes(home.replace(/\\/g, "\\\\")));
 		assert.ok(out.includes("<results>"));
 	});
+
+	test("export redacts paths escaped twice, as in a tool error stored inside a JSON string", () => {
+		const home = "C:\\Users\\someone";
+		const inner = JSON.stringify({ stderr: "c:\\Users\\someone\\x.luau: Unknown require" });
+		const out = redact(JSON.stringify({ result: inner }), tmp, home);
+		assert.ok(!out.toLowerCase().includes("someone"), out);
+	});
+
+	test("export keeps verdicts and diffs by default, and everything but transcripts with --full", () => {
+		for (const name of ["comparison.json", "changes.diff", "final-message.md", "benchmark.md"]) assert.ok(keepFile(name, 10), name);
+		for (const name of ["prompt.md", "metrics.json", "Foo.luau", "transcript.jsonl"]) assert.ok(!keepFile(name, 10), name);
+		assert.ok(keepFile("prompt.md", 10, { full: true }));
+		assert.ok(!keepFile("stderr.log", 0, { full: true }));
+		assert.ok(!keepFile("transcript.jsonl", 10, { full: true }));
+		assert.ok(keepFile("transcript.jsonl", 10, { full: true, transcripts: true }));
+	});
 });
 
 describe("trial status", () => {
@@ -268,6 +299,43 @@ describe("blind judge", () => {
 
 	test("template placeholders are filled", () => {
 		assert.equal(fillTemplate("{{A}} and {{B}} and {{C}}", { A: "1", B: "$&" }), "1 and $& and {{C}}");
+	});
+
+	describe("judge facts in the prompt", () => {
+		const template = "<facts>\n{{FACTS}}\n</facts>\n<task>{{TASK_PROMPT}}</task>\n{{RUBRIC}}\n{{OUTPUT_A}}|{{OUTPUT_B}}";
+		const attempt = (diff) => ({ diff, checks: "- [pass] ok" });
+		const meta = (extra = {}) => ({ prompt: "Do it", rubric: ["Works"], ...extra });
+
+		test("a task without judge_facts gets only the global facts", () => {
+			assert.equal(renderFacts("- Global fact.", undefined), "- Global fact.");
+			assert.equal(renderFacts("- Global fact.", []), "- Global fact.");
+			const prompt = buildJudgePrompt(template, "- Global fact.", meta(), attempt("a"), attempt("b"));
+			assert.match(prompt, /<facts>\n- Global fact\.\n<\/facts>/);
+			assert.doesNotMatch(prompt, /Facts for this task/);
+		});
+
+		test("task facts follow the global facts, one bullet each", () => {
+			const facts = ["Charm.subscribe skips the first run.", "jest.fn returns\n  two values."];
+			const prompt = buildJudgePrompt(template, "- Global fact.", meta({ judge_facts: facts }), attempt("a"), attempt("b"));
+			const block = /<facts>\n([\s\S]*)\n<\/facts>/.exec(prompt)[1];
+			assert.equal(
+				block,
+				"- Global fact.\n\nFacts for this task, verified against the same source:\n\n- Charm.subscribe skips the first run.\n- jest.fn returns two values.",
+			);
+			assert.match(prompt, /<task>Do it<\/task>\n1\. Works\na\|b$/);
+		});
+
+		test("placeholders inside facts and diffs stay literal", () => {
+			const prompt = buildJudgePrompt(template, "- G", meta({ judge_facts: ["{{OUTPUT_A}} $&"] }), attempt("{{TASK_PROMPT}}"), attempt("b"));
+			assert.match(prompt, /- \{\{OUTPUT_A\}\} \$&/);
+			assert.match(prompt, /\{\{TASK_PROMPT\}\}\|b$/);
+		});
+
+		test("the real template has a FACTS placeholder", () => {
+			const real = readFileSync(path.join(HERE, "..", "judge-prompt.md"), "utf8");
+			const prompt = buildJudgePrompt(real, "- Global fact.", meta({ judge_facts: ["Task fact."] }), attempt("a"), attempt("b"));
+			assert.match(prompt, /<library_facts>\n- Global fact\.\n\nFacts for this task[^\n]*\n\n- Task fact\.\n<\/library_facts>/);
+		});
 	});
 
 	test("summaries count wins per setup", () => {

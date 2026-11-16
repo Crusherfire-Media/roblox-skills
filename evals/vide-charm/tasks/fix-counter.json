@@ -1,0 +1,58 @@
+{
+  "id": 4,
+  "name": "fix-counter",
+  "skill": "vide-charm",
+  "prompt": "The build HUD in the top-left corner is broken in a few ways. It's BuildHud.luau, fed by PlacedBlocks.luau (a Charm store), both in src/StarterPlayer/StarterPlayerScripts, and Main.client.luau mounts it.\n\n- \"Blocks placed\" stays at 0 no matter how many blocks I place. In Studio every placement prints \"attempt to modify a readonly table\" from PlacedBlocks; on the live servers there's no error, it just stays at 0.\n- The \"Last:\" line always says \"none\".\n- Each time I hide and show the HUD with H, placing a block plays the click sound one more time than before.\n\nPlease fix these, plus anything else in PlacedBlocks.luau and BuildHud.luau that's using Charm wrong. Keep the HUD looking and working the way it's meant to.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/fix-counter/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/fix-counter/PlacedBlocks.luau", "to": "src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau" },
+    { "from": "fixtures/fix-counter/BuildHud.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BuildHud.luau" },
+    { "from": "fixtures/fix-counter/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau",
+      "pattern": "local history = getHistory\\(\\)\\s+table\\.insert\\(history",
+      "text": "onBlockPlaced no longer inserts into the stored history table in place (planted bug 1 is gone)"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/PlacedBlocks.luau",
+      "pattern": "local history = getHistory\\(\\)\\s+table\\.clear\\(history",
+      "text": "clear no longer empties the stored history table in place (unreported bug is gone)"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BuildHud.luau",
+      "pattern": "Text = function\\(\\)\\s+local last = PlacedBlocks\\.getLastPlaced\\(\\)",
+      "text": "The Last label no longer calls the Charm getter inside its Vide binding (planted bug 2 is gone)"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BuildHud.luau",
+      "pattern": "^\\s*Charm\\.subscribe\\(",
+      "text": "The click subscription's disposer is no longer thrown away (planted bug 3 is gone)"
+    }
+  ],
+  "rubric": [
+    "Fixes the stuck counter at its cause: `onBlockPlaced` changed the stored history table in place (`table.insert`) and set the same table again, which errors in Studio (Charm freezes stored tables) and notifies nobody live. The fix sets a new table (copy, then add), and does not switch off `Charm.flags.frozen` or paper over it with `Charm.trigger`.",
+    "Also fixes `PlacedBlocks.clear`, which has the same in-place bug (`table.clear` on the stored table, then setting it again), for example by setting a new empty table.",
+    "Fixes the \"Last:\" line: the binding called the Charm getter `PlacedBlocks.getLastPlaced()` directly, which Vide does not track. The fix bridges it into a Vide source inside the component (vide-charm's `useSignalState`, as the count already does) and binds the label to that.",
+    "Fixes the extra clicks: the `Charm.subscribe` made in the HUD's body was never disposed, so every time `show` rebuilt the HUD another subscription piled up. The fix registers its disposer with Vide's `cleanup` (or otherwise ties it to the HUD's scope) so exactly one click plays per placement.",
+    "Keeps the HUD's look and behavior otherwise unchanged (count, last block, Clear button, H toggle), keeps the store's public functions working for their callers, and changes only those two files plus anything strictly needed.",
+    "luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files, such as a preview story or a spec, count neither for nor against."
+  ],
+  "judge_facts": [
+    "Charm 0.11.1 (charm/src/init.luau): `flags.strict` and `flags.frozen` both default to `RunService:IsStudio()`. With `frozen` on, every table stored in a signal, including the initial value, is deep-frozen (tables with a metatable are skipped), so `table.insert` or `table.clear` on it errors \"attempt to modify a readonly table\".",
+    "Charm 0.11.1 (charm/src/init.luau): a signal setter does nothing when the new value `==` the pending one (or a custom `equals` matches), and returns the new value. So changing a stored table in place and setting the same table again notifies nobody.",
+    "Charm 0.11.1 (charm/src/init.luau): `subscribe(getter, cb)` creates a Charm effect and returns its dispose function; nothing disposes it unless that function is called. `listen` is the same but also calls `cb` once right away.",
+    "Vide 0.4.1 (vide/src/source.luau) registers the running Vide scope only when a Vide source is read. A Charm 0.11.1 getter registers only with Charm's own running effect or computed (charm/src/init.luau, signalGetter), so a Charm getter called inside a Vide binding never makes that binding rerun.",
+    "vide-charm 0.4.1 (vide-charm/src/init.luau): `useSignalState(getter)` is `Vide.source(getter())` plus `Vide.cleanup(Charm.listen(getter, state))`, so the source follows the getter and the listener stops when the calling Vide scope is destroyed.",
+    "Vide 0.4.1 `show(condition, component)` (vide/src/show.luau) builds the component in a new scope each time the condition turns true and destroys that scope when it turns false, running cleanups registered in it."
+  ],
+  "timeout_minutes": 20
+}

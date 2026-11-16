@@ -1,0 +1,304 @@
+diff --git a/src/ReplicatedStorage/Shared/Dev/SpikeReport.luau b/src/ReplicatedStorage/Shared/Dev/SpikeReport.luau
+new file mode 100644
+index 0000000..7ea8879
+--- /dev/null
++++ b/src/ReplicatedStorage/Shared/Dev/SpikeReport.luau
+@@ -0,0 +1,298 @@
++--!strict
++--[[
++	Dev-only report on a MicroProfiler snapshot saved by HitchSnapshot. Run it from the Studio
++	command bar in Edit mode after the playtest:
++
++		require(game.ReplicatedStorage.Shared.Dev.SpikeReport).run(2)
++
++	run(slot) returns:
++		medianMs, p90Ms     CPU frame time percentiles over the analyzed frames
++		slowThresholdMs     SLOW_FACTOR * medianMs; frames above it count as slow
++		slowFrames          each slow frame, with its TOP_SCOPE_COUNT scopes by self time, summed
++		                    over all CPU threads. Each scope also has normalAvgMs, its average self
++		                    time over the frames that weren't slow (0 where it didn't run), so a
++		                    hitch can be compared with a normal frame.
++
++	Self time is a scope's time minus the time of the scopes nested inside it. A scope that crosses
++	a frame boundary has only the part inside each frame counted toward that frame.
++
++	Each slow frame has both IDs: frameId is LibMP's ID inside the snapshot (session:FetchFrameDesc,
++	iterator ranges), and absoluteFrameId is the frame number the MicroProfiler UI shows.
++
++	The snapshot's first frame isn't counted. It warms up the iterator's scope stacks, since
++	scopes that were already open when the snapshot starts can't be reconstructed there. Paused
++	and incomplete frames are skipped as well.
++]]
++
++local LibMP = require(script.Parent.LibMPLoader)
++
++local SLOW_FACTOR = 2
++local TOP_SCOPE_COUNT = 5
++
++export type ScopeStat = {
++	name: string,
++	timerId: number,
++	selfMs: number, -- self time in this frame, summed over CPU threads
++	normalAvgMs: number, -- average self time over the frames that weren't slow
++	threads: { string }, -- CPU threads the scope ran on in this frame
++}
++
++export type SlowFrame = {
++	name: string,
++	frameId: number,
++	absoluteFrameId: number,
++	frameMs: number,
++	topScopes: { ScopeStat },
++}
++
++export type Report = {
++	slot: number,
++	frameCount: number,
++	normalFrameCount: number,
++	medianMs: number,
++	p90Ms: number,
++	slowThresholdMs: number,
++	slowFrames: { SlowFrame },
++}
++
++-- Linear interpolation between the closest ranks. `sorted` must be ascending and not empty.
++local function percentile(sorted: { number }, p: number): number
++	local n = #sorted
++	local pos = 1 + (n - 1) * p
++	local lo = math.floor(pos)
++	local hi = math.min(lo + 1, n)
++	return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo)
++end
++
++local function analyze(session: any, iter: any, slot: number): Report
++	local tickToMs: number = session:FetchGlobalDesc().TickToMsCpu
++	local frameIdMin: number = session:GetFrameIdMin()
++	local frameIdMax: number = session:GetFrameIdMax()
++	if frameIdMin == 0 or frameIdMax - frameIdMin < 2 then
++		error(`SpikeReport: slot {slot} holds too few frames to analyze`)
++	end
++
++	-- Frame times. The first frame is only used to warm up the iterator.
++	local frameStartTick: { [number]: number } = {}
++	local frameMs: { [number]: number } = {}
++	local frameAbsoluteId: { [number]: number } = {}
++	local analyzedFrameIds: { number } = {}
++	for frameId = frameIdMin, frameIdMax do
++		local desc = session:FetchFrameDesc(frameId)
++		frameStartTick[frameId] = desc.TickStartCpu
++		if frameId > frameIdMin and not desc.IsPaused and not desc.IsIncomplete then
++			frameMs[frameId] = (desc.TickEndCpu - desc.TickStartCpu) * tickToMs
++			frameAbsoluteId[frameId] = desc.FrameAbsoluteId
++			table.insert(analyzedFrameIds, frameId)
++		end
++	end
++	if #analyzedFrameIds == 0 then
++		error(`SpikeReport: slot {slot} has no complete frames to analyze`)
++	end
++
++	-- Self time in ticks per frame per timer, and which threads each timer ran on.
++	local selfTicks: { [number]: { [number]: number } } = {}
++	local timerThreads: { [number]: { [number]: { [number]: boolean } } } = {}
++
++	-- Scopes finished in the current thread's log for the current frame that haven't been
++	-- claimed by an enclosing scope yet. Scopes arrive in exit order, so children always come
++	-- before their parent, and a parent claims every unclaimed scope that entered after it did.
++	local unclaimed: { { enter: number, ticks: number } } = {}
++	local currentFrameId, currentThreadId = 0, 0
++
++	local function addScope(frameId: number, threadId: number, timerId: number, enterTick: number, exitTick: number)
++		if frameId ~= currentFrameId or threadId ~= currentThreadId then
++			table.clear(unclaimed)
++			currentFrameId, currentThreadId = frameId, threadId
++		end
++
++		local ticks = math.max(exitTick - enterTick, 0)
++		local childTicks = 0
++		while #unclaimed > 0 and unclaimed[#unclaimed].enter >= enterTick do
++			childTicks += (table.remove(unclaimed) :: any).ticks
++		end
++		table.insert(unclaimed, { enter = enterTick, ticks = ticks })
++
++		if not frameMs[frameId] then
++			return -- warm-up, paused or incomplete frame
++		end
++		local perTimer = selfTicks[frameId]
++		local perTimerThreads = timerThreads[frameId]
++		if not perTimer then
++			perTimer = {}
++			perTimerThreads = {}
++			selfTicks[frameId] = perTimer
++			timerThreads[frameId] = perTimerThreads
++		end
++		perTimer[timerId] = (perTimer[timerId] or 0) + math.max(ticks - childTicks, 0)
++		local threads = perTimerThreads[timerId]
++		if not threads then
++			threads = {}
++			perTimerThreads[timerId] = threads
++		end
++		threads[threadId] = true
++	end
++
++	iter:Configure({
++		SkipGpuThreads = true,
++		SkipEvents = true,
++		SkipPausedFrames = true,
++		EmitThreadFrameEnd = true,
++	})
++	local state = iter:GetState()
++	iter:RewindTo(frameIdMin, frameIdMax)
++	while iter:Step() do
++		if state:IsThreadFrameEnd() then
++			-- Scopes still open when this thread's log ends in the frame: count the part inside
++			-- the frame. Deepest first, so children still come before parents.
++			local frameId: number = state:FrameId()
++			local threadId: number = state:ThreadId()
++			local exitTick: number = state:Timestamp()
++			for level = state:ThreadStackDepth() - 1, 0, -1 do
++				local el = iter:GetCurrentThreadStackElement(level)
++				if el then
++					local timerId: number = el:EnterTimerId()
++					local enterTick: number = el:EnterTimestampFrameLocal()
++					addScope(frameId, threadId, timerId, enterTick, exitTick)
++				end
++			end
++			table.clear(unclaimed)
++			currentFrameId, currentThreadId = 0, 0
++		elseif state:IsExit() and not state:ThreadStackWasOverflowed() then
++			local frameId: number = state:FrameId()
++			local threadId: number = state:ThreadId()
++			local timerId: number = state:TimerId()
++			local exitTick: number = state:Timestamp()
++			local enterTick: number
++			if state:ThreadStackIsUnderflowed() then
++				-- Entered before the frame; count from the frame's start.
++				enterTick = frameStartTick[frameId]
++			else
++				enterTick = iter:GetCurrentThreadStackElement(state:ThreadStackDepth()):EnterTimestampFrameLocal()
++			end
++			addScope(frameId, threadId, timerId, enterTick, exitTick)
++		end
++	end
++
++	-- Frame time statistics.
++	local sortedMs: { number } = {}
++	for _, frameId in analyzedFrameIds do
++		table.insert(sortedMs, frameMs[frameId])
++	end
++	table.sort(sortedMs)
++	local medianMs = percentile(sortedMs, 0.5)
++	local p90Ms = percentile(sortedMs, 0.9)
++	local slowThresholdMs = medianMs * SLOW_FACTOR
++
++	-- Average self time per timer over the normal frames.
++	local slowFrameIds: { number } = {}
++	local normalTotalTicks: { [number]: number } = {}
++	local normalFrameCount = 0
++	for _, frameId in analyzedFrameIds do
++		if frameMs[frameId] > slowThresholdMs then
++			table.insert(slowFrameIds, frameId)
++		else
++			normalFrameCount += 1
++			for timerId, ticks in selfTicks[frameId] or {} do
++				normalTotalTicks[timerId] = (normalTotalTicks[timerId] or 0) + ticks
++			end
++		end
++	end
++
++	local timerNames: { [number]: string } = {}
++	local function timerName(timerId: number): string
++		local name = timerNames[timerId]
++		if not name then
++			name = session:FetchTimerDesc(timerId).TimerName :: string
++			timerNames[timerId] = name
++		end
++		return name :: string
++	end
++	local threadNames: { [number]: string } = {}
++	local function threadName(threadId: number): string
++		local name = threadNames[threadId]
++		if not name then
++			name = session:FetchThreadDesc(threadId).ThreadName :: string
++			threadNames[threadId] = name
++		end
++		return name :: string
++	end
++
++	local slowFrames: { SlowFrame } = {}
++	for _, frameId in slowFrameIds do
++		local ranked: { { timerId: number, ticks: number } } = {}
++		for timerId, ticks in selfTicks[frameId] or {} do
++			table.insert(ranked, { timerId = timerId, ticks = ticks })
++		end
++		table.sort(ranked, function(a, b)
++			return a.ticks > b.ticks
++		end)
++
++		local topScopes: { ScopeStat } = {}
++		for i = 1, math.min(TOP_SCOPE_COUNT, #ranked) do
++			local timerId = ranked[i].timerId
++			local threads: { string } = {}
++			for threadId in timerThreads[frameId][timerId] do
++				table.insert(threads, threadName(threadId))
++			end
++			table.sort(threads)
++			table.insert(topScopes, {
++				name = timerName(timerId),
++				timerId = timerId,
++				selfMs = ranked[i].ticks * tickToMs,
++				normalAvgMs = if normalFrameCount > 0
++					then (normalTotalTicks[timerId] or 0) * tickToMs / normalFrameCount
++					else 0,
++				threads = threads,
++			})
++		end
++
++		local absoluteFrameId = frameAbsoluteId[frameId]
++		table.insert(slowFrames, {
++			name = string.format(
++				"frameId %d / MicroProfiler frame %d (%.2f ms)",
++				frameId,
++				absoluteFrameId,
++				frameMs[frameId]
++			),
++			frameId = frameId,
++			absoluteFrameId = absoluteFrameId,
++			frameMs = frameMs[frameId],
++			topScopes = topScopes,
++		})
++	end
++
++	return {
++		slot = slot,
++		frameCount = #analyzedFrameIds,
++		normalFrameCount = normalFrameCount,
++		medianMs = medianMs,
++		p90Ms = p90Ms,
++		slowThresholdMs = slowThresholdMs,
++		slowFrames = slowFrames,
++	}
++end
++
++local SpikeReport = {}
++
++function SpikeReport.run(slot: number): Report
++	local session = LibMP.Session.OpenFromSlot(slot)
++	if not session then
++		error(`SpikeReport: couldn't open slot {slot}; is there a snapshot in it?`)
++	end
++	if not session:IsValid() then
++		session:Dispose()
++		error(`SpikeReport: slot {slot} doesn't hold a valid snapshot`)
++	end
++
++	local iter = session:CreateLogIterator()
++	local ok, result = pcall(analyze, session, iter, slot)
++	iter:Dispose()
++	session:Dispose()
++	if not ok then
++		error(result, 0)
++	end
++	return result
++end
++
++return SpikeReport

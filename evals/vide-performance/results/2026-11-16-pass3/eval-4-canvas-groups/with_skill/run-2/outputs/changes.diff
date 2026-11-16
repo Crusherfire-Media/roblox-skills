@@ -1,0 +1,160 @@
+diff --git a/docs/perf/block-catalog.md b/docs/perf/block-catalog.md
+new file mode 100644
+index 0000000..5100b8e
+--- /dev/null
++++ b/docs/perf/block-catalog.md
+@@ -0,0 +1,57 @@
++# Block catalog: CanvasGroup count
++
++## Problem
++
++On phones at low graphics quality, the catalog flickered and some cards drew blank. With it
++open, PlayerGui held 41 CanvasGroups: the panel plus one per card (5 block types x 8 shapes).
++All CanvasGroups share one texture budget, and the client's quality level caps it. Past the
++budget, groups blur, flicker, or draw blank. PC runs at a higher quality level, so it had
++room for all 41.
++
++## Change
++
++`src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau`
++
++- Each card is now a plain `Frame` with a `UICorner`. Its swatch, labels, and hitbox are
++  unchanged.
++- The shine stripe sits in its own `ShineClip` CanvasGroup, with the card's corner radius, built
++  with `show` only while that card's shine is above 0: while it is hovered, and while the shine
++  fades out after the cursor leaves. That group still clips the rotated stripe to the rounded
++  corners. A plain `ClipsDescendants` frame would clip to the rectangle and ignore both the
++  `UICorner` and the rotation.
++- The shine fade now drives the group's `GroupTransparency` (`1 - shine`) instead of the
++  stripe's own transparency, and the stripe stays at 0.5. Strength works out the same as
++  before (half opacity at full shine). Because the group is almost fully clear when it is
++  created and when it is removed, the white frame a CanvasGroup can draw at those moments
++  doesn't show.
++- The panel keeps its CanvasGroup for the fade in and out. It already existed only while the
++  catalog was open (`show` in `Main.client.luau`). Fading each element on its own would look
++  different wherever the cards overlap the panel background.
++
++Expected count: 1 CanvasGroup with the catalog open and idle, 2 while a card is hovered (a few
++more briefly while shines fade out after quick sweeps over several cards), and 0 with the
++catalog closed. Before the change it was 41 whenever the catalog was open.
++
++## How to check
++
++1. Play in Studio, open the catalog (C or the Catalog button), and run this in the command bar
++   (client side):
++
++   ```lua
++   local total, drawn = 0, 0
++   for _, instance in game.Players.LocalPlayer.PlayerGui:GetDescendants() do
++   	if instance:IsA("CanvasGroup") then
++   		total += 1
++   		print(instance:GetFullName())
++   	end
++   end
++   print("CanvasGroups:", total)
++   ```
++
++   Expect 1 (`BlockCatalog`). Hover a card and run it again: expect 2 (`...ShineClip`). Close the
++   catalog and wait for the fade: expect 0.
++2. Look: the panel still fades in and out. On hover, the shine sweeps across the card, clipped
++   to its rounded corners at all four corners. When the cursor leaves, the shine slides back
++   and fades. Watch the first and last frames of a hover for any white flash.
++3. On a phone, or in Studio's device emulator with Settings > Graphics Quality set to 1: open
++   the catalog, scroll through every card, and confirm none flicker or draw blank.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau b/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
+index f07bd2d..fc0f2d6 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
+@@ -10,6 +10,7 @@ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
++local show = Vide.show
+ local source = Vide.source
+ local spring = Vide.spring
+ 
+@@ -24,6 +25,8 @@ local CARD_GAP = 8
+ local CARD_RADIUS = 10
+ local SWATCH_SIZE = 48
+ local SHINE_WIDTH = 28
++-- At full shine. The shine's CanvasGroup fades it in from fully clear.
++local SHINE_TRANSPARENCY = 0.5
+ -- How long the panel takes to fade in or out, in seconds.
+ local FADE_SECONDS = 0.25
+ -- How long the shine takes to sweep across a card, in seconds.
+@@ -56,7 +59,8 @@ local function card(
+ 		return if isHovered() then 1 else -1
+ 	end, SWEEP_SECONDS)
+ 
+-	return create("CanvasGroup")({
++	-- Not a CanvasGroup: they share a texture budget that low graphics quality caps.
++	return create("Frame")({
+ 		Name = `{blockType.Name}{shapeName}`,
+ 		LayoutOrder = layoutOrder,
+ 		BackgroundColor3 = CARD_COLOR,
+@@ -111,28 +115,44 @@ local function card(
+ 				props.Select(blockType.Name)
+ 			end,
+ 		}),
+-		create("Frame")({
+-			Name = "Shine",
+-			AnchorPoint = Vector2.new(0.5, 0.5),
+-			Position = function()
+-				return UDim2.fromScale(0.5 + sweep() * 0.75, 0.5)
+-			end,
+-			Size = UDim2.new(0, SHINE_WIDTH, 2, 0),
+-			Rotation = 20,
+-			BackgroundColor3 = SHINE_COLOR,
+-			BackgroundTransparency = function()
+-				return 1 - shine() * 0.5
+-			end,
+-			ZIndex = 2,
+-
+-			create("UIGradient")({
+-				Transparency = NumberSequence.new({
+-					NumberSequenceKeypoint.new(0, 1),
+-					NumberSequenceKeypoint.new(0.5, 0),
+-					NumberSequenceKeypoint.new(1, 1),
++		-- Only a CanvasGroup clips the rotated stripe to the rounded corners. It exists only
++		-- while the shine shows, and since the shine rises from 0 and falls back to it, the
++		-- group is nearly clear when made and removed, which hides the white frame a
++		-- CanvasGroup can draw at those moments.
++		show(function(): boolean
++			return shine() > 0
++		end, function(): CanvasGroup
++			return create("CanvasGroup")({
++				Name = "ShineClip",
++				Size = UDim2.fromScale(1, 1),
++				BackgroundTransparency = 1,
++				GroupTransparency = function(): number
++					return 1 - shine()
++				end,
++				ZIndex = 2,
++
++				create("UICorner")({ CornerRadius = UDim.new(0, CARD_RADIUS) }),
++				create("Frame")({
++					Name = "Shine",
++					AnchorPoint = Vector2.new(0.5, 0.5),
++					Position = function()
++						return UDim2.fromScale(0.5 + sweep() * 0.75, 0.5)
++					end,
++					Size = UDim2.new(0, SHINE_WIDTH, 2, 0),
++					Rotation = 20,
++					BackgroundColor3 = SHINE_COLOR,
++					BackgroundTransparency = SHINE_TRANSPARENCY,
++
++					create("UIGradient")({
++						Transparency = NumberSequence.new({
++							NumberSequenceKeypoint.new(0, 1),
++							NumberSequenceKeypoint.new(0.5, 0),
++							NumberSequenceKeypoint.new(1, 1),
++						}),
++					}),
+ 				}),
+-			}),
+-		}),
++			})
++		end),
+ 	})
+ end
+ 

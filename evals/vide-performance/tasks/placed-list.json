@@ -1,0 +1,46 @@
+{
+  "id": 2,
+  "name": "placed-list",
+  "skill": "vide-performance",
+  "prompt": "Our builders place a lot of blocks, and the placed blocks panel (PlacedList.luau, toggled with L; Main.client.luau feeds it, both in src/StarterPlayer/StarterPlayerScripts) falls apart in long sessions. At about 2,000 placed blocks the game drops from 60 to around 35 FPS even with the panel closed, scrolling the open panel is choppy, and every new block causes a small hitch. The script profiler shows about 2,000 Heartbeat connections from PlacedList taking roughly 10 ms a frame, and the panel holds around 14,000 GUI objects.\n\nMake it hold up at a few thousand blocks without changing what the panel shows. Then write a short note in docs/perf/placed-list.md: what you changed, and how I can check the improvement in Studio.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/placed-list/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/placed-list/PlacedList.luau", "to": "src/StarterPlayer/StarterPlayerScripts/PlacedList.luau" },
+    { "from": "fixtures/placed-list/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/perf/placed-list.md",
+      "text": "The note docs/perf/placed-list.md exists"
+    },
+    {
+      "type": "command",
+      "run": [
+        "node",
+        "-e",
+        "const fs=require(\"fs\");const src=fs.readFileSync(\"src/StarterPlayer/StarterPlayerScripts/PlacedList.luau\",\"utf8\");const bodies=src.match(/local function [A-Za-z]*[Rr]ow\\w*\\b[\\s\\S]*?\\nend\\b/g)||[];const perRow=bodies.filter((b)=>/(Heartbeat|PreRender|RenderStepped|Stepped)\\s*:\\s*Connect/.test(b)).map((b)=>b.split(\"(\")[0]);console.log(bodies.length+\" row functions; with their own per-frame connection: \"+(perRow.join(\", \")||\"none\"));process.exit(perRow.length?1:0)"
+      ],
+      "expect_exit": 0,
+      "text": "The row function no longer connects its own per-frame event"
+    }
+  ],
+  "rubric": [
+    "The list builds rows only for what its window can show: a pool of rows about the size of the visible area, refilled from the scroll position as the player scrolls (or, at minimum, rows away from the window taken out of the tree), not one row of instances per placed block.",
+    "The canvas height comes from the number of entries (entry count times row step), not from the children, so the scroll bar and the reachable range still cover the whole list.",
+    "One clock serves every age label instead of one Heartbeat connection per row, and it runs only while the panel is open, so a closed panel costs no per-frame work.",
+    "Age labels rerun and write their text only when the shown text changes (for example a `derive` of the whole seconds, or a clock that ticks once per second), not on every frame.",
+    "The panel still shows the same thing: newest first, each row's color, type, position, and age, the header count, and new placements appearing live; rows reused from a pool never show a stale entry after a scroll or a new placement.",
+    "docs/perf/placed-list.md says what changed and how to confirm it on the same workload: a way to reach a couple of thousand entries, then frame time with the panel closed and while scrolling, the GUI object count, and the number of per-frame connections, before and after, plus what to check by eye.",
+    "Correct and in scope: the L toggle and placement keep working, the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files, such as a preview story, count neither for nor against."
+  ],
+  "judge_facts": [
+    "Vide 0.4.1 `indexes(input, component)` (vide/src/indexes.luau): builds one scope (and its instances) per key of the input table, keeps it while the key stays, updates its value source when the value under that key changes, and destroys it when the key leaves. `values` (vide/src/values.luau) does the same per distinct value.",
+    "Vide 0.4.1 (vide/src/graph.luau, implicit_effect.luau): a `derive` reruns its readers only when its new value `~=` the old one, while a function bound to a property reruns whenever a source it reads changes and writes the property each time it reruns.",
+    "Vide 0.4.1 `cleanup(value)` (vide/src/cleanup.luau) registers a cleanup on the running scope; a connection is disconnected when the scope is destroyed. A GuiObject hidden with `Visible = false` keeps its Vide scope, bindings, and connections."
+  ],
+  "timeout_minutes": 25
+}

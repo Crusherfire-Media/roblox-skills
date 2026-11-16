@@ -1,0 +1,65 @@
+{
+  "id": 2,
+  "name": "fix-inventory",
+  "skill": "roblox-testing",
+  "prompt": "Bug report from testers: \"New players can place one Window block even though the starter kit has no windows. After that the Window counter shows -1 and it won't let them place any more. The other block types stop correctly at 0.\"\n\nInventories live in src/ServerScriptService/Inventory/BlockInventory.luau, and src/ServerScriptService/BlockPlacement.server.luau uses them. Fix the bug, and add a regression test in src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau so it can't come back. Jest Roblox is installed (see README.md). Specs can't run here, so make sure luau-lsp, selene, and StyLua pass. I can't answer questions while you work, so make reasonable calls and note any assumptions in a comment or in your write-up.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/fix-inventory/BlockInventory.luau",
+      "to": "src/ServerScriptService/Inventory/BlockInventory.luau"
+    },
+    {
+      "from": "fixtures/fix-inventory/BlockPlacement.server.luau",
+      "to": "src/ServerScriptService/BlockPlacement.server.luau"
+    }
+  ],
+  "auto_checks": [
+    "luau-lsp",
+    "selene",
+    "stylua"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau",
+      "text": "The regression spec exists at the requested path"
+    },
+    {
+      "type": "file_matches",
+      "path": "src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau",
+      "pattern": "JestGlobals",
+      "text": "The spec requires its Jest names from JestGlobals"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Inventory/BlockInventory.luau",
+      "pattern": "if current and current < amount then",
+      "text": "The planted check that skips missing entries is gone from take"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau",
+      "pattern": "\\)\\s*:\\s*(to[A-Z]\\w*|never)\\b",
+      "text": "No matcher is called with a colon"
+    }
+  ],
+  "rubric": [
+    "Fixes the root cause in BlockInventory.take: a block type with no entry in Counts counts as 0, so taking one is refused and changes nothing, and refusing when the count is below amount still works. A fix only in BlockPlacement.server.luau (for example adding Window = 0 to STARTER_KIT) leaves take broken for every missing type and earns partial credit at most.",
+    "Adds a regression test at src/ServerScriptService/Tests/Specs/Inventory/BlockInventory.spec.luau that reproduces the report through BlockInventory's public functions: an inventory made without the type (for example BlockInventory.new({ Brick = 20 })), then take of that type returns false and its count stays 0. A test that only uses a type stored with count 0 doesn't reproduce the bug: the original code already refused that.",
+    "The test asserts outcomes (take's return value and the count afterward) rather than internals such as call counts or mocks of the module's own functions, is named after the behavior, fails on the original code, and passes on the fix.",
+    "Uses Jest Roblox correctly: names required from JestGlobals, matchers called with a dot, .never for negation (see the judge facts).",
+    "Stays in scope: the change is the fix plus the regression test, and the rest of BlockInventory and BlockPlacement keep their behavior. Extra tests of other BlockInventory behaviors count neither for nor against unless they are wrong or duplicate each other.",
+    "luau-lsp, selene, and StyLua pass on the changed files."
+  ],
+  "judge_facts": [
+    "Jest Roblox 3.21.0: spec files don't see describe, it, or expect as globals; each spec requires them from JestGlobals. injectGlobals (default true in jest-config/src/Defaults.lua) only copies them into environment.global (jest-circus/src/circus/legacy-code-todo-rewrite/jestAdapterInit.lua, line 177), and jest-runtime/src/init.lua builds every module's function environment from the chunk's own environment (lines 1940 to 2021) without reading environment.global.",
+    "Jest Roblox 3.21.0 (expect/src/init.lua, expect_): matchers are plain functions called with a dot, and negation is .never (expectation.never[name]). A colon call such as expect(ok):toBe(false) passes the expectation table as the expected value, so the assertion fails.",
+    "Jest Roblox 3.21.0: a spec file needs no return value. jest-circus loads it with requireModule(testPath, nil, nil, nil, true), the noModuleReturnRequired flag (jest-circus/src/circus/legacy-code-todo-rewrite/jestAdapter.lua, line 111)."
+  ],
+  "notes": "Planted bug: take reads `local current = inventory.Counts[name]` and skips the amount check when it is nil, then stores (current or 0) - amount. A type the starter kit leaves out (Window) has no entry, so the first take succeeds and stores -1; after that -1 < 1 refuses. Types that ran down to an explicit 0 were always refused, which is why the regression test has to use a missing type.",
+  "timeout_minutes": 15
+}

@@ -1,0 +1,382 @@
+diff --git a/src/ServerScriptService/Stories/BuildModeHud.story.luau b/src/ServerScriptService/Stories/BuildModeHud.story.luau
+new file mode 100644
+index 0000000..e5fdcfe
+--- /dev/null
++++ b/src/ServerScriptService/Stories/BuildModeHud.story.luau
+@@ -0,0 +1,45 @@
++--!strict
++
++const UILabs = require("@game/ReplicatedStorage/Packages/UILabs")
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const BuildModeHudView = require("@game/StarterPlayer/StarterPlayerScripts/BuildModeHudView")
++
++const BLOCK_TYPE_NAMES = {}
++for _, blockType in BlockTypes.List do
++	table.insert(BLOCK_TYPE_NAMES, blockType.Name)
++end
++
++const CONTROLS = {
++	SelectedBlock = UILabs.Ordered(UILabs.Choose(BLOCK_TYPE_NAMES), 1),
++	-- Roblox display names run up to 20 characters.
++	PlayerName = UILabs.Ordered("Builder", 2),
++	PlacedCount = UILabs.Ordered(UILabs.Number(0, 0, 999999, 1), 3),
++}
++
++type StoryProps = {
++	controls: {
++		SelectedBlock: () -> string,
++		PlayerName: () -> string,
++		PlacedCount: () -> number,
++	},
++	target: Frame,
++}
++
++local function story(props: StoryProps)
++	local controls = props.controls
++
++	return BuildModeHudView({
++		PlayerName = controls.PlayerName,
++		BlockTypeName = controls.SelectedBlock,
++		PlacedCount = controls.PlacedCount,
++	})
++end
++
++return {
++	summary = "The build mode HUD panel, without its in-game blur, zoom, and sound.",
++	vide = Vide,
++	controls = CONTROLS,
++	story = story,
++}
+diff --git a/src/ServerScriptService/Stories/GameUI.storybook.luau b/src/ServerScriptService/Stories/GameUI.storybook.luau
+new file mode 100644
+index 0000000..25d83e2
+--- /dev/null
++++ b/src/ServerScriptService/Stories/GameUI.storybook.luau
+@@ -0,0 +1,6 @@
++--!strict
++
++return {
++	name = "Game UI",
++	storyRoots = { script.Parent },
++}
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BuildModeHud.luau b/src/StarterPlayer/StarterPlayerScripts/BuildModeHud.luau
+index 57fa95a..3e32644 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BuildModeHud.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BuildModeHud.luau
+@@ -1,41 +1,34 @@
++--!strict
+ --[[
+-	The build mode HUD: a panel in the top-left corner with the player's name, the selected block
+-	type, and how many blocks they have placed since build mode opened. While it is open the world
+-	behind it is blurred and the camera zooms in a little, and a sound plays as it opens.
++	The build mode HUD in game: BuildModeHudView fed with the player's name, the
++	selected block type, and how many blocks they have placed since build mode
++	opened. While it is open the world behind it is blurred and the camera zooms
++	in a little, and a sound plays as it opens.
+ ]]
+ 
+-local Lighting = game:GetService("Lighting")
+-local Players = game:GetService("Players")
+-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-local SoundService = game:GetService("SoundService")
+-local Workspace = game:GetService("Workspace")
++const Lighting = game:GetService("Lighting")
++const Players = game:GetService("Players")
++const ReplicatedStorage = game:GetService("ReplicatedStorage")
++const SoundService = game:GetService("SoundService")
+ 
+-local BlockPlacer = require(script.Parent.BlockPlacer)
+-local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+-local Vide = require(ReplicatedStorage.Packages.Vide)
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
+ 
+-local cleanup = Vide.cleanup
+-local create = Vide.create
+-local source = Vide.source
++const BlockPlacer = require("./BlockPlacer")
++const BuildModeHudView = require("./BuildModeHudView")
+ 
+-local PANEL_SIZE = Vector2.new(240, 96)
+-local PANEL_MARGIN = 16
+-local PANEL_PADDING = 10
+-local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+-local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
+-local MUTED_TEXT_COLOR = Color3.fromRGB(180, 180, 190)
+-local SWATCH_SIZE = 16
+-local BLUR_SIZE = 12
+-local BUILD_FIELD_OF_VIEW = 60
+-local OPEN_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
++const cleanup = Vide.cleanup
++const source = Vide.source
+ 
+-local openSound = Instance.new("Sound")
++const BLUR_SIZE = 12
++const BUILD_FIELD_OF_VIEW = 60
++const OPEN_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
++
++const openSound = Instance.new("Sound")
+ openSound.Name = "BuildModeOpen"
+ openSound.SoundId = OPEN_SOUND_ID
+ openSound.Volume = 0.5
+ 
+ local function buildModeHud(): Frame
+-	local localPlayer = Players.LocalPlayer
+ 	local selected = source(BlockPlacer.getBlockType())
+ 	local placedCount = source(0)
+ 
+@@ -43,10 +36,20 @@ local function buildModeHud(): Frame
+ 		selected(name)
+ 	end))
+ 
+-	local blockPlaced = ReplicatedStorage:WaitForChild("BlockPlaced") :: RemoteEvent
+-	cleanup(blockPlaced.OnClientEvent:Connect(function()
+-		placedCount(placedCount() + 1)
++	-- Vide scopes must not yield, so the wait for the remote runs on its own
++	-- thread, which is outside the scope and cannot register cleanups itself.
++	local placedConnection: RBXScriptConnection? = nil
++	cleanup(task.spawn(function()
++		local blockPlaced = ReplicatedStorage:WaitForChild("BlockPlaced") :: RemoteEvent
++		placedConnection = blockPlaced.OnClientEvent:Connect(function()
++			placedCount(placedCount() + 1)
++		end)
+ 	end))
++	cleanup(function()
++		if placedConnection then
++			placedConnection:Disconnect()
++		end
++	end)
+ 
+ 	local blur = Instance.new("BlurEffect")
+ 	blur.Name = "BuildBlur"
+@@ -54,7 +57,7 @@ local function buildModeHud(): Frame
+ 	blur.Parent = Lighting
+ 	cleanup(blur)
+ 
+-	local camera = Workspace.CurrentCamera
++	local camera = workspace.CurrentCamera
+ 	local previousFieldOfView = camera.FieldOfView
+ 	camera.FieldOfView = BUILD_FIELD_OF_VIEW
+ 	cleanup(function()
+@@ -63,90 +66,10 @@ local function buildModeHud(): Frame
+ 
+ 	SoundService:PlayLocalSound(openSound)
+ 
+-	local function selectedType(): BlockTypes.BlockType
+-		return BlockTypes.ByName[selected()]
+-	end
+-
+-	return create("Frame")({
+-		Name = "BuildModeHud",
+-		Position = UDim2.fromOffset(PANEL_MARGIN, PANEL_MARGIN),
+-		Size = UDim2.fromOffset(PANEL_SIZE.X, PANEL_SIZE.Y),
+-		BackgroundColor3 = PANEL_COLOR,
+-		BackgroundTransparency = 0.2,
+-
+-		create("UICorner")({ CornerRadius = UDim.new(0, 8) }),
+-		create("UIPadding")({
+-			PaddingLeft = UDim.new(0, PANEL_PADDING),
+-			PaddingRight = UDim.new(0, PANEL_PADDING),
+-			PaddingTop = UDim.new(0, PANEL_PADDING),
+-			PaddingBottom = UDim.new(0, PANEL_PADDING),
+-		}),
+-		create("UIListLayout")({
+-			FillDirection = Enum.FillDirection.Vertical,
+-			Padding = UDim.new(0, 6),
+-		}),
+-
+-		create("TextLabel")({
+-			Name = "PlayerName",
+-			LayoutOrder = 1,
+-			Size = UDim2.new(1, 0, 0, 22),
+-			BackgroundTransparency = 1,
+-			Font = Enum.Font.GothamBold,
+-			TextSize = 18,
+-			TextColor3 = TEXT_COLOR,
+-			TextXAlignment = Enum.TextXAlignment.Left,
+-			TextTruncate = Enum.TextTruncate.AtEnd,
+-			Text = `{localPlayer.DisplayName} is building`,
+-		}),
+-		create("Frame")({
+-			Name = "Selected",
+-			LayoutOrder = 2,
+-			Size = UDim2.new(1, 0, 0, 20),
+-			BackgroundTransparency = 1,
+-
+-			create("UIListLayout")({
+-				FillDirection = Enum.FillDirection.Horizontal,
+-				VerticalAlignment = Enum.VerticalAlignment.Center,
+-				Padding = UDim.new(0, 6),
+-			}),
+-
+-			create("Frame")({
+-				Name = "Swatch",
+-				LayoutOrder = 1,
+-				Size = UDim2.fromOffset(SWATCH_SIZE, SWATCH_SIZE),
+-				BackgroundColor3 = function()
+-					return selectedType().Color
+-				end,
+-
+-				create("UICorner")({ CornerRadius = UDim.new(0, 4) }),
+-			}),
+-			create("TextLabel")({
+-				Name = "BlockName",
+-				LayoutOrder = 2,
+-				Size = UDim2.new(1, -(SWATCH_SIZE + 6), 1, 0),
+-				BackgroundTransparency = 1,
+-				Font = Enum.Font.Gotham,
+-				TextSize = 16,
+-				TextColor3 = MUTED_TEXT_COLOR,
+-				TextXAlignment = Enum.TextXAlignment.Left,
+-				Text = function()
+-					return selectedType().DisplayName
+-				end,
+-			}),
+-		}),
+-		create("TextLabel")({
+-			Name = "PlacedCount",
+-			LayoutOrder = 3,
+-			Size = UDim2.new(1, 0, 0, 20),
+-			BackgroundTransparency = 1,
+-			Font = Enum.Font.Gotham,
+-			TextSize = 16,
+-			TextColor3 = MUTED_TEXT_COLOR,
+-			TextXAlignment = Enum.TextXAlignment.Left,
+-			Text = function()
+-				return `Placed: {placedCount()}`
+-			end,
+-		}),
++	return BuildModeHudView({
++		PlayerName = Players.LocalPlayer.DisplayName,
++		BlockTypeName = selected,
++		PlacedCount = placedCount,
+ 	})
+ end
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BuildModeHudView.luau b/src/StarterPlayer/StarterPlayerScripts/BuildModeHudView.luau
+new file mode 100644
+index 0000000..4c0ac8f
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/BuildModeHudView.luau
+@@ -0,0 +1,120 @@
++--!strict
++--[[
++	The build mode HUD panel, drawn only from its props. It reads no game state
++	and touches nothing outside its own frame, so UI Labs can render it in edit
++	mode. BuildModeHud connects it to the game.
++]]
++
++const BlockTypes = require("@game/ReplicatedStorage/Shared/BlockTypes")
++const Vide = require("@game/ReplicatedStorage/Packages/Vide")
++
++const create = Vide.create
++const read = Vide.read
++
++const PANEL_SIZE = Vector2.new(240, 96)
++const PANEL_MARGIN = 16
++const PANEL_PADDING = 10
++const PANEL_COLOR = Color3.fromRGB(28, 28, 34)
++const TEXT_COLOR = Color3.fromRGB(240, 240, 240)
++const MUTED_TEXT_COLOR = Color3.fromRGB(180, 180, 190)
++const SWATCH_SIZE = 16
++
++export type Props = {
++	PlayerName: string | () -> string,
++	-- A key of BlockTypes.ByName.
++	BlockTypeName: string | () -> string,
++	PlacedCount: number | () -> number,
++}
++
++local function buildModeHudView(props: Props): Frame
++	local function selectedType(): BlockTypes.BlockType
++		return BlockTypes.ByName[read(props.BlockTypeName)]
++	end
++
++	return create("Frame")({
++		Name = "BuildModeHud",
++		Position = UDim2.fromOffset(PANEL_MARGIN, PANEL_MARGIN),
++		Size = UDim2.fromOffset(PANEL_SIZE.X, PANEL_SIZE.Y),
++		BackgroundColor3 = PANEL_COLOR,
++		BackgroundTransparency = 0.2,
++
++		create("UICorner")({ CornerRadius = UDim.new(0, 8) }),
++		create("UIPadding")({
++			PaddingLeft = UDim.new(0, PANEL_PADDING),
++			PaddingRight = UDim.new(0, PANEL_PADDING),
++			PaddingTop = UDim.new(0, PANEL_PADDING),
++			PaddingBottom = UDim.new(0, PANEL_PADDING),
++		}),
++		create("UIListLayout")({
++			FillDirection = Enum.FillDirection.Vertical,
++			Padding = UDim.new(0, 6),
++		}),
++
++		create("TextLabel")({
++			Name = "PlayerName",
++			LayoutOrder = 1,
++			Size = UDim2.new(1, 0, 0, 22),
++			BackgroundTransparency = 1,
++			Font = Enum.Font.GothamBold,
++			TextSize = 18,
++			TextColor3 = TEXT_COLOR,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++			Text = function()
++				return `{read(props.PlayerName)} is building`
++			end,
++		}),
++		create("Frame")({
++			Name = "Selected",
++			LayoutOrder = 2,
++			Size = UDim2.new(1, 0, 0, 20),
++			BackgroundTransparency = 1,
++
++			create("UIListLayout")({
++				FillDirection = Enum.FillDirection.Horizontal,
++				VerticalAlignment = Enum.VerticalAlignment.Center,
++				Padding = UDim.new(0, 6),
++			}),
++
++			create("Frame")({
++				Name = "Swatch",
++				LayoutOrder = 1,
++				Size = UDim2.fromOffset(SWATCH_SIZE, SWATCH_SIZE),
++				BackgroundColor3 = function()
++					return selectedType().Color
++				end,
++
++				create("UICorner")({ CornerRadius = UDim.new(0, 4) }),
++			}),
++			create("TextLabel")({
++				Name = "BlockName",
++				LayoutOrder = 2,
++				Size = UDim2.new(1, -(SWATCH_SIZE + 6), 1, 0),
++				BackgroundTransparency = 1,
++				Font = Enum.Font.Gotham,
++				TextSize = 16,
++				TextColor3 = MUTED_TEXT_COLOR,
++				TextXAlignment = Enum.TextXAlignment.Left,
++				Text = function()
++					return selectedType().DisplayName
++				end,
++			}),
++		}),
++		create("TextLabel")({
++			Name = "PlacedCount",
++			LayoutOrder = 3,
++			Size = UDim2.new(1, 0, 0, 20),
++			BackgroundTransparency = 1,
++			Font = Enum.Font.Gotham,
++			TextSize = 16,
++			TextColor3 = MUTED_TEXT_COLOR,
++			TextXAlignment = Enum.TextXAlignment.Left,
++			TextTruncate = Enum.TextTruncate.AtEnd,
++			Text = function()
++				return `Placed: {read(props.PlacedCount)}`
++			end,
++		}),
++	})
++end
++
++return buildModeHudView

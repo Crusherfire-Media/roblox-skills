@@ -1,0 +1,366 @@
+diff --git a/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+new file mode 100644
+index 0000000..c26c960
+--- /dev/null
++++ b/src/ServerScriptService/Tests/Specs/PlacementRules.spec.luau
+@@ -0,0 +1,360 @@
++--[[
++	Specs for ReplicatedStorage.Shared.PlacementRules.
++
++	Assumptions:
++	- The reason strings returned by validate are asserted exactly. They are only meant for the
++	  server log, but asserting them shows which rule rejected a request, so a test can't pass
++	  because an earlier, unrelated check failed. Update them here if the wording changes.
++	- Reach and height limits are read from PlacementRules.MaxReach / MaxHeight and
++	  BlockTypes.BlockSize so the specs keep working if those values are tuned.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local ServerScriptService = game:GetService("ServerScriptService")
++
++local JestGlobals = require(ServerScriptService.Tests.Packages.JestGlobals)
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
++
++local describe = JestGlobals.describe
++local it = JestGlobals.it
++local expect = JestGlobals.expect
++
++local SIZE = BlockTypes.BlockSize
++local HALF = SIZE / 2
++
++-- A valid block type name, taken from the list so the specs don't depend on a particular name.
++local BLOCK = BlockTypes.List[1].Name
++
++-- The cell resting on the Baseplate at the origin, and a character standing right beside it.
++local ORIGIN_CELL = Vector3.new(HALF, HALF, HALF)
++local NEAR_ROOT = ORIGIN_CELL + Vector3.new(SIZE, 0, 0)
++
++local function emptyOccupied(): { [Vector3]: boolean }
++	return {}
++end
++
++describe("PlacementRules.snap", function()
++	it("snaps the origin to the center of the cell resting on the Baseplate", function()
++		expect(PlacementRules.snap(Vector3.zero)).toEqual(ORIGIN_CELL)
++	end)
++
++	it("keeps every point inside a cell in that cell", function()
++		local justInside = SIZE - 0.01
++		expect(PlacementRules.snap(Vector3.new(justInside, justInside, justInside))).toEqual(
++			ORIGIN_CELL
++		)
++		expect(PlacementRules.snap(Vector3.new(0.01, HALF, justInside))).toEqual(ORIGIN_CELL)
++	end)
++
++	it("puts a point on a cell boundary in the cell above it", function()
++		expect(PlacementRules.snap(Vector3.new(SIZE, SIZE, SIZE))).toEqual(
++			Vector3.new(SIZE + HALF, SIZE + HALF, SIZE + HALF)
++		)
++	end)
++
++	it("snaps negative coordinates to the cell below zero", function()
++		expect(PlacementRules.snap(Vector3.new(-0.01, -0.01, -0.01))).toEqual(
++			Vector3.new(-HALF, -HALF, -HALF)
++		)
++		expect(PlacementRules.snap(Vector3.new(-SIZE, -SIZE, -SIZE))).toEqual(
++			Vector3.new(-HALF, -HALF, -HALF)
++		)
++		expect(PlacementRules.snap(Vector3.new(-SIZE - 0.01, 0, 0))).toEqual(
++			Vector3.new(-SIZE - HALF, HALF, HALF)
++		)
++	end)
++
++	it("snaps each axis independently", function()
++		expect(PlacementRules.snap(Vector3.new(1, SIZE * 2 + 1, -1))).toEqual(
++			Vector3.new(HALF, SIZE * 2 + HALF, -HALF)
++		)
++	end)
++
++	it("leaves a cell center where it is", function()
++		local center = Vector3.new(SIZE * 3 + HALF, SIZE + HALF, -SIZE * 5 - HALF)
++		expect(PlacementRules.snap(center)).toEqual(center)
++		expect(PlacementRules.snap(PlacementRules.snap(Vector3.new(7.3, 9.9, -2.2)))).toEqual(
++			PlacementRules.snap(Vector3.new(7.3, 9.9, -2.2))
++		)
++	end)
++end)
++
++describe("PlacementRules.validate", function()
++	describe("a valid request", function()
++		it("is accepted and returns the snapped cell center", function()
++			local ok, result =
++				PlacementRules.validate(BLOCK, Vector3.new(1, 1, 1), NEAR_ROOT, emptyOccupied())
++			expect(ok).toBe(true)
++			expect(result).toEqual(ORIGIN_CELL)
++		end)
++
++		it("is accepted for every block type", function()
++			for _, blockType in BlockTypes.List do
++				local ok, result =
++					PlacementRules.validate(blockType.Name, ORIGIN_CELL, NEAR_ROOT, emptyOccupied())
++				expect(ok).toBe(true)
++				expect(result).toEqual(ORIGIN_CELL)
++			end
++		end)
++	end)
++
++	describe("block type", function()
++		-- nil can't be stored as a table value, so it gets its own test below.
++		local badNames: { [string]: unknown } = {
++			["an unknown name"] = "Diamond",
++			["a name in the wrong case"] = string.lower(BLOCK),
++			["an empty string"] = "",
++			["a number"] = 1,
++			["a table"] = { Name = BLOCK },
++			["a boolean"] = true,
++		}
++
++		it("rejects nil", function()
++			local ok, reason = PlacementRules.validate(nil, ORIGIN_CELL, NEAR_ROOT, emptyOccupied())
++			expect(ok).toBe(false)
++			expect(reason).toBe("unknown block type")
++		end)
++
++		for label, name in badNames do
++			it(`rejects {label}`, function()
++				local ok, reason =
++					PlacementRules.validate(name, ORIGIN_CELL, NEAR_ROOT, emptyOccupied())
++				expect(ok).toBe(false)
++				expect(reason).toBe("unknown block type")
++			end)
++		end
++	end)
++
++	describe("position", function()
++		local notVectors: { [string]: unknown } = {
++			["a table shaped like a Vector3"] = { X = HALF, Y = HALF, Z = HALF },
++			["a string"] = "2, 2, 2",
++			["a number"] = HALF,
++			["a CFrame"] = CFrame.new(HALF, HALF, HALF),
++			["a Vector2"] = Vector2.new(HALF, HALF),
++		}
++
++		it("rejects nil", function()
++			local ok, reason = PlacementRules.validate(BLOCK, nil, NEAR_ROOT, emptyOccupied())
++			expect(ok).toBe(false)
++			expect(reason).toBe("position is not a Vector3")
++		end)
++
++		for label, position in notVectors do
++			it(`rejects {label}`, function()
++				local ok, reason =
++					PlacementRules.validate(BLOCK, position, NEAR_ROOT, emptyOccupied())
++				expect(ok).toBe(false)
++				expect(reason).toBe("position is not a Vector3")
++			end)
++		end
++
++		local nan = 0 / 0
++		local nonFinite: { [string]: Vector3 } = {
++			["NaN in X"] = Vector3.new(nan, HALF, HALF),
++			["NaN in Y"] = Vector3.new(HALF, nan, HALF),
++			["NaN in Z"] = Vector3.new(HALF, HALF, nan),
++			["infinity in X"] = Vector3.new(math.huge, HALF, HALF),
++			["infinity in Y"] = Vector3.new(HALF, math.huge, HALF),
++			["infinity in Z"] = Vector3.new(HALF, HALF, math.huge),
++			["negative infinity in X"] = Vector3.new(-math.huge, HALF, HALF),
++			["negative infinity in Y"] = Vector3.new(HALF, -math.huge, HALF),
++			["negative infinity in Z"] = Vector3.new(HALF, HALF, -math.huge),
++		}
++
++		for label, position in nonFinite do
++			it(`rejects {label}`, function()
++				local ok, reason =
++					PlacementRules.validate(BLOCK, position, NEAR_ROOT, emptyOccupied())
++				expect(ok).toBe(false)
++				expect(reason).toBe("position is not finite")
++			end)
++		end
++	end)
++
++	describe("height", function()
++		-- Cell centers sit at HALF + n * SIZE, so MaxHeight itself may not be a cell center.
++		-- These are the highest center at or below MaxHeight and the next one up.
++		local highestY = (math.floor(PlacementRules.MaxHeight / SIZE - 0.5) + 0.5) * SIZE
++		local tooHighY = highestY + SIZE
++
++		it("accepts the lowest cell, resting on the Baseplate", function()
++			local ok, result = PlacementRules.validate(
++				BLOCK,
++				Vector3.new(HALF, 0, HALF),
++				NEAR_ROOT,
++				emptyOccupied()
++			)
++			expect(ok).toBe(true)
++			expect(result).toEqual(ORIGIN_CELL)
++		end)
++
++		-- Note: the docs say the center must be above the Baseplate (Y > 0) while the code checks
++		-- center.Y < 0. Snapped centers are always an odd multiple of HALF, so a center of exactly
++		-- 0 can't happen and the two agree today. This test pins the cell just below the top.
++		it("rejects the cell just below the Baseplate's top", function()
++			local ok, reason = PlacementRules.validate(
++				BLOCK,
++				Vector3.new(HALF, -0.01, HALF),
++				NEAR_ROOT,
++				emptyOccupied()
++			)
++			expect(ok).toBe(false)
++			expect(reason).toBe("out of height range")
++		end)
++
++		it("rejects cells deep below the Baseplate", function()
++			local ok, reason = PlacementRules.validate(
++				BLOCK,
++				Vector3.new(HALF, -SIZE * 10, HALF),
++				NEAR_ROOT,
++				emptyOccupied()
++			)
++			expect(ok).toBe(false)
++			expect(reason).toBe("out of height range")
++		end)
++
++		it("accepts the highest cell at or below MaxHeight", function()
++			local center = Vector3.new(HALF, highestY, HALF)
++			local root = center - Vector3.new(0, 3, 0)
++			local ok, result = PlacementRules.validate(BLOCK, center, root, emptyOccupied())
++			expect(ok).toBe(true)
++			expect(result).toEqual(center)
++		end)
++
++		it("rejects the first cell above MaxHeight", function()
++			local center = Vector3.new(HALF, tooHighY, HALF)
++			local root = center - Vector3.new(0, 3, 0)
++			local ok, reason = PlacementRules.validate(BLOCK, center, root, emptyOccupied())
++			expect(ok).toBe(false)
++			expect(reason).toBe("out of height range")
++		end)
++	end)
++
++	describe("character and reach", function()
++		it("rejects a player with no character", function()
++			local ok, reason = PlacementRules.validate(BLOCK, ORIGIN_CELL, nil, emptyOccupied())
++			expect(ok).toBe(false)
++			expect(reason).toBe("no character")
++		end)
++
++		it("accepts a cell just inside MaxReach", function()
++			local root = ORIGIN_CELL + Vector3.new(PlacementRules.MaxReach - 0.1, 0, 0)
++			local ok, result = PlacementRules.validate(BLOCK, ORIGIN_CELL, root, emptyOccupied())
++			expect(ok).toBe(true)
++			expect(result).toEqual(ORIGIN_CELL)
++		end)
++
++		-- BUG: validate's doc comment says "A cell exactly MaxReach away is in reach", but the code
++		-- rejects it because it compares with `>=` instead of `>`
++		-- (`(rootPosition - center).Magnitude >= PlacementRules.MaxReach`). This test follows the
++		-- documented behaviour and fails until the comparison (or the doc) is changed. The offset
++		-- is along one axis with whole-number values so the distance is exactly MaxReach.
++		it("accepts a cell exactly MaxReach away", function()
++			local root = ORIGIN_CELL + Vector3.new(PlacementRules.MaxReach, 0, 0)
++			local ok, result = PlacementRules.validate(BLOCK, ORIGIN_CELL, root, emptyOccupied())
++			expect(ok).toBe(true)
++			expect(result).toEqual(ORIGIN_CELL)
++		end)
++
++		it("rejects a cell just past MaxReach", function()
++			local root = ORIGIN_CELL + Vector3.new(PlacementRules.MaxReach + 0.1, 0, 0)
++			local ok, reason = PlacementRules.validate(BLOCK, ORIGIN_CELL, root, emptyOccupied())
++			expect(ok).toBe(false)
++			expect(reason).toBe("out of reach")
++		end)
++
++		it("measures reach in 3D, not just horizontally", function()
++			local reach = PlacementRules.MaxReach
++			-- Each axis is within reach on its own, but the diagonal distance is not.
++			local root = ORIGIN_CELL + Vector3.new(reach * 0.8, reach * 0.8, 0)
++			local ok, reason = PlacementRules.validate(BLOCK, ORIGIN_CELL, root, emptyOccupied())
++			expect(ok).toBe(false)
++			expect(reason).toBe("out of reach")
++		end)
++
++		it("measures reach to the cell center, not the raw position", function()
++			-- The raw position is about MaxReach - 0.9 from the root, but its cell center is
++			-- MaxReach + 1 away.
++			local position = Vector3.new(0.1, HALF, HALF)
++			local root = Vector3.new(HALF - PlacementRules.MaxReach - 1, HALF, HALF)
++			local ok, reason = PlacementRules.validate(BLOCK, position, root, emptyOccupied())
++			expect(ok).toBe(false)
++			expect(reason).toBe("out of reach")
++		end)
++	end)
++
++	describe("occupied cells", function()
++		it("rejects a cell that is already occupied", function()
++			local occupied = { [ORIGIN_CELL] = true }
++			local ok, reason = PlacementRules.validate(BLOCK, ORIGIN_CELL, NEAR_ROOT, occupied)
++			expect(ok).toBe(false)
++			expect(reason).toBe("cell is occupied")
++		end)
++
++		it("looks up the snapped center, not the raw position", function()
++			local occupied = { [ORIGIN_CELL] = true }
++			local ok, reason =
++				PlacementRules.validate(BLOCK, Vector3.new(0.5, 3.5, 1), NEAR_ROOT, occupied)
++			expect(ok).toBe(false)
++			expect(reason).toBe("cell is occupied")
++		end)
++
++		it("accepts a cell next to an occupied one", function()
++			local neighbour = ORIGIN_CELL + Vector3.new(0, SIZE, 0)
++			local occupied = { [neighbour] = true }
++			local ok, result = PlacementRules.validate(BLOCK, ORIGIN_CELL, NEAR_ROOT, occupied)
++			expect(ok).toBe(true)
++			expect(result).toEqual(ORIGIN_CELL)
++		end)
++
++		it("treats a cell marked false as free", function()
++			local occupied = { [ORIGIN_CELL] = false }
++			local ok, result = PlacementRules.validate(BLOCK, ORIGIN_CELL, NEAR_ROOT, occupied)
++			expect(ok).toBe(true)
++			expect(result).toEqual(ORIGIN_CELL)
++		end)
++
++		it("never changes occupied", function()
++			local occupied: { [Vector3]: boolean } = {}
++			PlacementRules.validate(BLOCK, ORIGIN_CELL, NEAR_ROOT, occupied)
++			expect(next(occupied)).toBeNil()
++
++			local neighbour = ORIGIN_CELL + Vector3.new(SIZE, 0, 0)
++			local partlyFilled = { [neighbour] = true }
++			PlacementRules.validate(BLOCK, ORIGIN_CELL, NEAR_ROOT, partlyFilled)
++			PlacementRules.validate(BLOCK, neighbour, NEAR_ROOT, partlyFilled)
++			local count = 0
++			for _ in partlyFilled do
++				count += 1
++			end
++			expect(count).toBe(1)
++			expect(partlyFilled[neighbour]).toBe(true)
++			expect(partlyFilled[ORIGIN_CELL]).toBeNil()
++		end)
++	end)
++
++	describe("check order", function()
++		it("reports an unknown block type before a bad position", function()
++			local ok, reason = PlacementRules.validate("Diamond", "nope", nil, emptyOccupied())
++			expect(ok).toBe(false)
++			expect(reason).toBe("unknown block type")
++		end)
++
++		it("reports the height before a missing character", function()
++			local ok, reason =
++				PlacementRules.validate(BLOCK, Vector3.new(0, -SIZE, 0), nil, emptyOccupied())
++			expect(ok).toBe(false)
++			expect(reason).toBe("out of height range")
++		end)
++
++		it("reports reach before occupancy", function()
++			local far = ORIGIN_CELL + Vector3.new(PlacementRules.MaxReach * 2, 0, 0)
++			local ok, reason =
++				PlacementRules.validate(BLOCK, ORIGIN_CELL, far, { [ORIGIN_CELL] = true })
++			expect(ok).toBe(false)
++			expect(reason).toBe("out of reach")
++		end)
++	end)
++end)

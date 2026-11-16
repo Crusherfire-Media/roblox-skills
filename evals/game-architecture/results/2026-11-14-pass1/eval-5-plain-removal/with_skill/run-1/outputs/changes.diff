@@ -1,0 +1,305 @@
+diff --git a/src/ServerScriptService/BlockPlacement.server.luau b/src/ServerScriptService/BlockPlacement.server.luau
+index 812f4f9..efc29f9 100644
+--- a/src/ServerScriptService/BlockPlacement.server.luau
++++ b/src/ServerScriptService/BlockPlacement.server.luau
+@@ -1,6 +1,7 @@
+ --[[
+-	Places blocks for players. Clients fire PlaceBlock with a block type name and the position of
+-	the grid cell they want filled; the server checks both before placing anything.
++	Places and removes blocks for players. Clients fire PlaceBlock with a block type name and the
++	position of the grid cell they want filled, and RemoveBlock with a block they placed. Only the
++	player who placed a block may remove it.
+ ]]
+ 
+ local Players = game:GetService("Players")
+@@ -12,19 +13,30 @@ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local BLOCK_SIZE = BlockTypes.BlockSize
+ -- How far from the player's character a block may be placed, in studs.
+ local MAX_REACH = 64
+--- Shortest time between two placements by one player, in seconds.
++-- Shortest time between two block actions by one player, in seconds. Placing and removing share
++-- one timer so alternating them can't double the rate.
+ local MIN_INTERVAL = 0.1
+ 
++type BlockRecord = {
++	OwnerUserId: number,
++	Cell: Vector3,
++}
++
+ local placeBlock = Instance.new("RemoteEvent")
+ placeBlock.Name = "PlaceBlock"
+ placeBlock.Parent = ReplicatedStorage
+ 
++local removeBlock = Instance.new("RemoteEvent")
++removeBlock.Name = "RemoveBlock"
++removeBlock.Parent = ReplicatedStorage
++
+ local blocksFolder = Instance.new("Folder")
+ blocksFolder.Name = "Blocks"
+ blocksFolder.Parent = Workspace
+ 
+-local lastPlacedAt: { [Player]: number } = {}
++local lastActionAt: { [Player]: number } = {}
+ local occupied: { [Vector3]: boolean } = {}
++local blockRecords: { [BasePart]: BlockRecord? } = {}
+ 
+ local function snapAxis(value: number): number
+ 	return math.floor(value / BLOCK_SIZE) * BLOCK_SIZE + BLOCK_SIZE / 2
+@@ -34,6 +46,19 @@ local function snapToCell(position: Vector3): Vector3
+ 	return Vector3.new(snapAxis(position.X), snapAxis(position.Y), snapAxis(position.Z))
+ end
+ 
++local function isRateLimited(player: Player, now: number): boolean
++	return now - (lastActionAt[player] or 0) < MIN_INTERVAL
++end
++
++local function getRootPart(player: Player): BasePart?
++	local character = player.Character
++	local rootPart = if character then character:FindFirstChild("HumanoidRootPart") else nil
++	if not rootPart or not rootPart:IsA("BasePart") then
++		return nil
++	end
++	return rootPart
++end
++
+ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: unknown)
+ 	if typeof(blockTypeName) ~= "string" or typeof(position) ~= "Vector3" then
+ 		return
+@@ -49,13 +74,12 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 	end
+ 
+ 	local now = os.clock()
+-	if now - (lastPlacedAt[player] or 0) < MIN_INTERVAL then
++	if isRateLimited(player, now) then
+ 		return
+ 	end
+ 
+-	local character = player.Character
+-	local rootPart = if character then character:FindFirstChild("HumanoidRootPart") else nil
+-	if not rootPart or not rootPart:IsA("BasePart") then
++	local rootPart = getRootPart(player)
++	if not rootPart then
+ 		return
+ 	end
+ 
+@@ -67,7 +91,7 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 		return
+ 	end
+ 
+-	lastPlacedAt[player] = now
++	lastActionAt[player] = now
+ 	occupied[cell] = true
+ 
+ 	local part = Instance.new("Part")
+@@ -78,11 +102,45 @@ local function onPlaceBlock(player: Player, blockTypeName: unknown, position: un
+ 	part.Color = blockType.Color
+ 	part.Material = blockType.Material
+ 	part.Transparency = blockType.Transparency
++	blockRecords[part] = {
++		OwnerUserId = player.UserId,
++		Cell = cell,
++	}
+ 	part.Parent = blocksFolder
+ end
+ 
++local function onRemoveBlock(player: Player, block: unknown)
++	if typeof(block) ~= "Instance" or not block:IsA("BasePart") then
++		return
++	end
++
++	local record = blockRecords[block]
++	if not record or record.OwnerUserId ~= player.UserId then
++		return
++	end
++
++	local now = os.clock()
++	if isRateLimited(player, now) then
++		return
++	end
++
++	local rootPart = getRootPart(player)
++	if not rootPart then
++		return
++	end
++	if (record.Cell - rootPart.Position).Magnitude > MAX_REACH then
++		return
++	end
++
++	lastActionAt[player] = now
++	occupied[record.Cell] = nil
++	blockRecords[block] = nil
++	block:Destroy()
++end
++
+ placeBlock.OnServerEvent:Connect(onPlaceBlock)
++removeBlock.OnServerEvent:Connect(onRemoveBlock)
+ 
+ Players.PlayerRemoving:Connect(function(player: Player)
+-	lastPlacedAt[player] = nil
++	lastActionAt[player] = nil
+ end)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+index e8d33eb..9f0c105 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+@@ -1,6 +1,7 @@
+ --[[
+ 	Client side of block placement: keeps track of the selected block type and asks the server to
+ 	place it where the player clicks or taps in the world. Number keys 1 to 5 select a block type.
++	Right-clicking or long-pressing a block asks the server to remove it.
+ ]]
+ 
+ local Players = game:GetService("Players")
+@@ -11,6 +12,9 @@ local Workspace = game:GetService("Workspace")
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ 
+ local RAY_LENGTH = 512
++-- Right-dragging turns the camera, so a right-click only removes if the mouse stayed this close
++-- to where it was pressed, in pixels.
++local MAX_RIGHT_CLICK_DRIFT = 4
+ local NUMBER_KEYS = {
+ 	Enum.KeyCode.One,
+ 	Enum.KeyCode.Two,
+@@ -25,6 +29,8 @@ local selectedName = BlockTypes.List[1].Name
+ local isEnabled = true
+ local hasStarted = false
+ local placeBlock: RemoteEvent? = nil
++local removeBlock: RemoteEvent? = nil
++local rightPressPosition: Vector2? = nil
+ local blockTypeChanged = Instance.new("BindableEvent")
+ 
+ --[[
+@@ -50,16 +56,16 @@ function BlockPlacer.isEnabled(): boolean
+ end
+ 
+ --[[
+-	Turns placing on or off. While off, clicks and taps in the world place nothing.
++	Turns placing and removing on or off. While off, clicks and taps in the world do nothing.
+ ]]
+ function BlockPlacer.setEnabled(enabled: boolean)
+ 	isEnabled = enabled
+ end
+ 
+-local function placeAt(screenPosition: Vector2)
++local function raycastFromScreen(screenPosition: Vector2): RaycastResult?
+ 	local camera = Workspace.CurrentCamera
+-	if not isEnabled or not placeBlock or not camera then
+-		return
++	if not camera then
++		return nil
+ 	end
+ 
+ 	local params = RaycastParams.new()
+@@ -71,7 +77,15 @@ local function placeAt(screenPosition: Vector2)
+ 
+ 	-- ScreenPointToRay takes positions below the topbar inset, as input positions are.
+ 	local ray = camera:ScreenPointToRay(screenPosition.X, screenPosition.Y)
+-	local result = Workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
++	return Workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
++end
++
++local function placeAt(screenPosition: Vector2)
++	if not isEnabled or not placeBlock then
++		return
++	end
++
++	local result = raycastFromScreen(screenPosition)
+ 	if not result then
+ 		return
+ 	end
+@@ -80,6 +94,20 @@ local function placeAt(screenPosition: Vector2)
+ 	placeBlock:FireServer(selectedName, cellPosition)
+ end
+ 
++local function removeAt(screenPosition: Vector2)
++	if not isEnabled or not removeBlock then
++		return
++	end
++
++	local result = raycastFromScreen(screenPosition)
++	local blocksFolder = Workspace:FindFirstChild("Blocks")
++	if not result or not blocksFolder or result.Instance.Parent ~= blocksFolder then
++		return
++	end
++
++	removeBlock:FireServer(result.Instance)
++end
++
+ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
+ 	if gameProcessedEvent then
+ 		return
+@@ -89,6 +117,10 @@ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
+ 		placeAt(Vector2.new(input.Position.X, input.Position.Y))
+ 		return
+ 	end
++	if input.UserInputType == Enum.UserInputType.MouseButton2 then
++		rightPressPosition = Vector2.new(input.Position.X, input.Position.Y)
++		return
++	end
+ 
+ 	local index = table.find(NUMBER_KEYS, input.KeyCode)
+ 	if index and BlockTypes.List[index] then
+@@ -96,6 +128,19 @@ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
+ 	end
+ end
+ 
++local function onInputEnded(input: InputObject)
++	if input.UserInputType ~= Enum.UserInputType.MouseButton2 or not rightPressPosition then
++		return
++	end
++
++	local pressPosition = rightPressPosition
++	rightPressPosition = nil
++	local releasePosition = Vector2.new(input.Position.X, input.Position.Y)
++	if (releasePosition - pressPosition).Magnitude <= MAX_RIGHT_CLICK_DRIFT then
++		removeAt(releasePosition)
++	end
++end
++
+ local function onTouchTapInWorld(position: Vector2, processedByUI: boolean)
+ 	if processedByUI then
+ 		return
+@@ -103,9 +148,20 @@ local function onTouchTapInWorld(position: Vector2, processedByUI: boolean)
+ 	placeAt(position)
+ end
+ 
++local function onTouchLongPress(
++	touchPositions: { Vector2 },
++	state: Enum.UserInputState,
++	processedByUI: boolean
++)
++	if processedByUI or state ~= Enum.UserInputState.Begin or not touchPositions[1] then
++		return
++	end
++	removeAt(touchPositions[1])
++end
++
+ --[[
+-	Connects input and finds the server's PlaceBlock remote. Yields until the remote exists, so
+-	call it after any UI is mounted or from its own thread.
++	Connects input and finds the server's PlaceBlock and RemoveBlock remotes. Yields until the
++	remotes exist, so call it after any UI is mounted or from its own thread.
+ ]]
+ function BlockPlacer.start()
+ 	if hasStarted then
+@@ -114,11 +170,17 @@ function BlockPlacer.start()
+ 	hasStarted = true
+ 
+ 	UserInputService.InputBegan:Connect(onInputBegan)
++	UserInputService.InputEnded:Connect(onInputEnded)
+ 	UserInputService.TouchTapInWorld:Connect(onTouchTapInWorld)
++	UserInputService.TouchLongPress:Connect(onTouchLongPress)
++
++	local placeRemote = ReplicatedStorage:WaitForChild("PlaceBlock")
++	assert(placeRemote:IsA("RemoteEvent"), "PlaceBlock must be a RemoteEvent")
++	placeBlock = placeRemote
+ 
+-	local remote = ReplicatedStorage:WaitForChild("PlaceBlock")
+-	assert(remote:IsA("RemoteEvent"), "PlaceBlock must be a RemoteEvent")
+-	placeBlock = remote
++	local removeRemote = ReplicatedStorage:WaitForChild("RemoveBlock")
++	assert(removeRemote:IsA("RemoteEvent"), "RemoveBlock must be a RemoteEvent")
++	removeBlock = removeRemote
+ end
+ 
+ return BlockPlacer

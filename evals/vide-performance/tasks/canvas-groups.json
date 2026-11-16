@@ -1,0 +1,42 @@
+{
+  "id": 4,
+  "name": "canvas-groups",
+  "skill": "vide-performance",
+  "prompt": "Phone players at low graphics quality say the block catalog flickers and some cards draw blank while it's open; on PC it looks fine. I counted 41 CanvasGroups in PlayerGui while the catalog is open: one for the panel and one per card, and almost all of them are just sitting there. The catalog is BlockCatalog.luau, opened with C or the Catalog button; Main.client.luau mounts it (both in src/StarterPlayer/StarterPlayerScripts).\n\nFix it without changing how the catalog looks: the panel still fades in and out, and hovering a card still sweeps the shine across it, clipped to the card's rounded corners. Then write a short note in docs/perf/block-catalog.md: what you changed, and how I can check it.",
+  "setup_files": [
+    { "from": "fixtures/shared/BlockTypes.luau", "to": "src/ReplicatedStorage/Shared/BlockTypes.luau" },
+    { "from": "fixtures/shared/BlockPlacement.server.luau", "to": "src/ServerScriptService/BlockPlacement.server.luau" },
+    { "from": "fixtures/shared/BlockPlacer.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau" },
+    { "from": "fixtures/canvas-groups/BlockCatalog.luau", "to": "src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau" },
+    { "from": "fixtures/canvas-groups/Main.client.luau", "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau" }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/perf/block-catalog.md",
+      "text": "The note docs/perf/block-catalog.md exists"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau",
+      "pattern": "return create\\(\"CanvasGroup\"\\)\\(\\{\\s+Name = `\\{blockType\\.Name\\}\\{shapeName\\}`",
+      "text": "Cards are no longer built as CanvasGroups"
+    }
+  ],
+  "rubric": [
+    "With the catalog open and nothing hovered, only a handful of CanvasGroups exist (for example the panel's own), not one per card.",
+    "The shine is still clipped to the card's rounded corners: it is drawn inside a small CanvasGroup with a `UICorner` that exists only while that card's shine is showing (built for example with Vide's `show` on the hover or shine state) and is removed once the shine has gone.",
+    "The temporary shine group never pops: it is created while the shine is fully faded and removed only after it has faded out, for example by driving the group's own `GroupTransparency` from the shine strength, so hovering looks as smooth as before.",
+    "The card's content (swatch, name, shape, hit area) lives in plain Frames and labels and is never moved into and out of a temporary CanvasGroup.",
+    "The look is otherwise unchanged: the panel fades in and out, cards keep their layout and rounded corners, clicking a card still selects its block type and closes the catalog.",
+    "docs/perf/block-catalog.md says what changed and how to confirm it: CanvasGroup counts with the catalog closed, open and idle, and while hovering, before and after, plus what to check at low graphics quality on a phone.",
+    "Correct and in scope: the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files, such as a preview story, count neither for nor against."
+  ],
+  "judge_facts": [
+    "Vide 0.4.1 `show(condition, component)` (vide/src/show.luau, switch.luau) builds the component in a new scope when the condition turns truthy and destroys it (after the delay the builder returned) when it turns falsy. The builder's second argument, `present`, starts false, is set true right after the builder runs, and is set false when the condition goes away.",
+    "Vide 0.4.1 `spring(source, period?, dampingRatio?)` (vide/src/spring.luau) starts at the source's value when created and animates toward later values.",
+    "Vide 0.4.1 (vide/src/graph.luau): a `derive` reruns its readers only when its new value `~=` the old one."
+  ],
+  "timeout_minutes": 20
+}

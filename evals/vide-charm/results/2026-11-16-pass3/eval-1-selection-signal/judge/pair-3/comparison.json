@@ -1,0 +1,113 @@
+{
+  "pair": 3,
+  "status": "ok",
+  "winner": "A",
+  "winner_config": "with_skill",
+  "reasoning": "Both attempts work correctly. A does the Charm-to-Vide conversion in the mounted app scope and leaves BlockPicker as a plain Vide view, which matches the rubric's preferred design. B moves useSignalState into BlockPicker, so the picker can only take a Charm getter, and it renames the public getter for no reason. A's only flaw is the lost name in the assert message, which is smaller than B's problems.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns Charm signal",
+          "score": 5,
+          "note": "`Charm.signal` is local and only the getter is exported as `getBlockType`. `setBlockType` still asserts `BlockTypes.ByName[name]` before it calls `setSelectedName`, and number keys and tile clicks both go through it."
+        },
+        {
+          "criterion": "Hotbar converts to tracked Vide state",
+          "score": 5,
+          "note": "`VideCharm.useSignalState(BlockPlacer.getBlockType)` is called in the `app()` body that `mount` runs, so the state is disposed with the UI."
+        },
+        {
+          "criterion": "Single copy, BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirrored `source` and the BindableEvent are both deleted; the check confirms nothing mentions BlockTypeChanged."
+        },
+        {
+          "criterion": "PlacementPreview follows via Charm",
+          "score": 5,
+          "note": "`Charm.listen(BlockPlacer.getBlockType, ...)` colors the ghost right away and again on every change."
+        },
+        {
+          "criterion": "BlockPicker unchanged",
+          "score": 5,
+          "note": "BlockPicker is not touched; it still receives a Vide source as `Selected`."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 4,
+          "note": "All checks pass and the API name is kept. The assert message dropped the `{name}` interpolation, a small regression in diagnostics."
+        }
+      ],
+      "overall_score": 9
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "BlockPlacer owns Charm signal",
+          "score": 4,
+          "note": "The setter is private and `setBlockType` still validates with the full message. But `getBlockType` is renamed to `selectedBlockType`, an unneeded public API change."
+        },
+        {
+          "criterion": "Hotbar converts to tracked Vide state",
+          "score": 4,
+          "note": "`useSignalState(props.Selected)` runs in the `blockPicker` body during `mount`, so it works and is disposed with the UI. The conversion now sits in the view rather than in Main."
+        },
+        {
+          "criterion": "Single copy, BlockTypeChanged removed",
+          "score": 5,
+          "note": "The mirrored source and the BindableEvent are both removed."
+        },
+        {
+          "criterion": "PlacementPreview follows via Charm",
+          "score": 5,
+          "note": "`Charm.listen(BlockPlacer.selectedBlockType, applyBlockType)` colors the ghost at start and on every change."
+        },
+        {
+          "criterion": "BlockPicker unchanged",
+          "score": 3,
+          "note": "BlockPicker now calls `useSignalState` on `props.Selected`. It requires a Charm getter, so a Vide source passed as `Selected` would never update, which ties the view to Charm."
+        },
+        {
+          "criterion": "Correct, in scope, checks pass",
+          "score": 4,
+          "note": "All checks pass and behavior works. Renaming the getter risks breaking any caller outside the changed files."
+        }
+      ],
+      "overall_score": 7.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 9,
+      "strengths": [
+        "useSignalState is called in the mounted app scope, which is the textbook placement",
+        "BlockPicker stays a plain Vide view and is not modified",
+        "Keeps the `getBlockType` API name, so other callers are unaffected",
+        "Minimal, clean diff"
+      ],
+      "weaknesses": [
+        "The assert message lost the block name interpolation"
+      ]
+    },
+    "B": {
+      "score": 7.5,
+      "strengths": [
+        "Correct, working Charm signal and listen usage",
+        "Keeps the descriptive assert message",
+        "Good doc comment on the getter"
+      ],
+      "weaknesses": [
+        "Couples the BlockPicker view to Charm through useSignalState on its props",
+        "Renames the public getter without need"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 9,
+    "without_skill": 7.5
+  },
+  "mapping": {
+    "A": "with_skill/run-3",
+    "B": "without_skill/run-3"
+  }
+}

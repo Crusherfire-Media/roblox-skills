@@ -1,0 +1,163 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index 4ddf4b5..9e3c825 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -10,8 +10,9 @@ local UserInputService = game:GetService("UserInputService")
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local cleanup = Vide.cleanup
+ local create = Vide.create
+-local effect = Vide.effect
++local show = Vide.show
+ local source = Vide.source
+ 
+ type BlockType = BlockTypes.BlockType
+@@ -88,7 +89,9 @@ type TileProps = {
+ 
+ local function tile(props: TileProps): TextButton
+ 	local isHovered = source(false)
+-	local isSelected = props.Selected() == props.BlockType.Name
++	local function isSelected(): boolean
++		return props.Selected() == props.BlockType.Name
++	end
+ 
+ 	return create("TextButton")({
+ 		Name = props.BlockType.Name,
+@@ -109,21 +112,21 @@ local function tile(props: TileProps): TextButton
+ 		create("UICorner")({ CornerRadius = UDim.new(0, TILE_RADIUS) }),
+ 		create("UIStroke")({
+ 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+-			Color = if isSelected then SELECTED_COLOR else IDLE_COLOR,
+-			Thickness = if isSelected then 3 else 1,
++			Color = function()
++				return if isSelected() then SELECTED_COLOR else IDLE_COLOR
++			end,
++			Thickness = function()
++				return if isSelected() then 3 else 1
++			end,
+ 		}),
+ 
+-		function()
+-			if isHovered() then
+-				return infoCard({
+-					BlockType = props.BlockType,
+-					IsSelected = function()
+-						return props.Selected() == props.BlockType.Name
+-					end,
+-				})
+-			end
+-			return nil
+-		end,
++		-- show() builds the card in its own stable scope, so the card can have reactive properties.
++		show(isHovered, function()
++			return infoCard({
++				BlockType = props.BlockType,
++				IsSelected = isSelected,
++			})
++		end),
+ 	})
+ end
+ 
+@@ -133,10 +136,9 @@ export type BlockPickerProps = {
+ }
+ 
+ local function blockPicker(props: BlockPickerProps): Frame
+-	local selectedDisplayName = source("")
+-	effect(function()
+-		selectedDisplayName(BlockTypes.ByName[props.Selected()].DisplayName)
+-	end)
++	local function selectedDisplayName(): string
++		return BlockTypes.ByName[props.Selected()].DisplayName
++	end
+ 
+ 	local function step(direction: number)
+ 		local current = 1
+@@ -149,16 +151,20 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 		props.Select(BlockTypes.List[nextIndex].Name)
+ 	end
+ 
+-	UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEvent: boolean)
+-		if gameProcessedEvent then
+-			return
+-		end
+-		if input.KeyCode == Enum.KeyCode.Q then
+-			step(-1)
+-		elseif input.KeyCode == Enum.KeyCode.E then
+-			step(1)
++	-- Disconnected when the picker's scope is destroyed, so Q and E only work while it is shown.
++	local connection = UserInputService.InputBegan:Connect(
++		function(input: InputObject, gameProcessedEvent: boolean)
++			if gameProcessedEvent then
++				return
++			end
++			if input.KeyCode == Enum.KeyCode.Q then
++				step(-1)
++			elseif input.KeyCode == Enum.KeyCode.E then
++				step(1)
++			end
+ 		end
+-	end)
++	)
++	cleanup(connection)
+ 
+ 	local tiles = {}
+ 	for index, blockType in BlockTypes.List do
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 7277fa5..a4cb3e1 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -6,11 +6,13 @@ local BlockPicker = require(script.Parent.BlockPicker)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
++local cleanup = Vide.cleanup
+ local create = Vide.create
+ local root = Vide.root
+ local source = Vide.source
+ 
+ local localPlayer = Players.LocalPlayer
++local playerGui = localPlayer:WaitForChild("PlayerGui")
+ 
+ local selected = source(BlockPlacer.getBlockType())
+ BlockPlacer.BlockTypeChanged:Connect(function(name: string)
+@@ -19,11 +21,17 @@ end)
+ 
+ local destroyPicker: (() -> ())? = nil
+ 
++local function closePicker()
++	if destroyPicker then
++		destroyPicker()
++		destroyPicker = nil
++	end
++end
++
+ local function openPicker()
++	closePicker()
+ 	destroyPicker = root(function()
+-		local playerGui = localPlayer:WaitForChild("PlayerGui")
+-
+-		return create("ScreenGui")({
++		local gui = create("ScreenGui")({
+ 			Name = "BlockPickerGui",
+ 			Parent = playerGui,
+ 
+@@ -32,16 +40,11 @@ local function openPicker()
+ 				Select = BlockPlacer.setBlockType,
+ 			}),
+ 		})
++		-- Vide doesn't destroy instances when a root is destroyed, so remove the gui explicitly.
++		cleanup(gui)
+ 	end)
+ end
+ 
+-local function closePicker()
+-	if destroyPicker then
+-		destroyPicker()
+-		destroyPicker = nil
+-	end
+-end
+-
+ -- B toggles build mode: the picker shows and clicks place blocks only while it is on.
+ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEvent: boolean)
+ 	if gameProcessedEvent or input.KeyCode ~= Enum.KeyCode.B then

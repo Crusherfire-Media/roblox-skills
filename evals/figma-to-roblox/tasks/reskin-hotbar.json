@@ -1,0 +1,76 @@
+{
+	"id": 3,
+	"name": "reskin-hotbar",
+	"skill": "figma-to-roblox",
+	"prompt": "The designer redid the hotbar in Figma. They exported the HUD frame and the Hotbar Slot component set with Figma's API (GET /v1/files/:key/nodes) to design/figma/hotbar.json: node 31:100 is the screen and 31:2 is the component set. There's no screenshot.\n\nReskin our existing hotbar (src/StarterPlayer/StarterPlayerScripts/UI/Hotbar.luau) to match the design. It has to keep working the way it does now: click or tap a slot to select it, and the number keys still change the selection. Then write docs/figma/hotbar-notes.md listing anything in the design that Roblox can't reproduce exactly and what you used instead.",
+	"setup_files": [
+		{
+			"from": "fixtures/shared/BlockTypes.luau",
+			"to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacement.server.luau",
+			"to": "src/ServerScriptService/BlockPlacement.server.luau"
+		},
+		{
+			"from": "fixtures/shared/BlockPlacer.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+		},
+		{
+			"from": "fixtures/shared/UI/Screen.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/UI/Screen.luau"
+		},
+		{
+			"from": "fixtures/reskin-hotbar/UI/Hotbar.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/UI/Hotbar.luau"
+		},
+		{
+			"from": "fixtures/reskin-hotbar/Main.client.luau",
+			"to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+		},
+		{
+			"from": "fixtures/design/hotbar.json",
+			"to": "design/figma/hotbar.json"
+		}
+	],
+	"auto_checks": [
+		"luau-lsp",
+		"selene",
+		"stylua"
+	],
+	"checks": [
+		{
+			"type": "file_exists",
+			"path": "docs/figma/hotbar-notes.md",
+			"text": "The notes exist at docs/figma/hotbar-notes.md"
+		},
+		{
+			"type": "file_matches",
+			"path": "src/StarterPlayer/StarterPlayerScripts/UI/Hotbar.luau",
+			"pattern": "UIGradient",
+			"flags": "m",
+			"text": "Hotbar.luau uses a UIGradient (the selected stroke's gradient)"
+		},
+		{
+			"type": "any_file_matches",
+			"dir": "src",
+			"ext": ".luau",
+			"pattern": "BorderStrokePosition",
+			"text": "A stroke sets BorderStrokePosition (the selected stroke is outside)"
+		}
+	],
+	"rubric": [
+		"Restyles the existing Hotbar.luau and its slot component instead of adding a parallel hotbar; selecting by click or tap, the number-key sync through the Selected prop, and Main.client.luau's wiring keep working.",
+		"States: Selected stays driven by the existing selection prop, while Hover and Pressed are the slot's own pointer state (for example MouseEnter/MouseLeave plus InputBegan/InputEnded, or GuiState), not props the caller passes; fills are default (38,43,69), hover (49,56,88), and pressed (29,33,54), within rounding.",
+		"No reflow: the Pressed variant's shrink to 60 px happens without moving the other slots (a UIScale of about 0.94 or a shrinking inner frame, not a change to the slot's layout Size), and the Selected 3 px outside stroke doesn't change the layout.",
+		"Layer opacity: the hotbar's 0.8 opacity applies to the whole bar and its contents, so it is folded into every element's transparency (bar BackgroundTransparency 0.2, slots and swatches likewise) or done once with a CanvasGroup at GroupTransparency 0.2; the bar keeps UIListLayout Padding 8, UIPadding 10, and corner radius 14.",
+		"Strokes: the bar's top-only 2 px stroke (white, alpha 0.12) is a thin frame along the top edge, since a UIStroke draws every side; the Selected stroke is a 3 px UIStroke with BorderStrokePosition Outer, white Color, and a left-to-right UIGradient from (255,210,90) to (255,128,26).",
+		"Corners and badge: slots use UICorner 12, swatches 8, and the 18 px key badge is a circle (UDim.new(1, 0) or 9) with 12 px bold key text on black at 0.45 transparency; the selected name's 2 px outline (black, alpha 0.6) is a UIStroke on the text, not on its box.",
+		"docs/figma/hotbar-notes.md names each gap with the design value and the replacement: Gilroy ExtraBold is not a Roblox font (nearest shipped font chosen), letter spacing -0.5 is dropped, and corner smoothing 0.6 becomes plain rounding.",
+		"Correct and in scope: the hotbar works as before, placement and the server keep working, and luau-lsp, selene, and StyLua pass on the attempt's own files. Supporting files such as a preview story count neither for nor against."
+	],
+	"judge_facts": [
+		"Roblox engine API in this sandbox's type definitions (globalTypes.d.luau), all real and current: UIShadow (BlurRadius: UDim, Color, Enabled, Inset: boolean, Mode: Enum.ApplyShadowMode Shape or Text, Offset: UDim2, ShowBehindParent, Spread: UDim2, Transparency, ZIndex); UIStroke.BorderStrokePosition (Enum.BorderStrokePosition: Inner, Center, Outer) and UIStroke.BorderOffset; UIGradient.Type (Enum.GradientType: Linear, Radial, Elliptical, Conical); UIListLayout.Wraps, HorizontalFlex, VerticalFlex (Enum.UIFlexAlignment, including SpaceBetween); UIFlexItem.FlexMode (Fill, Grow, Shrink, Custom)."
+	],
+	"timeout_minutes": 20
+}

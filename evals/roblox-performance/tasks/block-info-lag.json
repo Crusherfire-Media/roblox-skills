@@ -1,0 +1,65 @@
+{
+  "id": 2,
+  "name": "block-info-lag",
+  "skill": "roblox-performance",
+  "prompt": "Builders say the game gets choppy once a build is big. On my PC, a client MicroProfiler capture with about 6,000 blocks placed shows Script_BlockInfo taking about 2.5 ms every frame, with a GC label right after it most frames, and on my phone the same build runs at about 35 FPS. On an empty baseplate both are fine, and builds are going to get a lot bigger than 6,000 blocks.\n\nThe script is src/StarterPlayer/StarterPlayerScripts/BlockInfo.client.luau (the block counts panel and the hover highlight). Make it stay cheap as builds grow, without changing what players see. Then write a short performance report in docs/perf/block-info.md: what was costing time, what you changed, and what I should check in Studio afterwards.",
+  "setup_files": [
+    {
+      "from": "fixtures/shared/BlockTypes.luau",
+      "to": "src/ReplicatedStorage/Shared/BlockTypes.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacement.server.luau",
+      "to": "src/ServerScriptService/BlockPlacement.server.luau"
+    },
+    {
+      "from": "fixtures/shared/BlockPlacer.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau"
+    },
+    {
+      "from": "fixtures/shared/Main.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/Main.client.luau"
+    },
+    {
+      "from": "fixtures/block-info-lag/BlockInfo.client.luau",
+      "to": "src/StarterPlayer/StarterPlayerScripts/BlockInfo.client.luau"
+    }
+  ],
+  "auto_checks": ["luau-lsp", "selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "docs/perf/block-info.md",
+      "text": "The report was written to docs/perf/block-info.md"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BlockInfo.client.luau",
+      "pattern": "for _, block in blocksFolder:GetChildren\\(\\) do\\s*if block:IsA\\(\"BasePart\"\\) then\\s*local distance",
+      "text": "The hover lookup no longer scans every block for the nearest one (planted scan is gone)"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "src/StarterPlayer/StarterPlayerScripts/BlockInfo.client.luau",
+      "pattern": "#blocksFolder:GetChildren\\(\\)",
+      "text": "The total no longer builds a fresh array of every block to count it"
+    },
+    {
+      "type": "any_file_matches",
+      "dir": "src",
+      "ext": ".luau",
+      "pattern": "ChildAdded|ChildRemoved|DescendantAdded|DescendantRemoving|GetAttributeChangedSignal|AttributeChanged",
+      "text": "Counts are driven by events (child added and removed, or attribute changes)"
+    }
+  ],
+  "rubric": [
+    "Block counts are kept up to date from events (for example the Blocks folder's ChildAdded and ChildRemoved, or counts the server maintains and replicates) instead of scanning the folder every frame. No per-frame GetChildren or GetDescendants of the Blocks folder remains; one pass over the existing blocks at startup is fine.",
+    "The hover lookup no longer loops over every block: it uses the raycast result's Instance when it is a block in the Blocks folder, or a lookup keyed by grid cell, so its cost no longer grows with the number of blocks.",
+    "Work happens only when its inputs change: the counts text is rebuilt when a count or the hovered block changes rather than every frame (the hover raycast itself may still run every frame or on mouse movement), and the SelectionBox's Adornee is only written when the hovered block changes or the write stays a cheap same-value write.",
+    "Same behavior: counts stay correct as blocks are added and removed, including blocks that already exist when the script starts; the total matches; the selection box and the \"Pointing at\" line still follow the block under the mouse; and nothing shows up later than before.",
+    "Removes the per-frame cost rather than spreading or micro-tuning it: throttling the panel to every N frames or seconds is not the fix (it would show counts late), and no object pooling, buffers, native code, or Parallel Luau is added.",
+    "The report is honest about evidence: it explains that the old cost grew with the number of blocks every frame (and the allocations behind the GC label), does not present after-change timings as measured (they can only be taken in Studio), and tells the user what to capture to confirm, such as the same MicroProfiler label with the same build before and after, and the phone's frame rate.",
+    "Correct and in scope: changes stay in BlockInfo.client.luau and the report (plus anything strictly needed), the code is typed and readable, and luau-lsp, selene, and StyLua pass on the changed files. Extra supporting files count neither for nor against."
+  ],
+  "timeout_minutes": 20
+}

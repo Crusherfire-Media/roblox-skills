@@ -1,0 +1,211 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+new file mode 100644
+index 0000000..3450097
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/GhostPreview.luau
+@@ -0,0 +1,205 @@
++--!strict
++-- A see-through copy of the selected block that follows the mouse, snapped to the grid, so the
++-- player can see where a click in build mode would put a block. It turns red where
++-- PlacementRules.check says the block can't go.
++--
++-- Usage:
++--   local ghost = GhostPreview.new("Brick")
++--   ghost:setBlockType("Wood")
++--   local center, canPlace = ghost:getPlacement()
++--   ghost:destroy()
++
++local Players = game:GetService("Players")
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++local RunService = game:GetService("RunService")
++local UserInputService = game:GetService("UserInputService")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local PlacementRules = require(ReplicatedStorage.Shared.PlacementRules)
++
++type BlockType = BlockTypes.BlockType
++
++export type Options = {
++	-- Transparency of the ghost, from 0 (solid) to 1 (invisible). Defaults to 0.5.
++	transparency: number?,
++	-- How far from the camera the mouse ray reaches, in studs. Defaults to 500.
++	maxDistance: number?,
++}
++
++local DEFAULT_TRANSPARENCY = 0.5
++local DEFAULT_MAX_DISTANCE = 500
++local BLOCKED_COLOR = Color3.fromRGB(255, 60, 60)
++-- Slightly smaller than a block so the ghost doesn't z-fight with the blocks around it.
++local GHOST_SIZE = Vector3.one * (BlockTypes.BlockSize - 0.05)
++local PLACED_BLOCKS_FOLDER_NAME = "PlacedBlocks"
++
++local localPlayer = Players.LocalPlayer
++-- Each ghost binds its own render step, so names must stay unique across a session.
++local nextId = 0
++
++local GhostPreview = {}
++GhostPreview.__index = GhostPreview
++
++type Fields = {
++	_part: Part,
++	_blockType: BlockType,
++	_maxDistance: number,
++	_raycastParams: RaycastParams,
++	_renderStepName: string,
++	_center: Vector3?,
++	_canPlace: boolean,
++	_destroyed: boolean,
++}
++
++export type GhostPreview = typeof(setmetatable({} :: Fields, GhostPreview))
++
++local function assertBlockType(blockType: unknown)
++	assert(BlockTypes.isBlockType(blockType), `unknown block type: {blockType}`)
++end
++
++--[[
++	Creates a ghost of blockType and starts moving it with the mouse every frame. Call destroy
++	when build mode ends.
++]]
++function GhostPreview.new(blockType: BlockType, options: Options?): GhostPreview
++	assertBlockType(blockType)
++
++	local transparency = if options and options.transparency ~= nil
++		then options.transparency
++		else DEFAULT_TRANSPARENCY
++	local maxDistance = if options and options.maxDistance ~= nil
++		then options.maxDistance
++		else DEFAULT_MAX_DISTANCE
++	assert(transparency >= 0 and transparency <= 1, "transparency must be between 0 and 1")
++	assert(maxDistance > 0, "maxDistance must be greater than 0")
++
++	local part = Instance.new("Part")
++	part.Name = "GhostPreview"
++	part.Size = GHOST_SIZE
++	part.Anchored = true
++	part.CanCollide = false
++	part.CanTouch = false
++	part.CanQuery = false
++	part.CastShadow = false
++	part.Transparency = transparency
++
++	local raycastParams = RaycastParams.new()
++	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
++
++	nextId += 1
++	local self = setmetatable(
++		{
++			_part = part,
++			_blockType = blockType,
++			_maxDistance = maxDistance,
++			_raycastParams = raycastParams,
++			_renderStepName = `GhostPreview{nextId}`,
++			_center = nil,
++			_canPlace = false,
++			_destroyed = false,
++		} :: Fields,
++		GhostPreview
++	)
++
++	self:_applyStyle()
++	-- Run right after the camera moves so the ghost lines up with this frame's view.
++	RunService:BindToRenderStep(
++		self._renderStepName,
++		Enum.RenderPriority.Camera.Value + 1,
++		function()
++			self:_update()
++		end
++	)
++
++	return self
++end
++
++--[[
++	Switches the ghost to another block type. Takes effect immediately.
++]]
++function GhostPreview.setBlockType(self: GhostPreview, blockType: BlockType)
++	assertBlockType(blockType)
++	assert(not self._destroyed, "GhostPreview is destroyed")
++	self._blockType = blockType
++	self:_applyStyle()
++end
++
++function GhostPreview.getBlockType(self: GhostPreview): BlockType
++	return self._blockType
++end
++
++--[[
++	Returns the center of the cell the ghost is in and whether a block can be placed there, as
++	of the last frame. The center is nil when the mouse points at nothing, in which case the
++	second value is false.
++]]
++function GhostPreview.getPlacement(self: GhostPreview): (Vector3?, boolean)
++	return self._center, self._canPlace
++end
++
++--[[
++	Stops following the mouse and removes the ghost. Safe to call more than once.
++]]
++function GhostPreview.destroy(self: GhostPreview)
++	if self._destroyed then
++		return
++	end
++	self._destroyed = true
++	RunService:UnbindFromRenderStep(self._renderStepName)
++	self._part:Destroy()
++	self._center = nil
++	self._canPlace = false
++end
++
++function GhostPreview._applyStyle(self: GhostPreview)
++	local style = BlockTypes.Styles[self._blockType]
++	self._part.Material = style.Material
++	self._part.Color = if self._center ~= nil and not self._canPlace
++		then BLOCKED_COLOR
++		else style.Color
++end
++
++function GhostPreview._raycastFromMouse(self: GhostPreview): RaycastResult?
++	local camera = workspace.CurrentCamera
++	if not camera then
++		return nil
++	end
++
++	local character = localPlayer.Character
++	self._raycastParams.FilterDescendantsInstances = if character
++		then { character, self._part }
++		else { self._part }
++
++	local mouseLocation = UserInputService:GetMouseLocation()
++	-- GetMouseLocation includes the top bar inset, which is what ViewportPointToRay expects.
++	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
++	return workspace:Raycast(ray.Origin, ray.Direction * self._maxDistance, self._raycastParams)
++end
++
++function GhostPreview._update(self: GhostPreview)
++	local result = self:_raycastFromMouse()
++	if not result then
++		self._center = nil
++		self._canPlace = false
++		self._part.Parent = nil
++		return
++	end
++
++	-- The hit point lies on a cell face; step half a block out along the normal to land in the
++	-- middle of the empty cell on the near side of that face.
++	local center = PlacementRules.snap(result.Position + result.Normal * (BlockTypes.BlockSize / 2))
++
++	local blocksFolder = workspace:FindFirstChild(PLACED_BLOCKS_FOLDER_NAME)
++	-- Without the folder the server isn't ready to accept blocks, so don't promise a placement.
++	local canPlace = if blocksFolder
++		then (PlacementRules.check(center, localPlayer.Character, blocksFolder))
++		else false
++
++	self._center = center
++	self._canPlace = canPlace
++	self._part.CFrame = CFrame.new(center)
++	self:_applyStyle()
++	self._part.Parent = workspace
++end
++
++return GhostPreview

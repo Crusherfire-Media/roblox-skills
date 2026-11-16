@@ -1,0 +1,359 @@
+diff --git a/docs/perf/build-menu.md b/docs/perf/build-menu.md
+new file mode 100644
+index 0000000..360466a
+--- /dev/null
++++ b/docs/perf/build-menu.md
+@@ -0,0 +1,43 @@
++# Build menu hitches
++
++## Problem
++
++Every tab switch destroyed the current page and built the new one from scratch (Vide `switch`).
++The Shapes page is about 450 instances (≈40 ms frame) and Colors about 370 (≈30 ms). Closing the
++menu also destroyed the whole menu (`show(isMenuOpen, …)`), so every open rebuilt the panel plus
++whichever page was last selected.
++
++## What changed
++
++- **Pages are built once and kept** (`BuildMenu.luau`). The menu tracks which tabs have been
++  visited and renders them with `Vide.values`. A page is built the first time you visit its tab;
++  after that, switching tabs only flips each page's `Visible`.
++- **The menu is built once and kept** (`Main.client.luau`). The menu now mounts on the first open
++  (`hasMenuOpened`, which never goes back to false) instead of following `isMenuOpen`. Opening
++  and closing only drive `Present`, which runs the same slide spring as before.
++- **The closed panel is hidden.** Once the slide-out spring settles, the panel's `Visible` turns
++  off, so the off-screen menu does no rendering or layout work.
++- **The rainbow swatch only runs while you can see it.** Its Heartbeat connection is only active
++  while the Colors tab is selected and the menu is open. Before, the page was destroyed when
++  hidden; now it is kept, so without this it would keep updating every frame.
++- **Looks the same.** The first open still slides in, closing still slides out, and Shapes/Colors
++  still start scrolled to the top each time they're shown, like when they were rebuilt.
++
++Still expected: one spike the first time you open the menu, and one the first time you visit each
++of Colors and Shapes in a session. Nothing is built ahead of time.
++
++## How to check in Studio
++
++1. Play Solo, then open the MicroProfiler (Ctrl+F6). Pause it (Ctrl+P) when you want to inspect
++   frames.
++2. Open the menu (M) and visit Blocks, Colors and Shapes once each. You should see the same
++   one-time spikes as before. These are the first builds.
++3. Now switch between the tabs several times, and close and reopen the menu while it is on Shapes
++   and on Colors. Those frames should now be close to your normal ~8 ms, with no 30–40 ms spikes.
++4. To confirm nothing is being rebuilt: in the Explorer, expand
++   `Players > <you> > PlayerGui > BuildMenuGui > BuildMenu > Page`. After you've visited all three
++   tabs it has three children (`Blocks`, `Colors`, `Shapes`). Switching tabs only toggles their
++   `Visible`, and the instances stay the same (they don't flash or get re-added in the Explorer).
++   Closing the menu leaves `BuildMenu` in place with `Visible = false`.
++5. Optional: run `print(#game.Players.LocalPlayer.PlayerGui.BuildMenuGui:GetDescendants())` in
++   the command bar (set to client) before and after switching tabs. The count should stay the same.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau b/src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau
+index 5f1730b..80f4c53 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BuildMenu.luau
+@@ -3,6 +3,10 @@
+ 	palette of tints for the next blocks plus a rainbow swatch whose hue keeps cycling, and Shapes
+ 	lists the block shapes. The panel slides up from below the screen when it opens and back down
+ 	when it closes.
++
++	Performance: each page is built the first time its tab is shown and then kept, hidden with
++	Visible, so switching back to a tab doesn't rebuild hundreds of instances. Main.client keeps
++	the whole menu alive after the first open, and the panel is hidden once it has slid out.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+@@ -13,9 +17,11 @@ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local cleanup = Vide.cleanup
+ local create = Vide.create
++local effect = Vide.effect
+ local source = Vide.source
+ local spring = Vide.spring
+-local switch = Vide.switch
++local untrack = Vide.untrack
++local values = Vide.values
+ 
+ type BlockType = BlockTypes.BlockType
+ 
+@@ -85,11 +91,17 @@ local function swatch(props: BuildMenuProps, color: Color3, layoutOrder: number)
+ 	})
+ end
+ 
+-local function rainbowSwatch(props: BuildMenuProps): TextButton
++local function rainbowSwatch(props: BuildMenuProps, visible: () -> boolean): TextButton
+ 	local hue = source(0)
+-	cleanup(RunService.Heartbeat:Connect(function(deltaTime: number)
+-		hue((hue() + deltaTime * RAINBOW_SPEED) % 1)
+-	end))
++	-- Only cycle while the swatch can be seen; the page now stays alive while hidden.
++	effect(function()
++		if not (visible() and props.Present()) then
++			return
++		end
++		cleanup(RunService.Heartbeat:Connect(function(deltaTime: number)
++			hue((hue() + deltaTime * RAINBOW_SPEED) % 1)
++		end))
++	end)
+ 
+ 	return create("TextButton")({
+ 		Name = "Rainbow",
+@@ -108,7 +120,22 @@ local function rainbowSwatch(props: BuildMenuProps): TextButton
+ 	})
+ end
+ 
+-local function colorsPage(props: BuildMenuProps): ScrollingFrame
++-- The pages used to be rebuilt on every tab switch and every open, which always started them
++-- scrolled to the top. Keep that behaviour now that they're reused.
++local function scrollToTopWhenShown(
++	frame: ScrollingFrame,
++	props: BuildMenuProps,
++	visible: () -> boolean
++): ScrollingFrame
++	effect(function()
++		if visible() and props.Present() then
++			frame.CanvasPosition = Vector2.zero
++		end
++	end)
++	return frame
++end
++
++local function colorsPage(props: BuildMenuProps, visible: () -> boolean): ScrollingFrame
+ 	local swatches = {}
+ 	for row = 1, PALETTE_ROWS do
+ 		for column = 1, PALETTE_COLUMNS do
+@@ -122,23 +149,28 @@ local function colorsPage(props: BuildMenuProps): ScrollingFrame
+ 		end
+ 	end
+ 
+-	return create("ScrollingFrame")({
+-		Name = "Colors",
+-		Size = UDim2.fromScale(1, 1),
+-		BackgroundTransparency = 1,
+-		BorderSizePixel = 0,
+-		ScrollBarThickness = 6,
+-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+-		CanvasSize = UDim2.new(),
++	return scrollToTopWhenShown(
++		create("ScrollingFrame")({
++			Name = "Colors",
++			Size = UDim2.fromScale(1, 1),
++			BackgroundTransparency = 1,
++			BorderSizePixel = 0,
++			ScrollBarThickness = 6,
++			AutomaticCanvasSize = Enum.AutomaticSize.Y,
++			CanvasSize = UDim2.new(),
++			Visible = visible,
++
++			create("UIGridLayout")({
++				CellSize = UDim2.fromOffset(SWATCH_SIZE, SWATCH_SIZE),
++				CellPadding = UDim2.fromOffset(SWATCH_GAP, SWATCH_GAP),
++			}),
+ 
+-		create("UIGridLayout")({
+-			CellSize = UDim2.fromOffset(SWATCH_SIZE, SWATCH_SIZE),
+-			CellPadding = UDim2.fromOffset(SWATCH_GAP, SWATCH_GAP),
++			rainbowSwatch(props, visible),
++			swatches,
+ 		}),
+-
+-		rainbowSwatch(props),
+-		swatches,
+-	})
++		props,
++		visible
++	)
+ end
+ 
+ local function blockCard(blockType: BlockType, layoutOrder: number): Frame
+@@ -176,7 +208,7 @@ local function blockCard(blockType: BlockType, layoutOrder: number): Frame
+ 	})
+ end
+ 
+-local function blocksPage(): Frame
++local function blocksPage(_props: BuildMenuProps, visible: () -> boolean): Frame
+ 	local cards = {}
+ 	for index, blockType in BlockTypes.List do
+ 		cards[index] = blockCard(blockType, index)
+@@ -186,6 +218,7 @@ local function blocksPage(): Frame
+ 		Name = "Blocks",
+ 		Size = UDim2.fromScale(1, 1),
+ 		BackgroundTransparency = 1,
++		Visible = visible,
+ 
+ 		create("UIGridLayout")({
+ 			CellSize = UDim2.fromOffset(108, 128),
+@@ -238,7 +271,7 @@ local function shapeCard(shapeName: string, variant: number, layoutOrder: number
+ 	})
+ end
+ 
+-local function shapesPage(): ScrollingFrame
++local function shapesPage(props: BuildMenuProps, visible: () -> boolean): ScrollingFrame
+ 	local cards = {}
+ 	for shapeIndex, shapeName in SHAPE_NAMES do
+ 		for variant = 1, SHAPE_VARIANTS do
+@@ -247,24 +280,35 @@ local function shapesPage(): ScrollingFrame
+ 		end
+ 	end
+ 
+-	return create("ScrollingFrame")({
+-		Name = "Shapes",
+-		Size = UDim2.fromScale(1, 1),
+-		BackgroundTransparency = 1,
+-		BorderSizePixel = 0,
+-		ScrollBarThickness = 6,
+-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+-		CanvasSize = UDim2.new(),
++	return scrollToTopWhenShown(
++		create("ScrollingFrame")({
++			Name = "Shapes",
++			Size = UDim2.fromScale(1, 1),
++			BackgroundTransparency = 1,
++			BorderSizePixel = 0,
++			ScrollBarThickness = 6,
++			AutomaticCanvasSize = Enum.AutomaticSize.Y,
++			CanvasSize = UDim2.new(),
++			Visible = visible,
++
++			create("UIGridLayout")({
++				CellSize = UDim2.fromOffset(SHAPE_CARD_SIZE.X, SHAPE_CARD_SIZE.Y),
++				CellPadding = UDim2.fromOffset(CARD_GAP, CARD_GAP),
++			}),
+ 
+-		create("UIGridLayout")({
+-			CellSize = UDim2.fromOffset(SHAPE_CARD_SIZE.X, SHAPE_CARD_SIZE.Y),
+-			CellPadding = UDim2.fromOffset(CARD_GAP, CARD_GAP),
++			cards,
+ 		}),
+-
+-		cards,
+-	})
++		props,
++		visible
++	)
+ end
+ 
++local PAGES: { [Tab]: (props: BuildMenuProps, visible: () -> boolean) -> GuiObject } = {
++	Blocks = blocksPage,
++	Colors = colorsPage,
++	Shapes = shapesPage,
++}
++
+ local function tabButton(props: BuildMenuProps, tab: Tab, layoutOrder: number): TextButton
+ 	return create("TextButton")({
+ 		Name = tab,
+@@ -299,12 +343,29 @@ local function buildMenu(props: BuildMenuProps): Frame
+ 		tabs[index] = tabButton(props, tab, index)
+ 	end
+ 
++	-- Tabs that have been shown at least once. Each gets its page built on first visit; after
++	-- that the page is kept and only its Visible flips.
++	local visitedTabs = source({ untrack(props.Tab) })
++	effect(function()
++		local tab = props.Tab()
++		local visited = untrack(visitedTabs)
++		if not table.find(visited, tab) then
++			local nextVisited = table.clone(visited)
++			table.insert(nextVisited, tab)
++			visitedTabs(nextVisited)
++		end
++	end)
++
+ 	return create("Frame")({
+ 		Name = "BuildMenu",
+ 		AnchorPoint = Vector2.new(0.5, 0.5),
+ 		Position = function()
+ 			return UDim2.new(0.5, 0, 0.5 + slide(), slide() * PANEL_SIZE.Y)
+ 		end,
++		-- Once it has finished sliding out, hide it so the off-screen panel costs nothing.
++		Visible = function()
++			return props.Present() or slide() < 1
++		end,
+ 		Size = UDim2.fromOffset(PANEL_SIZE.X, PANEL_SIZE.Y),
+ 		BackgroundColor3 = PANEL_COLOR,
+ 		BackgroundTransparency = 0.1,
+@@ -335,13 +396,11 @@ local function buildMenu(props: BuildMenuProps): Frame
+ 			Size = UDim2.new(1, 0, 1, -(TAB_HEIGHT + PANEL_PADDING)),
+ 			BackgroundTransparency = 1,
+ 
+-			switch(props.Tab)({
+-				Blocks = blocksPage,
+-				Colors = function()
+-					return colorsPage(props)
+-				end,
+-				Shapes = shapesPage,
+-			}),
++			values(visitedTabs, function(tab: Tab)
++				return PAGES[tab](props, function()
++					return props.Tab() == tab
++				end)
++			end),
+ 		}),
+ 	})
+ end
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index fdb61ce..875c56c 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -19,9 +19,19 @@ local TEXT_COLOR = Color3.fromRGB(240, 240, 240)
+ local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+ 
+ local isMenuOpen = source(false)
++-- Becomes true on the first open and stays true, so the menu is built once and then kept
++-- (closing only slides it out and hides it) instead of being rebuilt on every open.
++local hasMenuOpened = source(false)
+ local tab = source("Blocks" :: BuildMenu.Tab)
+ local tint = source(Color3.new(1, 1, 1))
+ 
++local function toggleMenu()
++	isMenuOpen(not isMenuOpen())
++	if isMenuOpen() then
++		hasMenuOpened(true)
++	end
++end
++
+ local function menuButton()
+ 	return create("TextButton")({
+ 		Name = "MenuButton",
+@@ -34,9 +44,7 @@ local function menuButton()
+ 		TextColor3 = TEXT_COLOR,
+ 		Text = "Menu",
+ 
+-		Activated = function()
+-			isMenuOpen(not isMenuOpen())
+-		end,
++		Activated = toggleMenu,
+ 
+ 		create("UICorner")({ CornerRadius = UDim.new(0, 8) }),
+ 	})
+@@ -48,15 +56,18 @@ local function app()
+ 
+ 		menuButton(),
+ 
+-		show(isMenuOpen, function(_, present: () -> boolean)
++		show(hasMenuOpened, function(_, mounted: () -> boolean)
+ 			return BuildMenu.component({
+ 				Tab = tab,
+ 				SelectTab = tab,
+ 				Tint = tint,
+ 				SelectTint = tint,
+-				Present = present,
+-			}),
+-				BuildMenu.SlideSeconds
++				-- `mounted` starts false and flips true right after creation, so the first
++				-- open still slides in from below.
++				Present = function()
++					return mounted() and isMenuOpen()
++				end,
++			})
+ 		end),
+ 	})
+ end
+@@ -68,7 +79,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEv
+ 	if gameProcessedEvent or input.KeyCode ~= Enum.KeyCode.M then
+ 		return
+ 	end
+-	isMenuOpen(not isMenuOpen())
++	toggleMenu()
+ end)
+ 
+ BlockPlacer.start()

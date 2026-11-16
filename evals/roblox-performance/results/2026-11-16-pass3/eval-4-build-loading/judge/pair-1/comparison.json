@@ -1,0 +1,123 @@
+{
+  "pair": 1,
+  "status": "ok",
+  "winner": "B",
+  "winner_config": "without_skill",
+  "reasoning": "Both attempts remove the value objects, set properties before parenting, and spread the work across frames under a time budget, and all checks pass for both. The difference is criterion 4. A never reserves the save's cells ahead of time, so other players can place into a loading build for its whole load and the saved blocks there are skipped. B claims every cell in a reserve phase that finishes within about 4 frames, before any part is created. B also releases unbuilt reservations when a player leaves mid-load and hands free slots to waiting players by event rather than by polling. B is the more correct and more mergeable fix.",
+  "rubric": {
+    "A": {
+      "criteria": [
+        {
+          "criterion": "Fewer instances per block",
+          "score": 5,
+          "note": "Owner/PlacedAt moved to `blockInfos[part]` with PlacedAt from the save or `os.time()`; one Part per block."
+        },
+        {
+          "criterion": "Properties before parent",
+          "score": 5,
+          "note": "`Instance.new(\"Part\")`, then the properties are set, then `part.Parent = plot.Folder`."
+        },
+        {
+          "criterion": "Loading/unloading spread across frames",
+          "score": 5,
+          "note": "Shared queue capped at `MAX_BLOCKS_PER_FRAME = 600` and a 4 ms `QUEUE_ALLOWANCE`, with `task.wait()` between frames; unloading also goes one block per step."
+        },
+        {
+          "criterion": "No overlaps / half states during load",
+          "score": 2,
+          "note": "Cells are only marked in `createBlock` as each block is built, so another player can take a save's cell during the whole load; leaving mid-load is handled through `IsRemoved` and the unload job."
+        },
+        {
+          "criterion": "Removal/placement rules preserved",
+          "score": 5,
+          "note": "`info.OwnerId ~= player.UserId` plus `getReachableRoot`; placement validation unchanged."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 5,
+          "note": "Says builds appear over about 0.6 to 1 s, labels the After numbers as worked out from the code, and lists the overlap, slot-wait and loss-of-Owner/PlacedAt-children effects."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 4,
+          "note": "All checks pass and types are clean; the `task.wait()` polling for a free slot is a little crude."
+        }
+      ],
+      "overall_score": 7
+    },
+    "B": {
+      "criteria": [
+        {
+          "criterion": "Fewer instances per block",
+          "score": 5,
+          "note": "`blockInfo[part] = { plot, ownerId, placedAt, cell }`; PlacedAt kept for saved and newly placed blocks."
+        },
+        {
+          "criterion": "Properties before parent",
+          "score": 5,
+          "note": "`templates[...]:Clone()`, then CFrame is set, then the part is parented; templates are built unparented."
+        },
+        {
+          "criterion": "Loading/unloading spread across frames",
+          "score": 5,
+          "note": "Heartbeat worker with a 3 ms `FRAME_BUDGET` and caps on reserves, creates and destroys per frame; unloads go first."
+        },
+        {
+          "criterion": "No overlaps / half states during load",
+          "score": 4,
+          "note": "A separate reserve phase claims all cells within about 4 frames, before any part is created; not strictly before the first yield. Leaving mid-load frees unbuilt reservations and removes the plot from `loadQueue`."
+        },
+        {
+          "criterion": "Removal/placement rules preserved",
+          "score": 5,
+          "note": "`info.ownerId ~= player.UserId` plus a reach check on `info.cell`; placement unchanged."
+        },
+        {
+          "criterion": "Write-up",
+          "score": 5,
+          "note": "Says builds appear over about 1.7 s (200 per frame at 60 Hz), has a 'Not verified' section, and lists the reservation window, unload time and slot wait."
+        },
+        {
+          "criterion": "Correct, in scope, typed, checks pass",
+          "score": 5,
+          "note": "All checks pass; well-typed Plot/BlockInfo; waiting players are handled by an event."
+        }
+      ],
+      "overall_score": 8.5
+    }
+  },
+  "output_quality": {
+    "A": {
+      "score": 7,
+      "strengths": [
+        "Clean job queue with error handling and an abort path",
+        "Unload keeps cells blocked until each part is destroyed",
+        "Honest write-up with clear verification steps"
+      ],
+      "weaknesses": [
+        "Doesn't reserve the save's cells ahead of creation, so other players can place into a loading build for about a second",
+        "Joiners wait for a slot by polling"
+      ]
+    },
+    "B": {
+      "score": 8.5,
+      "strengths": [
+        "Reserve phase cuts the overlap window to a few frames",
+        "Leaving mid-load is handled correctly: unbuilt reservations are released and the plot leaves the load queue",
+        "Template cloning, and a slot isn't handed out again until its plot has fully unloaded"
+      ],
+      "weaknesses": [
+        "Reservation still spans a few frames when it could have finished before the first yield",
+        "Timing estimates ignore the 3 ms time limit (though they are marked unverified)"
+      ]
+    }
+  },
+  "scores_by_config": {
+    "with_skill": 7,
+    "without_skill": 8.5
+  },
+  "mapping": {
+    "A": "with_skill/run-1",
+    "B": "without_skill/run-1"
+  }
+}

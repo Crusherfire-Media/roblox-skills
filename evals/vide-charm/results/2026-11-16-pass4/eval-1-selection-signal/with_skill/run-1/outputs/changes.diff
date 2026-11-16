@@ -1,0 +1,108 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+index e8d33eb..a186139 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+@@ -8,6 +8,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ local UserInputService = game:GetService("UserInputService")
+ local Workspace = game:GetService("Workspace")
+ 
++local Charm = require(ReplicatedStorage.Packages.Charm)
++
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ 
+ local RAY_LENGTH = 512
+@@ -21,28 +23,22 @@ local NUMBER_KEYS = {
+ 
+ local BlockPlacer = {}
+ 
+-local selectedName = BlockTypes.List[1].Name
++local getSelectedName, setSelectedName = Charm.signal(BlockTypes.List[1].Name)
+ local isEnabled = true
+ local hasStarted = false
+ local placeBlock: RemoteEvent? = nil
+-local blockTypeChanged = Instance.new("BindableEvent")
+ 
+ --[[
+-	Fires with the new block type's name whenever the selected block type changes.
++	Charm getter for the selected block type's name. Vide UI reads it through
++	VideCharm.useSignalState, since a Vide binding does not track Charm reads.
+ ]]
+-BlockPlacer.BlockTypeChanged = blockTypeChanged.Event
+-
+-function BlockPlacer.getBlockType(): string
+-	return selectedName
+-end
++BlockPlacer.getBlockType = getSelectedName :: () -> string
+ 
+ function BlockPlacer.setBlockType(name: string)
+-	assert(BlockTypes.ByName[name], `unknown block type {name}`)
+-	if name == selectedName then
+-		return
++	if not BlockTypes.ByName[name] then
++		error(`Unknown block type {name}`)
+ 	end
+-	selectedName = name
+-	blockTypeChanged:Fire(name)
++	setSelectedName(name)
+ end
+ 
+ function BlockPlacer.isEnabled(): boolean
+@@ -77,7 +73,7 @@ local function placeAt(screenPosition: Vector2)
+ 	end
+ 
+ 	local cellPosition = result.Position + result.Normal * (BlockTypes.BlockSize / 2)
+-	placeBlock:FireServer(selectedName, cellPosition)
++	placeBlock:FireServer(getSelectedName(), cellPosition)
+ end
+ 
+ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index bcf8d97..1257741 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -5,20 +5,16 @@ local BlockPicker = require(script.Parent.BlockPicker)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
+ local PlacementPreview = require(script.Parent.PlacementPreview)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
++local VideCharm = require(ReplicatedStorage.Packages.VideCharm)
+ 
+ local create = Vide.create
+ local mount = Vide.mount
+-local source = Vide.source
+ 
+ local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+ 
+--- Mirrors BlockPlacer's selection so the hotbar can bind to it.
+-local selected = source(BlockPlacer.getBlockType())
+-BlockPlacer.BlockTypeChanged:Connect(function(name: string)
+-	selected(name)
+-end)
+-
+ local function app()
++	local selected = VideCharm.useSignalState(BlockPlacer.getBlockType)
++
+ 	return create("ScreenGui")({
+ 		Name = "HotbarGui",
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/PlacementPreview.luau b/src/StarterPlayer/StarterPlayerScripts/PlacementPreview.luau
+index dc341d8..e2be911 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/PlacementPreview.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/PlacementPreview.luau
+@@ -11,6 +11,7 @@ local Workspace = game:GetService("Workspace")
+ 
+ local BlockPlacer = require(script.Parent.BlockPlacer)
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Charm = require(ReplicatedStorage.Packages.Charm)
+ 
+ local RAY_LENGTH = 512
+ local GHOST_TRANSPARENCY = 0.7
+@@ -79,8 +80,7 @@ function PlacementPreview.start()
+ 	part.Parent = Workspace
+ 	ghost = part
+ 
+-	applyBlockType(BlockPlacer.getBlockType())
+-	BlockPlacer.BlockTypeChanged:Connect(applyBlockType)
++	Charm.listen(BlockPlacer.getBlockType, applyBlockType)
+ 	RunService.RenderStepped:Connect(follow)
+ end
+ 

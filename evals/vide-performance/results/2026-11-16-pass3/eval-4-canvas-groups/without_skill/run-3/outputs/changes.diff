@@ -1,0 +1,193 @@
+diff --git a/docs/perf/block-catalog.md b/docs/perf/block-catalog.md
+new file mode 100644
+index 0000000..e913ca8
+--- /dev/null
++++ b/docs/perf/block-catalog.md
+@@ -0,0 +1,57 @@
++# Block catalog: CanvasGroups only while something is animating
++
++## Problem
++
++Opening the catalog put 41 CanvasGroups in PlayerGui: one for the panel (for its fade) and one per
++card (to clip the hover shine to the rounded corners). Every CanvasGroup renders its contents into
++its own offscreen texture. The card groups were also nested inside the panel group. At low graphics
++quality, phones have a small budget for these textures. They dropped or re-rendered some of them,
++which made the catalog flicker and some cards draw blank. PC has more headroom, so it looked fine there.
++
++Most of those groups did nothing most of the time. The panel is fully opaque once the fade-in
++finishes, and a card's shine is invisible unless that card is hovered.
++
++## Change (`src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau`)
++
++- **Cards** are now plain `Frame`s with a `UICorner`. The shine sits in a separate `ShineClip`
++  CanvasGroup (full card size, transparent background, same corner radius, ZIndex 2). It is parented
++  to the card only while the card is hovered or the shine is still fading out (`shine() > 0`).
++  Vide springs land exactly on their target, so the group leaves once the shine reaches 0.
++- **Panel**: the component now returns a transparent `BlockCatalog` Frame. The visible panel is a
++  `Panel` Frame (background, corner, padding, header, cards). While the fade spring is below 1
++  (opening, and again when closing), `Panel` is moved into a `Fade` CanvasGroup that carries the
++  `GroupTransparency`. Once the fade-in finishes, `Fade` is unparented and `Panel` is drawn
++  directly.
++
++The catalog should look the same: same colours, sizes, corner radii, fade timing, shine sweep and
++clipping. Click handling is unchanged (the hitbox is still ZIndex 3, above the shine).
++
++Expected CanvasGroup count in PlayerGui:
++
++| State                        | Before | After                 |
++| ---------------------------- | ------ | --------------------- |
++| Catalog open, nothing hovered | 41     | 0                     |
++| Hovering one card            | 41     | 1 (2 briefly when moving between cards) |
++| Fading in / out              | 41     | 1 + any shining cards |
++
++## How to check
++
++1. Play in Studio, open the catalog (C or the Catalog button), and wait for the fade-in to finish.
++   Run this in the command bar (Client view):
++
++   ```lua
++   local n = 0
++   for _, d in game.Players.LocalPlayer.PlayerGui:GetDescendants() do
++   	if d:IsA("CanvasGroup") then n += 1 end
++   end
++   print("CanvasGroups:", n)
++   ```
++
++   It should print `0`. Hover a card and run it again: it should print `1`. Move the mouse off the
++   card, wait about half a second, and it should be back to `0`.
++2. Look at it: open and close the catalog and check the panel still fades both ways. Hover a few
++   cards, including ones at the edges of the scroll area, and check the shine still sweeps across and
++   stays inside the rounded corners.
++3. Mobile at low quality: in Studio, use the Device emulator with a phone profile and set
++   Settings → Rendering → Quality Level to 1 (or test on a real phone with graphics quality turned
++   down). Open the catalog, scroll through it, and check there's no flicker and no blank cards.
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau b/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
+index f07bd2d..eae8d8d 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockCatalog.luau
+@@ -2,6 +2,11 @@
+ 	The block catalog: a panel with a card for every block type in every shape. Hovering a card
+ 	sweeps a soft shine across it, clipped to the card's rounded corners, and clicking it picks
+ 	that block type. The whole panel fades in when it opens and out when it closes.
++
++	CanvasGroups are only in the tree while they're needed: the panel's fade group only while the
++	panel is fading, and a card's shine group only while that card's shine is showing. Each one is
++	an offscreen texture, and dozens of idle ones made low-quality phones drop some of them (blank
++	cards, flicker). See docs/perf/block-catalog.md.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+@@ -10,6 +15,7 @@ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ 
+ local create = Vide.create
++local derive = Vide.derive
+ local source = Vide.source
+ local spring = Vide.spring
+ 
+@@ -56,7 +62,13 @@ local function card(
+ 		return if isHovered() then 1 else -1
+ 	end, SWEEP_SECONDS)
+ 
+-	return create("CanvasGroup")({
++	-- Clipping the shine to the rounded corners needs a CanvasGroup, but only while it's visible.
++	-- Springs land exactly on their target, so shine() is exactly 0 once it has faded out.
++	local isShining = derive(function(): boolean
++		return isHovered() or shine() > 0
++	end)
++
++	local cardFrame = create("Frame")({
+ 		Name = `{blockType.Name}{shapeName}`,
+ 		LayoutOrder = layoutOrder,
+ 		BackgroundColor3 = CARD_COLOR,
+@@ -111,6 +123,18 @@ local function card(
+ 				props.Select(blockType.Name)
+ 			end,
+ 		}),
++	})
++
++	create("CanvasGroup")({
++		Name = "ShineClip",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundTransparency = 1,
++		ZIndex = 2,
++		Parent = function()
++			return if isShining() then cardFrame else nil
++		end,
++
++		create("UICorner")({ CornerRadius = UDim.new(0, CARD_RADIUS) }),
+ 		create("Frame")({
+ 			Name = "Shine",
+ 			AnchorPoint = Vector2.new(0.5, 0.5),
+@@ -123,7 +147,6 @@ local function card(
+ 			BackgroundTransparency = function()
+ 				return 1 - shine() * 0.5
+ 			end,
+-			ZIndex = 2,
+ 
+ 			create("UIGradient")({
+ 				Transparency = NumberSequence.new({
+@@ -134,9 +157,11 @@ local function card(
+ 			}),
+ 		}),
+ 	})
++
++	return cardFrame
+ end
+ 
+-local function blockCatalog(props: BlockCatalogProps): CanvasGroup
++local function blockCatalog(props: BlockCatalogProps): Frame
+ 	-- 0 is hidden; 1 is fully shown.
+ 	local fade = spring(function(): number
+ 		return if props.Present() then 1 else 0
+@@ -150,15 +175,39 @@ local function blockCatalog(props: BlockCatalogProps): CanvasGroup
+ 		end
+ 	end
+ 
+-	return create("CanvasGroup")({
++	-- The panel only needs a CanvasGroup while it's partly transparent. The spring lands exactly on 1
++	-- once the fade-in finishes, and from then until it starts closing the panel is drawn directly.
++	local isFading = derive(function(): boolean
++		return fade() < 1
++	end)
++
++	local root = create("Frame")({
+ 		Name = "BlockCatalog",
+ 		AnchorPoint = Vector2.new(0.5, 0.5),
+ 		Position = UDim2.fromScale(0.5, 0.5),
+ 		Size = UDim2.fromOffset(PANEL_SIZE.X, PANEL_SIZE.Y),
+-		BackgroundColor3 = PANEL_COLOR,
++		BackgroundTransparency = 1,
++	})
++
++	local fadeGroup = create("CanvasGroup")({
++		Name = "Fade",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundTransparency = 1,
+ 		GroupTransparency = function()
+ 			return 1 - fade()
+ 		end,
++		Parent = function()
++			return if isFading() then root else nil
++		end,
++	})
++
++	create("Frame")({
++		Name = "Panel",
++		Size = UDim2.fromScale(1, 1),
++		BackgroundColor3 = PANEL_COLOR,
++		Parent = function()
++			return if isFading() then fadeGroup else root
++		end,
+ 
+ 		create("UICorner")({ CornerRadius = UDim.new(0, 14) }),
+ 		create("UIPadding")({
+@@ -196,6 +245,8 @@ local function blockCatalog(props: BlockCatalogProps): CanvasGroup
+ 			cards,
+ 		}),
+ 	})
++
++	return root
+ end
+ 
+ return {

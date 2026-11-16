@@ -1,0 +1,39 @@
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
+index 9ac9e39..e9c543f 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/PlotSystem/Implementation/_PlotPlacementMediator.luau
+@@ -9,7 +9,9 @@ local PlotServerService = require("../SystemPackage/PlotServerService")
+ 
+ local PlotPlacementMediator = {}
+ 
+-function PlotPlacementMediator:Init()
++-- Start, not Init: the plots exist only after PlotServerService:Init, and the
++-- loader does not order Init calls between modules.
++function PlotPlacementMediator:Start()
+ 	for _, plot in PlotServerService:GetPlots() do
+ 		PlacementServerService:AddBuildArea(plot)
+ 	end
+diff --git a/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau b/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
+index b7b787b..b1fda1a 100644
+--- a/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
++++ b/src/ServerScriptService/Modules/Systems/Gameplay/RoundSystem/SystemPackage/RoundServerService.luau
+@@ -33,7 +33,7 @@ local function runRound()
+ 	roundEnded:Fire()
+ end
+ 
+-function RoundServerService:Start()
++local function runRoundsAsync()
+ 	-- Every other system has to be running before the first round starts.
+ 	while not ModuleLoader.IsServerLoaded() do
+ 		task.wait()
+@@ -47,4 +47,10 @@ function RoundServerService:Start()
+ 	end
+ end
+ 
++function RoundServerService:Start()
++	-- ServerLoaded is set only after every Start returns, so waiting for it
++	-- here instead of in a new thread would block loading forever.
++	task.spawn(runRoundsAsync)
++end
++
+ return RoundServerService

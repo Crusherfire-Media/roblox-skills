@@ -1,0 +1,55 @@
+{
+  "id": 4,
+  "name": "memory-script",
+  "skill": "rbx-perf-profiling",
+  "prompt": "tools/profiling holds the Lute scripts we run on MicroProfiler dumps (.gprx files) that players send us, with LibMP.luau saved next to them (it isn't committed). overview.luau is one of them. Add tools/profiling/memory.luau, run as `lute memory.luau <dump.gprx> [topN]`, to help find what is eating memory before phones crash. It should print:\n\n- for each memory subsystem (each child of the memory counter, such as memory/Luau or memory/physics): its first, last, and peak value in the dump, how much it grew from first to last, and the frame where it peaked, sorted by growth;\n- then the topN (default 10) individual counters under memory that grew the most, with their full paths.\n\nName frames so we can find them both in our LibMP scripts and in the MicroProfiler UI.",
+  "setup_files": [
+    {
+      "from": "fixtures/memory-script/overview.luau",
+      "to": "tools/profiling/overview.luau"
+    }
+  ],
+  "auto_checks": ["selene", "stylua"],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "tools/profiling/memory.luau",
+      "text": "tools/profiling/memory.luau was added"
+    },
+    {
+      "type": "file_matches",
+      "path": "tools/profiling/memory.luau",
+      "pattern": "OpenFromFile",
+      "text": "The script opens the dump file with LibMP"
+    },
+    {
+      "type": "file_matches",
+      "path": "tools/profiling/memory.luau",
+      "pattern": "FrameAbsoluteId",
+      "text": "The script reads absolute frame ids"
+    },
+    {
+      "type": "file_not_matches",
+      "path": "tools/profiling/memory.luau",
+      "pattern": "LibMP\\.Control",
+      "text": "The script does not drive the live profiler (no LibMP.Control calls)"
+    }
+  ],
+  "rubric": [
+    "Opens the dump with Session.OpenFromFile from the command-line argument (process.args[2], as overview.luau does), prints a usage line or a clear error when the argument is missing or the file can't be opened, and disposes the session and any iterator when done.",
+    "Finds the memory subtree by walking the counter hierarchy (a counter iterator rooted at the memory counter, or the Parent, FirstChild, and Sibling links from FetchCounterDesc) and builds full paths from counter names; it does not hard-code the list of subsystems.",
+    "A subsystem's value in each frame is its own samples when the node has values, or the per-frame sum of its leaf counters (aligned by FrameId) when it is a value-less container. It never adds a parent's total to its children's values, and the top-N list ranks leaf counters (or otherwise avoids listing a total next to its own parts).",
+    "First, last, peak, and growth are computed from the samples, and a summed subsystem's peak frame is the frame where the sum peaks, not a mix of each leaf's own peak.",
+    "Each peak frame is shown with both its frame id and its absolute frame id (FetchFrameDesc(frameId).FrameAbsoluteId).",
+    "Uses Fetch*** results (or disposes any Get*** arrays), and calls no LibMP.Control methods or Roblox engine APIs, so it runs in Lute on a file.",
+    "Output is readable and sorted as asked, topN defaults to 10, only the new script is added, and selene and StyLua pass on it (luau-lsp can't resolve Lute's and LibMP's requires in this project, so it isn't run). Extra supporting files count neither for nor against."
+  ],
+  "judge_facts": [
+    "LibMP counters (Roblox/libmp upstream api-reference.md and guide; LibMP is not in the sandbox): counters form a tree; a parent node may hold a total of its children or be a value-less container, and the most specific counters are the leaves. session:CreateCounterIterator(), iter:Configure{RootCounterIds = {...}} (empty means all), then while iter:Step(): state = iter:GetState() gives CounterId(), ParentId(), Level(), RelativeLevel(), IsLeaf(); iter:GetStackElement(level) is the counter id at that level. FetchCounterDesc(id) has CounterName, Parent, FirstChild, Sibling, Level.",
+    "LibMP counter samples (upstream api-reference.md): FetchCounterSamples(id) returns an array of {FrameId, Value} copies that needs no disposal (it can be empty); GetCounterSamples(id) returns a CounterSampleArray that must be disposed; FetchLastCounterSample(id) returns only the last sample. Session.OpenFromFile(path) opens a .gprx dump in command-line Luau (Lute) and returns nil on failure.",
+    "LibMP (upstream api-reference.md, Memory Management): every Session, LogIterator, and CounterIterator, and every array returned by a Get*** method, must be released with :Dispose(); undisposed ones leak memory inside LibMP's WASM instance. Fetch*** methods return plain Luau copies that need no disposal.",
+    "LibMP (upstream api-reference.md and guide): FetchFrameDesc(id) has FrameId, FrameAbsoluteId (the frame number also used to find the frame in the MicroProfiler UI; it has gaps where capture paused), TickStartCpu, TickEndCpu, IsIncomplete. LibMP.Control methods (EnableProfiler, SetFrameLimit, EnableCapture, CaptureTo***) control the engine's live MicroProfiler.",
+    "LibMP (upstream api-reference.md): Find*** methods (FindCounterId, FindCounterIds, FindTimerIds) take name masks and return 0 or an empty list when nothing matches. Counter masks are path-like: a bare name matches anywhere in the tree, a trailing $ means a leaf, a leading / anchors at the root, * is one level and ** any depth. LibMP has no built-in averages, minimums, maximums, or growth figures: they are computed from the raw samples."
+  ],
+  "timeout_minutes": 20
+}

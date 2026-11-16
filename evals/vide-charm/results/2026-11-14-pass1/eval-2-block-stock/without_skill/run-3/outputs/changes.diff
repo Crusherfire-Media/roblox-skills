@@ -1,0 +1,306 @@
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+index 4599f52..bdefcf8 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPicker.luau
+@@ -1,6 +1,8 @@
+ --[[
+ 	The hotbar: a row of tiles along the bottom of the screen, one per block type. The selected
+-	tile has a yellow outline, and clicking or tapping a tile selects its block type.
++	tile has a yellow outline, and clicking or tapping a tile selects its block type. Each tile
++	shows how many of its block type the player has left and is grayed out when that reaches 0.
++	A label just above the hotbar shows the selected block type's count.
+ ]]
+ 
+ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+@@ -21,20 +23,42 @@ local BOTTOM_MARGIN = 24
+ local PANEL_COLOR = Color3.fromRGB(28, 28, 34)
+ local SELECTED_COLOR = Color3.fromRGB(255, 200, 60)
+ local IDLE_STROKE_COLOR = Color3.fromRGB(70, 70, 80)
++local TEXT_COLOR = Color3.fromRGB(255, 255, 255)
++local EMPTY_TEXT_COLOR = Color3.fromRGB(150, 150, 155)
++local TEXT_STROKE_COLOR = Color3.fromRGB(0, 0, 0)
++local COUNT_TEXT_SIZE = 18
++local COUNT_INSET = 4
++local STOCK_LABEL_HEIGHT = 24
++local STOCK_LABEL_TEXT_SIZE = 20
++local STOCK_LABEL_GAP = 6
++
++-- A dim gray with the same brightness as the color, for tiles whose block type has run out.
++local function grayOut(color: Color3): Color3
++	local luminance = 0.299 * color.R + 0.587 * color.G + 0.114 * color.B
++	return Color3.new(luminance, luminance, luminance):Lerp(PANEL_COLOR, 0.5)
++end
+ 
+ type TileProps = {
+ 	BlockType: BlockType,
+ 	LayoutOrder: number,
+ 	IsSelected: () -> boolean,
++	Count: () -> number,
+ 	Select: () -> (),
+ }
+ 
+ local function tile(props: TileProps): TextButton
++	local emptyColor = grayOut(props.BlockType.Color)
++	local function isEmpty()
++		return props.Count() <= 0
++	end
++
+ 	return create("TextButton")({
+ 		Name = props.BlockType.Name,
+ 		LayoutOrder = props.LayoutOrder,
+ 		Size = UDim2.fromOffset(TILE_SIZE, TILE_SIZE),
+-		BackgroundColor3 = props.BlockType.Color,
++		BackgroundColor3 = function()
++			return if isEmpty() then emptyColor else props.BlockType.Color
++		end,
+ 		Text = "",
+ 
+ 		Activated = props.Select,
+@@ -50,15 +74,44 @@ local function tile(props: TileProps): TextButton
+ 				return if props.IsSelected() then 3 else 1
+ 			end,
+ 		}),
++
++		create("TextLabel")({
++			Name = "Count",
++			AnchorPoint = Vector2.new(1, 1),
++			Position = UDim2.new(1, -COUNT_INSET - 2, 1, -COUNT_INSET),
++			Size = UDim2.new(1, -COUNT_INSET * 2, 0, COUNT_TEXT_SIZE),
++			BackgroundTransparency = 1,
++			Font = Enum.Font.GothamBold,
++			TextSize = COUNT_TEXT_SIZE,
++			TextXAlignment = Enum.TextXAlignment.Right,
++			TextColor3 = function()
++				return if isEmpty() then EMPTY_TEXT_COLOR else TEXT_COLOR
++			end,
++			Text = function()
++				return tostring(props.Count())
++			end,
++
++			create("UIStroke")({
++				Color = TEXT_STROKE_COLOR,
++				Thickness = 1.5,
++				Transparency = 0.2,
++			}),
++		}),
+ 	})
+ end
+ 
+ export type BlockPickerProps = {
+ 	Selected: () -> string,
+ 	Select: (name: string) -> (),
++	-- Every block type's count, keyed by block type name. Missing block types count as 0.
++	Stock: () -> { [string]: number },
+ }
+ 
+ local function blockPicker(props: BlockPickerProps): Frame
++	local function countOf(name: string): number
++		return props.Stock()[name] or 0
++	end
++
+ 	local tiles = {}
+ 	for index, blockType in BlockTypes.List do
+ 		tiles[index] = tile({
+@@ -67,6 +120,9 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 			IsSelected = function()
+ 				return props.Selected() == blockType.Name
+ 			end,
++			Count = function()
++				return countOf(blockType.Name)
++			end,
+ 			Select = function()
+ 				props.Select(blockType.Name)
+ 			end,
+@@ -93,12 +149,43 @@ local function blockPicker(props: BlockPickerProps): Frame
+ 			PaddingTop = UDim.new(0, PANEL_PADDING),
+ 			PaddingBottom = UDim.new(0, PANEL_PADDING),
+ 		}),
+-		create("UIListLayout")({
+-			FillDirection = Enum.FillDirection.Horizontal,
+-			Padding = UDim.new(0, TILE_GAP),
++
++		-- Positions here are inside the panel's padding, so the label's bottom sits
++		-- STOCK_LABEL_GAP above the panel's top edge.
++		create("TextLabel")({
++			Name = "StockLabel",
++			AnchorPoint = Vector2.new(0.5, 1),
++			Position = UDim2.new(0.5, 0, 0, -PANEL_PADDING - STOCK_LABEL_GAP),
++			Size = UDim2.new(1, 0, 0, STOCK_LABEL_HEIGHT),
++			BackgroundTransparency = 1,
++			Font = Enum.Font.GothamBold,
++			TextSize = STOCK_LABEL_TEXT_SIZE,
++			TextColor3 = function()
++				return if countOf(props.Selected()) <= 0 then EMPTY_TEXT_COLOR else TEXT_COLOR
++			end,
++			Text = function()
++				return `{countOf(props.Selected())} left`
++			end,
++
++			create("UIStroke")({
++				Color = TEXT_STROKE_COLOR,
++				Thickness = 1.5,
++				Transparency = 0.2,
++			}),
+ 		}),
+ 
+-		tiles,
++		create("Frame")({
++			Name = "Tiles",
++			Size = UDim2.fromScale(1, 1),
++			BackgroundTransparency = 1,
++
++			create("UIListLayout")({
++				FillDirection = Enum.FillDirection.Horizontal,
++				Padding = UDim.new(0, TILE_GAP),
++			}),
++
++			tiles,
++		}),
+ 	})
+ end
+ 
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+index 05d9044..d9da85d 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockPlacer.luau
+@@ -1,7 +1,7 @@
+ --[[
+ 	Client side of block placement: owns the selected block type (a Charm signal) and asks the
+-	server to place it where the player clicks or taps in the world. Number keys 1 to 5 select a
+-	block type.
++	server to place it where the player clicks or taps in the world, as long as the player has
++	some of it left (see BlockStock). Number keys 1 to 5 select a block type.
+ ]]
+ 
+ local Players = game:GetService("Players")
+@@ -12,6 +12,8 @@ local Workspace = game:GetService("Workspace")
+ local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
+ local Charm = require(ReplicatedStorage.Packages.Charm)
+ 
++local BlockStock = require(script.Parent.BlockStock)
++
+ local RAY_LENGTH = 512
+ local NUMBER_KEYS = {
+ 	Enum.KeyCode.One,
+@@ -56,6 +58,12 @@ local function placeAt(screenPosition: Vector2)
+ 		return
+ 	end
+ 
++	-- The server would refuse anyway; don't ask for a block type the player has none of.
++	local blockType = getSelected()
++	if BlockStock.getCount(blockType) <= 0 then
++		return
++	end
++
+ 	local params = RaycastParams.new()
+ 	params.FilterType = Enum.RaycastFilterType.Exclude
+ 	local character = Players.LocalPlayer.Character
+@@ -71,7 +79,7 @@ local function placeAt(screenPosition: Vector2)
+ 	end
+ 
+ 	local cellPosition = result.Position + result.Normal * (BlockTypes.BlockSize / 2)
+-	placeBlock:FireServer(getSelected(), cellPosition)
++	placeBlock:FireServer(blockType, cellPosition)
+ end
+ 
+ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
+diff --git a/src/StarterPlayer/StarterPlayerScripts/BlockStock.luau b/src/StarterPlayer/StarterPlayerScripts/BlockStock.luau
+new file mode 100644
+index 0000000..d683f87
+--- /dev/null
++++ b/src/StarterPlayer/StarterPlayerScripts/BlockStock.luau
+@@ -0,0 +1,61 @@
++--[[
++	The local player's stock of each block type, kept in a Charm signal. The server owns the real
++	counts and fires StockChanged(blockTypeName, count) whenever one changes; this module mirrors
++	them. Block types the server hasn't reported yet count as 0.
++]]
++
++local ReplicatedStorage = game:GetService("ReplicatedStorage")
++
++local BlockTypes = require(ReplicatedStorage.Shared.BlockTypes)
++local Charm = require(ReplicatedStorage.Packages.Charm)
++
++export type Stock = { [string]: number }
++
++local BlockStock = {}
++
++local getStock, setStock = Charm.signal({} :: Stock)
++local hasStarted = false
++
++--[[
++	Every block type's count, keyed by block type name. A Charm getter: read it in Charm effects
++	and computed values, or bridge it into Vide with vide-charm. The table is replaced, never
++	mutated, when a count changes.
++]]
++BlockStock.getStock = getStock
++
++--[[
++	How many of the named block type the player has. Reads the stock signal, so it is tracked
++	when called inside a Charm effect or computed value.
++]]
++function BlockStock.getCount(name: string): number
++	return getStock()[name] or 0
++end
++
++local function onStockChanged(name: unknown, count: unknown)
++	if typeof(name) ~= "string" or typeof(count) ~= "number" or not BlockTypes.ByName[name] then
++		return
++	end
++
++	setStock(function(current)
++		local nextStock = table.clone(current)
++		nextStock[name] = count
++		return nextStock
++	end)
++end
++
++--[[
++	Listens for the server's StockChanged remote. Yields until the remote exists. Events the
++	server fires before this connects are queued by Roblox and delivered once it does.
++]]
++function BlockStock.start()
++	if hasStarted then
++		return
++	end
++	hasStarted = true
++
++	local remote = ReplicatedStorage:WaitForChild("StockChanged")
++	assert(remote:IsA("RemoteEvent"), "StockChanged must be a RemoteEvent")
++	remote.OnClientEvent:Connect(onStockChanged)
++end
++
++return BlockStock
+diff --git a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+index 564e6f3..99d5f97 100644
+--- a/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
++++ b/src/StarterPlayer/StarterPlayerScripts/Main.client.luau
+@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+ local BlockPicker = require(script.Parent.BlockPicker)
+ local BlockPlacer = require(script.Parent.BlockPlacer)
++local BlockStock = require(script.Parent.BlockStock)
+ local Vide = require(ReplicatedStorage.Packages.Vide)
+ local VideCharm = require(ReplicatedStorage.Packages.VideCharm)
+ 
+@@ -13,6 +14,7 @@ local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+ 
+ local function app()
+ 	local selected = VideCharm.useSignalState(BlockPlacer.getBlockType)
++	local stock = VideCharm.useSignalState(BlockStock.getStock)
+ 
+ 	return create("ScreenGui")({
+ 		Name = "HotbarGui",
+@@ -20,10 +22,12 @@ local function app()
+ 		BlockPicker({
+ 			Selected = selected,
+ 			Select = BlockPlacer.setBlockType,
++			Stock = stock,
+ 		}),
+ 	})
+ end
+ 
+ mount(app, playerGui)
+ 
++BlockStock.start()
+ BlockPlacer.start()
