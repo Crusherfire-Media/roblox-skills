@@ -388,5 +388,3 @@ Done when `gh secret list` shows `ROBLOX_API_KEY` and `gh variable list` shows a
 | `rojo serve` crashes after a folder is deleted or a folder module becomes a file | A known Rojo 7.7.x bug. Run `rojo serve` again and click **Connect**. Rojo 7.6.1 avoids it, but it needs `rojo plugin install` in place of the Creator Store plugin, has no syncback, and lacks 7.7's protection against malicious web pages. |
 | luau-lsp shows no Roblox types or requires in the editor | Open VS Code on the project root, restart VS Code so Rojo is on its PATH, then run **Luau: Regenerate Sourcemap**. |
 | A CI run fails | Find it under "When a run fails" in `tools/ci/README.md`. |
-</content>
-</invoke>

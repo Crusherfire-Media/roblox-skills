@@ -112,8 +112,9 @@ folder. The template's `CLAUDE.md` lists the checks.
 - Run the hook tests with `npm test` (Node.js 22 or later).
 - Check the manifests with `claude plugin validate .` and `claude plugin validate plugins/roblox-dev`.
 - Bump `version` in `plugins/roblox-dev/.claude-plugin/plugin.json` when you publish, so installs pick up the change.
-- To release, replace the old tag in `SETUP.md` (its "Release tag" line) and in this README (the
-  prompt and the marketplace command), commit that to `main`, then create the tag on that commit.
+- To release, replace the old tag in `SETUP.md` (its "Release tag" line), in this README (the
+  prompt and the marketplace command), and in `template/.claude/settings.json` (the marketplace's
+  `ref`), commit that to `main`, then create the tag on that commit.
 
 ## Contributing
 
@@ -122,5 +123,3 @@ This repo doesn't accept pull requests. Fork it and make it your own. The MIT li
 ## License
 
 [MIT](LICENSE)
-</content>
-</invoke>
