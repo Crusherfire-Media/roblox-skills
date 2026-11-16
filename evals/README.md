@@ -24,14 +24,15 @@ Nothing in `evals/` ships with the plugin: the plugin is `plugins/roblox-dev/` o
 | `harness/judge.mjs`, `harness/judge-prompt.md` | The blind judge and its prompt template |
 | `harness/judge-facts.md` | Library facts every judge run gets, verified against the package source |
 | `harness/aggregate.mjs` | Benchmark summary (wraps `aggregate_benchmark.py`) |
-| `harness/export-results.mjs` | Copies a results folder into the repo with local paths removed |
+| `harness/export-results.mjs` | Copies a results folder's verdicts and diffs into the repo with local paths removed |
 | `harness/prove-isolation.mjs` | Proves what each setup loads; writes `isolation/` |
 | `harness/trigger_eval.py` | Description trigger tests (wraps skill-creator's `run_eval.py` and `run_loop.py`) |
 | `harness/fixtures/dummy-plugin/` | A throwaway `roblox-dev` plugin with two dummy skills and two dummy hooks |
 | `harness/test/` | `node --test` tests, run by `npm test` |
 | `isolation/` | Saved isolation evidence (trimmed init events) |
 | `smoke/` | The smoke task and its results |
-| `<skill>/` | Per skill, later: `tasks/*.json`, `triggers.json`, `results/<date>/` |
+| `<skill>/` | Per skill: `tasks/*.json`, `triggers.json`, `results/<date>-<pass>/` |
+| `PILOT.md`, `RESULTS.md` | The pilot's method and cost; the final results for every skill |
 
 The harness is Node (ES modules, no dependencies), matching the repo's `npm test` setup. The
 trigger tests are Python because they import skill-creator's Python modules and swap two of their
@@ -121,7 +122,8 @@ node evals/harness/judge.mjs --results <scratch>/results/vide
 node evals/harness/aggregate.mjs --results <scratch>/results/vide --skill-name vide \
   --skill-path "<worktree>/plugins/roblox-dev/skills/vide"
 
-# 5. Save to the repo without local paths (add --transcripts to keep transcripts).
+# 5. Save the verdicts and diffs to the repo without local paths (--full keeps every file,
+#    --transcripts also keeps transcripts). Copy the trigger results in as triggers.json.
 node evals/harness/export-results.mjs --results <scratch>/results/vide --dest evals/vide/results/2026-11-14
 ```
 

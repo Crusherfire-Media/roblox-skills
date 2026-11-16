@@ -11,7 +11,7 @@ import { checkIsolation, isolationArgs } from "../lib/isolation.mjs";
 import { hooksFired, parseEvents, skillFileReads, skillsLoaded, usageTotals } from "../lib/stream.mjs";
 import { loadTask, validateTask } from "../lib/task.mjs";
 import { ancestorMemoryFiles, resolveInside } from "../lib/workspace.mjs";
-import { redact } from "../export-results.mjs";
+import { keepFile, redact } from "../export-results.mjs";
 import { assignLabels, buildJudgePrompt, fillTemplate, renderFacts, scrub, summarizeJudgements } from "../judge.mjs";
 import { redactPaths } from "../prove-isolation.mjs";
 import { trialStatus } from "../run-trials.mjs";
@@ -255,6 +255,22 @@ describe("paths", () => {
 		const out = redact(text, tmp);
 		assert.ok(!out.includes(home.replace(/\\/g, "\\\\")));
 		assert.ok(out.includes("<results>"));
+	});
+
+	test("export redacts paths escaped twice, as in a tool error stored inside a JSON string", () => {
+		const home = "C:\\Users\\someone";
+		const inner = JSON.stringify({ stderr: "c:\\Users\\someone\\x.luau: Unknown require" });
+		const out = redact(JSON.stringify({ result: inner }), tmp, home);
+		assert.ok(!out.toLowerCase().includes("someone"), out);
+	});
+
+	test("export keeps verdicts and diffs by default, and everything but transcripts with --full", () => {
+		for (const name of ["comparison.json", "changes.diff", "final-message.md", "benchmark.md"]) assert.ok(keepFile(name, 10), name);
+		for (const name of ["prompt.md", "metrics.json", "Foo.luau", "transcript.jsonl"]) assert.ok(!keepFile(name, 10), name);
+		assert.ok(keepFile("prompt.md", 10, { full: true }));
+		assert.ok(!keepFile("stderr.log", 0, { full: true }));
+		assert.ok(!keepFile("transcript.jsonl", 10, { full: true }));
+		assert.ok(keepFile("transcript.jsonl", 10, { full: true, transcripts: true }));
 	});
 });
 
