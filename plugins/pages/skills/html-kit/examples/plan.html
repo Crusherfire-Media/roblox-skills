@@ -1,0 +1,132 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Daily Rewards Plan</title><script src="../kit/kit.js" defer></script>
+<rk-header tag="Plan · Click to Cook Food · DailyRewardsSystem" title="Daily Rewards" sub="A seven-day login streak that pays coins and a pet egg on day seven, saved in the player's profile and shown in a new HUD panel."></rk-header>
+<rk-stats>
+7 | days in one streak cycle |
+3 | new modules across two systems |
+1 | new remote, server to client |
+20 h | grace window before a streak resets | +up from 0
+</rk-stats>
+
+<h2>How it fits</h2>
+<p>The server owns the streak. The client only shows it and asks to claim, so a player can never grant themselves a reward. `DailyRewardsService` reads and writes the profile through `DataService`, and the panel reads the synced state through `CharmSync`.</p>
+<rk-diagram title="Systems and data flow">
+Player [user] -> DailyRewardsPanel: opens
+DailyRewardsPanel -> ClaimReward remote: claim
+ClaimReward remote [queue] -> DailyRewardsService: validates
+DailyRewardsService -> DataService: streak and last claim
+DataService -> Profile store [db]: saves
+DailyRewardsService -> CharmSync: state
+CharmSync [cache] -> DailyRewardsPanel: renders
+</rk-diagram>
+
+<h2>Approaches</h2>
+<rk-options>
+Server-owned streak [recommended] | the server decides the day and grants the reward
++ A player can't grant themselves a reward
++ One source of truth in the profile
+- Needs a remote and a rate limit
+Client-side streak | the client tracks the streak and tells the server to pay
++ No remote round trip to show the panel
+- Exploiters can claim every day at once
+~ Common in older games; not safe for currency
+</rk-options>
+
+<h2>Where it lives</h2>
+<rk-tree title="New and changed instances">
+ReplicatedStorage [Folder]
+  Systems [Folder]
+    + DailyRewardsSystem [Folder] | new system
+      + SystemPackage [ModuleScript] | client and server API
+      + Implementation [Folder]
+        + DailyRewardsService [ModuleScript] | server only
+        + DailyRewardsPanel [ModuleScript] | Vide component and story
+    ~ DataSystem [Folder] | `Streak` and `LastClaim` fields
+  Remotes [Folder]
+    + ClaimReward [RemoteFunction] | rate-limited
+    - LegacyLoginBonus [RemoteEvent] | replaced by ClaimReward
+</rk-tree>
+
+<h2>Claim flow</h2>
+<rk-sequence title="Claiming today's reward">
+Player [user] -> DailyRewardsPanel [client]: taps Claim
+DailyRewardsPanel -> ClaimReward [remote]: InvokeServer()
+ClaimReward -> DailyRewardsService [server]: OnServerInvoke
+note DailyRewardsService: checks the day on server time
+DailyRewardsService -> DataService [db]: add coins, save streak
+DataService --> DailyRewardsService: saved
+DailyRewardsService --> DailyRewardsPanel: reward and new streak
+DailyRewardsPanel -> DailyRewardsPanel: play claim animation
+</rk-sequence>
+
+<h2>Work items</h2>
+<rk-table>
+ID | Item | System | Status | Note
+DR-1 | Streak math and grace window | DailyRewardsService | [done] | Spec covers the day-boundary cases
+DR-2 | Profile fields `Streak`, `LastClaim` | DataService | [progress] | Migration for existing profiles
+DR-3 | `ClaimReward` remote with rate limit | Remotes | [todo] | One claim per player per day
+DR-4 | HUD panel and UI Labs story | DailyRewardsPanel | [todo] | Run `ui_lint` on the story
+DR-5 | Day-seven pet egg grant | PetSystem | [blocked] | Needs the egg's item id from design
+</rk-table>
+
+<h2>Build order</h2>
+<rk-steps>
+Write the streak spec first | day boundaries, the grace window, and a claim twice in one day
+Add the profile fields | default values and a migration for profiles saved before this change
+Wire the remote | server validates the day and rate-limits; the client never sends an amount
+Build the panel | Vide component, a story with day 1, day 6, and claimed states
+Playtest the full loop | claim, rejoin, and check the saved streak
+</rk-steps>
+
+<h2>Expected claims</h2>
+<rk-chart type="bar" title="Players claiming, by streak day (estimate)">
+Day 1: 1000
+Day 2: 720
+Day 3: 610
+Day 4: 540
+Day 5: 500
+Day 6: 470
+Day 7: 450
+</rk-chart>
+
+<h2>Risks</h2>
+<rk-callout kind="risk" title="Clock changes.">Server time decides the day, so a player who changes their device clock gains nothing; specs pin the server clock.</rk-callout>
+<rk-callout kind="warn" title="Profile migration.">Profiles saved before DR-2 have no `Streak` field. The read path treats a missing field as day 0.</rk-callout>
+<rk-callout kind="note" title="Deferred signals.">The panel updates after the `Claimed` signal's deferred handlers run, so specs call `Deferred.settleAsync()` before checking it.</rk-callout>
+<rk-callout kind="lesson" title="From the tutorial rework.">Rewards granted on the client drifted from saved data; granting only on the server removed the whole class of bug.</rk-callout>
+
+<h2>Panel states</h2>
+<rk-cols>
+<div>
+<h3>Unclaimed</h3>
+<ul>
+<li>Today's tile pulses and shows **Claim**.</li>
+<li>Past days show a check mark; future days are dimmed.</li>
+</ul>
+</div>
+<div>
+<h3>Claimed</h3>
+<ul>
+<li>Today's tile shows the time until the next claim.</li>
+<li>The HUD button's badge clears.</li>
+</ul>
+</div>
+</rk-cols>
+<pre><code>const DailyRewardsService = require("@game/ServerScriptService/Systems/DailyRewardsSystem/Implementation/DailyRewardsService")
+DailyRewardsService:Claim(player) -- returns the reward, or nil when today is already claimed</code></pre>
+
+<h2>Triage</h2>
+<rk-board title="Follow-ups" columns="Now,Next,Later">
+DR-6 | Streak-saver product for a missed day | Later
+DR-7 | Analytics event per claim | Next
+DR-8 | Sound on claim |
+DR-9 | Localize tile labels | Next
+</rk-board>
+
+<h2>Decisions</h2>
+<rk-decisions>
+Grace window length | Recommended: 20 hours past midnight UTC, so a player who logs in late at night keeps the streak.
+Reset or pause on a missed day | Reset is simpler and matches the genre; pause is kinder but needs a "paused" state in the panel.
+Day-seven reward | A pet egg (needs DR-5's item id) or a larger coin bundle with no new dependency.
+</rk-decisions>
+
+<footer>Plan page for Click to Cook Food. Example for the html-kit skill; the systems and numbers are made up.</footer>

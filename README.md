@@ -44,6 +44,13 @@ The skills work with any Studio MCP. The setup below adds
 [built-in Studio MCP](https://create.roblox.com/docs/studio/mcp) is the option with nothing to
 install.
 
+### The `pages` plugin (optional)
+
+In `plugins/pages`. Its `html-kit` skill writes HTML pages, such as a plan for a Roblox system,
+with themed components from one shared `kit.js`. A page holds only content, so it costs about as
+many tokens as markdown and opens in any browser. A hook holds back a new HTML page until the
+skill is loaded. It's [agent-html-kit](https://github.com/leex279/agent-html-kit) (MIT), restyled.
+
 ### The starter template
 
 `template/` is a game project ready to sync: Rojo 7.7.1, pesde with Module Loader, Jest Roblox
@@ -71,7 +78,7 @@ GitHub account and a Claude plan that includes Claude Code.
 Open an empty folder in VS Code, open the Claude Code panel, and paste:
 
 ```
-Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download `https://raw.githubusercontent.com/Crusherfire-Media/roblox-skills/v0.1.1/SETUP.md` with `curl.exe` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
+Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download `https://raw.githubusercontent.com/Crusherfire-Media/roblox-skills/v0.1.2/SETUP.md` with `curl.exe` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
 ```
 
 Claude follows [`SETUP.md`](SETUP.md) from that release. Along the way you click **Yes** on a few
@@ -84,8 +91,9 @@ ready.
 The plugin, in a terminal:
 
 ```
-claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.1
+claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.2
 claude plugin install roblox-dev@crusherfire
+claude plugin install pages@crusherfire
 ```
 
 The Studio MCP, which needs Node.js 22 or later:
@@ -111,7 +119,7 @@ from the latest release. It holds only `template/`, with no history. Unzip it, r
 install [Rokit](https://github.com/rojo-rbx/rokit#installation) and
 [pesde](https://docs.pesde.dev/installation/), and run `rokit install` and `pesde install` in that
 folder. The template's `CLAUDE.md` lists the checks. From a terminal with Node.js,
-`npx tiged Crusherfire-Media/roblox-skills/template#v0.1.1 my-game` copies the same files.
+`npx tiged Crusherfire-Media/roblox-skills/template#v0.1.2 my-game` copies the same files.
 
 ## Develop
 
