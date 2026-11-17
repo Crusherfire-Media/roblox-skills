@@ -1,6 +1,6 @@
 # Roblox AI workflow setup
 
-Release tag: `v0.1.4`
+Release tag: `v0.1.5`
 
 You are setting up the folder open in VS Code as a Roblox game project for the viewer who pasted
 the prompt. Wherever a command says `TAG`, replace it with the release tag above: the template
@@ -32,8 +32,10 @@ and the `roblox-dev` plugin both come from that tag.
 - **Viewer:** marks something only the viewer can do. Tell them exactly what to click or type, then
   wait until they say it's done. Put commands they type in a plain chat message, where they can
   copy them; a question dialog's text can't be copied.
-- **Stop and ask:** marks a decision that needs the viewer's accounts or choices. Ask, then wait for
-  the answer.
+- **Stop and ask:** marks a decision that needs the viewer's accounts or choices. Ask with your
+  question tool (AskUserQuestion) and offer the likely answers, then wait. Use it too for the
+  questions a skill asks during setup. When a step needs both a command and a question, send the
+  command in a chat message first, then ask.
 - When a command fails, find the symptom in [Common problems](#common-problems), apply its fix, and
   run the step again. When nothing there matches, show the viewer the error and stop.
 - Keys and tokens go only into the hidden-input script in [CI setup](#ci-setup-optional). Keep them
@@ -133,13 +135,30 @@ Check: `claude --version` runs. Otherwise, install the standalone CLI:
 
 ```powershell
 irm https://claude.ai/install.ps1 | iex
-$p = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($p -notlike "*$env:USERPROFILE\.local\bin*") { [Environment]::SetEnvironmentVariable('Path', "$p;$env:USERPROFILE\.local\bin", 'User') }
 ```
 
-The last two lines put the CLI's folder on the viewer's PATH when the installer leaves it off.
+Then, every time, check the viewer's PATH. This block adds the CLI's folder when the installer left
+it off. It also repairs a PATH that an installer in steps 2 to 4 saved as plain text: in that form,
+entries such as `%USERPROFILE%\AppData\Local\Microsoft\WindowsApps` (where winget lives) stop
+working after the restart.
 
-Done when `claude --version` runs.
+```powershell
+$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+$p = $k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+$add = "$env:USERPROFILE\.local\bin"
+$kind = if ($p) { $k.GetValueKind('Path') } else { 'None' }
+if ($p -notlike "*$add*" -or $kind -ne 'ExpandString') {
+  if ($p -notlike "*$add*") { $p = "$p;$add" }
+  $k.SetValue('Path', $p, 'ExpandString')
+  # Setting and clearing a variable tells Windows the environment changed.
+  [Environment]::SetEnvironmentVariable('ROBLOX_SETUP_REFRESH', '1', 'User')
+  [Environment]::SetEnvironmentVariable('ROBLOX_SETUP_REFRESH', $null, 'User')
+}
+$k.Close()
+```
+
+Done when `claude --version` runs and `(Get-Item HKCU:\Environment).GetValueKind('Path')` prints
+`ExpandString`.
 
 ## 5. Sign in to GitHub
 
@@ -169,7 +188,8 @@ gh auth setup-git
 
 **Stop and ask** what the GitHub repo should be called (suggest the folder name, with spaces as
 hyphens) and whether it's public or private, unless the viewer already said. When the viewer also
-has to sign in, ask in the same message as the sign-in.
+has to sign in, send the sign-in command first and ask right after it, so they can answer while
+the browser sign-in runs.
 
 Done when the check passes and you have the repo's name and visibility.
 
@@ -338,7 +358,10 @@ Otherwise, give the viewer these steps and stop until they're back:
 3. Reopen VS Code on this folder. In the Claude Code panel, click **Session history**, pick this
    conversation, and type `continue`. In a terminal, `claude --continue` does the same. If Claude
    Code asks whether to trust this folder or install the plugins its settings name, accept.
-4. Open Roblox Studio and start a new **Baseplate**.
+4. Open a terminal in VS Code (**Terminal > New Terminal**), run `claude`, accept the prompt to
+   trust this folder, then type `/exit`. The `claude` command keeps its own list of trusted
+   folders, and until it trusts this one it ignores the project's allowed commands.
+5. Open Roblox Studio and start a new **Baseplate**.
 
 When the viewer resumes, re-read `$env:TEMP\roblox-setup\SETUP.md` and start again at step 1.
 
@@ -351,7 +374,7 @@ message.
 
 1. Check: the project's `CLAUDE.md` has an `## Agent skills` section. Otherwise: **Viewer:** type
    `/mattpocock-skills:setup-matt-pocock-skills` in the chat. The skill then runs in your session:
-   ask its questions with these as the recommended answers: GitHub as the issue tracker (the repo
+   ask its questions with your question tool, with these as the recommended answers: GitHub as the issue tracker (the repo
    is on GitHub) and the default labels, then show the draft for the viewer to confirm. It writes
    the `## Agent skills` section and a few files under `docs/agents/`, and creates the labels in
    the repo. Once the section is there,
@@ -416,7 +439,7 @@ Done when `gh secret list` shows `ROBLOX_API_KEY` and `gh variable list` shows a
 | `winget` "is not recognized" | Check that the block starts with the PATH prelude, which adds winget's folder. If it does, run `Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe`, then retry. |
 | A winget install fails right after the UAC prompt | The prompt was declined or timed out. Run the install again and have the viewer click **Yes**. |
 | A tool "is not recognized" before the restart | Start the block with the PATH prelude. |
-| A tool "is not recognized" after the restart | **Viewer:** close every VS Code window and terminal and reopen. If that fails, sign out of Windows and back in, or restart Windows. |
+| A tool "is not recognized" after the restart | Run step 4's PATH block: an installer may have saved the PATH in a form that drops entries such as winget's. Then **Viewer:** close every VS Code window and terminal and reopen. If that fails, sign out of Windows and back in, or restart Windows. |
 | "running scripts is disabled on this system" | Use `npx.cmd` or `npm.cmd`. For the viewer's own terminal, `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` fixes it; **Stop and ask** first, since it changes a security setting. |
 | Rokit: "has not been marked as trusted" | Run `rokit trust <tool>` with the tool the error names, then `rokit install`. |
 | Rokit: "Failed to find tool ... in any project manifest" | Run the command in the project folder. For `pesde`, a Rokit copy is in the way: call `& "$env:USERPROFILE\.pesde\bin\pesde.exe"`. |
@@ -434,7 +457,7 @@ Done when `gh secret list` shows `ROBLOX_API_KEY` and `gh variable list` shows a
 | `.claude/settings.json` lost its `crusherfire` marketplace and plugins | A `claude plugin marketplace remove` ran in the project folder. Run `git checkout -- .claude/settings.json` when the change isn't committed; otherwise restore the file as in step 6. |
 | `claude` prints "Ignoring N permissions.allow entries ... this workspace has not been trusted" | The CLI hasn't recorded trust for this folder; the VS Code extension's trust can be saved under a lowercase drive letter that the CLI doesn't match. **Viewer:** run `claude` once in a VS Code terminal in the project folder and accept the trust prompt. |
 | A marketplace add or plugin install fails while cloning over SSH | Put `$env:CLAUDE_CODE_PLUGIN_PREFER_HTTPS = '1'` at the start of the block and retry. |
-| `claude plugin list` shows each plugin twice | Expected: step 9 installs them at user scope, and the template's `.claude/settings.json` turns them on at project scope. Both rows are the same plugin. |
+| `claude plugin list` shows a plugin twice, or the `crusherfire` plugins only once | Both are fine. Step 9 installs them at user scope, and the template's `.claude/settings.json` adds a project row; a later marketplace remove drops the project row, and the settings still turn the plugins on. |
 | `roblox-dev:` skills are missing after the restart | Check that `claude plugin list` shows the plugin enabled. **Viewer:** type `/reload-plugins`, or start a new conversation. |
 | The `robloxstudio` MCP server is missing after the restart | Run `claude mcp list`. When it's listed, the session started before it was added: **Viewer:** start a new conversation. When the saved command contains `cmd` or `C:/`, run `claude mcp remove robloxstudio` and add it again as in step 9. |
 | The Studio MCP plugin never shows **Connected**, or reports a version mismatch | **Viewer:** quit every Claude Code session and every Studio window, then reopen both. If the plugin is missing, run `npx.cmd -y @chrrxs/robloxstudio-mcp@latest --install-plugin` first. |
