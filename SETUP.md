@@ -1,6 +1,6 @@
 # Roblox AI workflow setup
 
-Release tag: `v0.1.2`
+Release tag: `v0.1.3`
 
 You are setting up the folder open in VS Code as a Roblox game project for the viewer who pasted
 the prompt. Wherever a command says `TAG`, replace it with the release tag above: the template
@@ -321,8 +321,13 @@ Done when the check passes.
 
 ## 12. Finish in the new session
 
+Run all three checks first, and when more than one needs the viewer, ask for those actions in one
+message.
+
 1. Check: the project's `CLAUDE.md` has an `## Agent skills` section. Otherwise: **Viewer:** type
-   `/setup-matt-pocock-skills` in the chat and answer its questions. Once the section is there,
+   `/setup-matt-pocock-skills` in the chat and answer its questions: GitHub as the issue tracker
+   (the repo is on GitHub), the default labels, then confirm. It writes the `## Agent skills`
+   section and a few files under `docs/agents/`, and creates the labels in the repo. Once the section is there,
    commit what it wrote and push:
    `git add -A; git commit -m "Configure Matt Pocock's skills"; git push`.
 2. Check: the `robloxstudio` MCP server reports a connected Studio place. When it reports none:
@@ -400,6 +405,7 @@ Done when `gh secret list` shows `ROBLOX_API_KEY` and `gh variable list` shows a
 | selene flags `game`, `workspace`, and other Roblox globals | `selene.toml` needs `std = "roblox"`. The template's has it, so run selene from the project root. |
 | `claude plugin marketplace add`: "source doesn't match its extraKnownMarketplaces entry" | An older `crusherfire` marketplace is registered. Run `claude plugin marketplace remove crusherfire`, then step 9 again. |
 | A marketplace add or plugin install fails while cloning over SSH | Put `$env:CLAUDE_CODE_PLUGIN_PREFER_HTTPS = '1'` at the start of the block and retry. |
+| `claude plugin list` shows each plugin twice | Expected: step 9 installs them at user scope, and the template's `.claude/settings.json` turns them on at project scope. Both rows are the same plugin. |
 | `roblox-dev:` skills are missing after the restart | Check that `claude plugin list` shows the plugin enabled. **Viewer:** type `/reload-plugins`, or start a new conversation. |
 | The `robloxstudio` MCP server is missing after the restart | Run `claude mcp list`. When it's listed, the session started before it was added: **Viewer:** start a new conversation. When the saved command contains `cmd` or `C:/`, run `claude mcp remove robloxstudio` and add it again as in step 9. |
 | The Studio MCP plugin never shows **Connected**, or reports a version mismatch | **Viewer:** quit every Claude Code session and every Studio window, then reopen both. If the plugin is missing, run `npx.cmd -y @chrrxs/robloxstudio-mcp@latest --install-plugin` first. |
