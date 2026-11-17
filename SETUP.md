@@ -1,6 +1,6 @@
 # Roblox AI workflow setup
 
-Release tag: `v0.1.1`
+Release tag: `v0.1.2`
 
 You are setting up the folder open in VS Code as a Roblox game project for the viewer who pasted
 the prompt. Wherever a command says `TAG`, replace it with the release tag above: the template
@@ -244,7 +244,7 @@ $cf = $m | Where-Object name -eq 'crusherfire'
 if ($cf -and $cf.ref -ne 'TAG') { claude plugin marketplace remove crusherfire; $cf = $null }
 if (-not $cf) { claude plugin marketplace add 'Crusherfire-Media/roblox-skills#TAG' }
 $installed = claude plugin list --json | ConvertFrom-Json | Where-Object scope -eq 'user' | ForEach-Object { $_.id }
-foreach ($id in 'roblox-dev@crusherfire', 'mattpocock-skills@claude-plugins-official') { if ($installed -notcontains $id) { claude plugin install $id } }
+foreach ($id in 'roblox-dev@crusherfire', 'pages@crusherfire', 'mattpocock-skills@claude-plugins-official') { if ($installed -notcontains $id) { claude plugin install $id } }
 ```
 
 The `#TAG` pins the marketplace, and with it `roblox-dev`, to this release. When the block removes
@@ -258,7 +258,7 @@ it's done:
 claude mcp add --scope user robloxstudio -- npx -y @chrrxs/robloxstudio-mcp@latest --auto-install-plugin
 ```
 
-Done when `claude plugin list --json` shows `roblox-dev@crusherfire` and
+Done when `claude plugin list --json` shows `roblox-dev@crusherfire`, `pages@crusherfire`, and
 `mattpocock-skills@claude-plugins-official` at user scope, `claude plugin marketplace list --json`
 shows `crusherfire` with `ref` set to the release tag, and the MCP add succeeded or said it already
 exists.
