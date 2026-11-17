@@ -78,10 +78,10 @@ GitHub account and a Claude plan that includes Claude Code.
 Open an empty folder in VS Code, open the Claude Code panel, and paste:
 
 ```
-Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download `https://raw.githubusercontent.com/Crusherfire-Media/roblox-skills/v0.1.5/SETUP.md` with `curl.exe` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
+Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download the latest `SETUP.md` from `https://github.com/Crusherfire-Media/roblox-skills/releases/latest/download/SETUP.md` with `curl.exe -L` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
 ```
 
-Claude follows [`SETUP.md`](SETUP.md) from that release. Along the way you click **Yes** on a few
+Claude follows the [`SETUP.md`](SETUP.md) attached to the latest release. Along the way you click **Yes** on a few
 Windows admin prompts, sign in to GitHub, choose a name and visibility for your repo, and restart
 VS Code and Studio once. CI setup is a separate, optional step: ask Claude for it when you're
 ready.
@@ -141,13 +141,14 @@ folder. The template's `CLAUDE.md` lists the checks. From a terminal with Node.j
 - Run the hook tests with `npm test` (Node.js 22 or later).
 - Check the manifests with `claude plugin validate .` and `claude plugin validate plugins/roblox-dev`.
 - To release, replace the old tag in `SETUP.md` (its "Release tag" line), in this README (the
-  prompt, the marketplace commands, the upgrade block, and the `tiged` command), and in
+  marketplace commands, the upgrade block, and the `tiged` command), and in
   `template/.claude/settings.json` (the marketplace's `ref`). Bump `version` in
   `plugins/<plugin>/.claude-plugin/plugin.json` for every plugin whose files changed since the last
   tag (`git diff --stat <last-tag> -- plugins` lists them): installs are cached by version, so an
   unchanged version keeps the old copy. Commit that to `main`, then publish a
   GitHub release with a new tag on that commit. The Release workflow attaches
-  `roblox-game-template.zip` to it; for a release without the zip, run the workflow by hand with
+  `roblox-game-template.zip` and `SETUP.md` to it (the prompt downloads the latest release's
+  `SETUP.md`, so the prompt itself never changes); for a release without the zip, run the workflow by hand with
   its tag.
 
 ## Contributing

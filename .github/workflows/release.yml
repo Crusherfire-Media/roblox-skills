@@ -1,7 +1,8 @@
 name: Release
 
 # Attaches roblox-game-template.zip (template/ at the release tag, no history)
-# to each release, so people can start a game without cloning this repo.
+# and SETUP.md to each release, so people can start a game without cloning this
+# repo, and the setup prompt can always download the latest release's SETUP.md.
 on:
   release:
     types: [published]
@@ -30,7 +31,9 @@ jobs:
         run: |
           git archive --format=zip --prefix=roblox-game-template/ -o roblox-game-template.zip HEAD:template
           unzip -l roblox-game-template.zip | grep -q ' roblox-game-template/default.project.json$'
-      - name: Attach it to the release
+      - name: Check SETUP.md names this release
+        run: grep -qx "Release tag: \`$TAG\`" SETUP.md
+      - name: Attach the zip and SETUP.md to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" roblox-game-template.zip --clobber
+        run: gh release upload "$TAG" roblox-game-template.zip SETUP.md --clobber
