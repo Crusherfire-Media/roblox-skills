@@ -1,6 +1,6 @@
 # Roblox AI workflow setup
 
-Release tag: `v0.1.3`
+Release tag: `v0.1.4`
 
 You are setting up the folder open in VS Code as a Roblox game project for the viewer who pasted
 the prompt. Wherever a command says `TAG`, replace it with the release tag above: the template
@@ -30,7 +30,8 @@ and the `roblox-dev` plugin both come from that tag.
 - In PowerShell, call `npx.cmd`: the execution policy can block `npx.ps1`. The saved MCP command in
   step 9 is the one place that keeps plain `npx`.
 - **Viewer:** marks something only the viewer can do. Tell them exactly what to click or type, then
-  wait until they say it's done.
+  wait until they say it's done. Put commands they type in a plain chat message, where they can
+  copy them; a question dialog's text can't be copied.
 - **Stop and ask:** marks a decision that needs the viewer's accounts or choices. Ask, then wait for
   the answer.
 - When a command fails, find the symptom in [Common problems](#common-problems), apply its fix, and
@@ -174,7 +175,13 @@ Done when the check passes and you have the repo's name and visibility.
 
 ## 6. Copy the template
 
-Check: `default.project.json` exists in the project folder. Otherwise:
+Check: `default.project.json` exists in the project folder, and this prints the release tag:
+
+```powershell
+(Get-Content .claude\settings.json -Raw | ConvertFrom-Json).extraKnownMarketplaces.crusherfire.source.ref
+```
+
+When either check fails, download this release's template:
 
 ```powershell
 $src = "$env:TEMP\roblox-setup\template-TAG"
@@ -182,12 +189,27 @@ if (-not (Test-Path "$src\roblox-game-template")) {
   curl.exe -fsSL -o "$src.zip" https://github.com/Crusherfire-Media/roblox-skills/releases/download/TAG/roblox-game-template.zip
   Expand-Archive -Path "$src.zip" -DestinationPath $src -Force
 }
+```
+
+When `default.project.json` is missing, copy all of it:
+
+```powershell
 Copy-Item -Path "$src\roblox-game-template\*" -Destination . -Recurse -Force
+```
+
+When only the tag check failed, `.claude/settings.json` is from an older release, or a
+`claude plugin marketplace remove` run in this folder stripped it. **Stop and ask** whether to
+replace it with this release's, since that drops any changes made to it. On a yes:
+
+```powershell
+New-Item -ItemType Directory -Force .claude | Out-Null
+Copy-Item -Path "$src\roblox-game-template\.claude\settings.json" -Destination .claude\settings.json -Force
 ```
 
 The template's `pesde.toml` takes the place of `pesde init`, which needs a person typing answers.
 
-Done when `default.project.json`, `rokit.toml`, and `pesde.toml` exist in the project folder.
+Done when `default.project.json`, `rokit.toml`, and `pesde.toml` exist in the project folder and
+the tag check prints the release tag.
 
 ## 7. Install the VS Code extensions
 
@@ -235,9 +257,11 @@ rojo plugin install
 npx.cmd -y @chrrxs/robloxstudio-mcp@latest --install-plugin
 ```
 
-The marketplaces and plugins, all at user scope:
+The marketplaces and plugins, all at user scope. The block runs from `$env:TEMP` because removing a
+marketplace inside the project also removes it from the project's `.claude/settings.json`:
 
 ```powershell
+Push-Location $env:TEMP
 $m = claude plugin marketplace list --json | ConvertFrom-Json
 if (-not ($m | Where-Object name -eq 'claude-plugins-official')) { claude plugin marketplace add anthropics/claude-plugins-official }
 $cf = $m | Where-Object name -eq 'crusherfire'
@@ -245,6 +269,7 @@ if ($cf -and $cf.ref -ne 'TAG') { claude plugin marketplace remove crusherfire; 
 if (-not $cf) { claude plugin marketplace add 'Crusherfire-Media/roblox-skills#TAG' }
 $installed = (claude plugin list --json | ConvertFrom-Json) | Where-Object scope -eq 'user' | ForEach-Object { $_.id }
 foreach ($id in 'roblox-dev@crusherfire', 'pages@crusherfire', 'mattpocock-skills@claude-plugins-official') { if ($installed -notcontains $id) { claude plugin install $id } }
+Pop-Location
 ```
 
 The `#TAG` pins the marketplace, and with it `roblox-dev`, to this release. When the block removes
@@ -325,9 +350,11 @@ Run all three checks first, and when more than one needs the viewer, ask for tho
 message.
 
 1. Check: the project's `CLAUDE.md` has an `## Agent skills` section. Otherwise: **Viewer:** type
-   `/setup-matt-pocock-skills` in the chat and answer its questions: GitHub as the issue tracker
-   (the repo is on GitHub), the default labels, then confirm. It writes the `## Agent skills`
-   section and a few files under `docs/agents/`, and creates the labels in the repo. Once the section is there,
+   `/mattpocock-skills:setup-matt-pocock-skills` in the chat. The skill then runs in your session:
+   ask its questions with these as the recommended answers: GitHub as the issue tracker (the repo
+   is on GitHub) and the default labels, then show the draft for the viewer to confirm. It writes
+   the `## Agent skills` section and a few files under `docs/agents/`, and creates the labels in
+   the repo. Once the section is there,
    commit what it wrote and push:
    `git add -A; git commit -m "Configure Matt Pocock's skills"; git push`.
 2. Check: the `robloxstudio` MCP server reports a connected Studio place. When it reports none:
@@ -403,7 +430,9 @@ Done when `gh secret list` shows `ROBLOX_API_KEY` and `gh variable list` shows a
 | "Unable to create ... index.lock: File exists" | Retry once the other Git command finishes. When none is running, delete `.git\index.lock`. |
 | `stylua --check` reports a diff in every file | Files were checked out with CRLF line endings. Confirm `.gitattributes` holds `* text=auto eol=lf`, run `stylua src tools`, and commit. |
 | selene flags `game`, `workspace`, and other Roblox globals | `selene.toml` needs `std = "roblox"`. The template's has it, so run selene from the project root. |
-| `claude plugin marketplace add`: "source doesn't match its extraKnownMarketplaces entry" | An older `crusherfire` marketplace is registered. Run `claude plugin marketplace remove crusherfire`, then step 9 again. |
+| `claude plugin marketplace add`: "source doesn't match its extraKnownMarketplaces entry" | An older `crusherfire` marketplace is registered. Run `Push-Location $env:TEMP; claude plugin marketplace remove crusherfire; Pop-Location`, then step 9 again. Running the remove inside the project also strips it from `.claude/settings.json`. |
+| `.claude/settings.json` lost its `crusherfire` marketplace and plugins | A `claude plugin marketplace remove` ran in the project folder. Run `git checkout -- .claude/settings.json` when the change isn't committed; otherwise restore the file as in step 6. |
+| `claude` prints "Ignoring N permissions.allow entries ... this workspace has not been trusted" | The CLI hasn't recorded trust for this folder; the VS Code extension's trust can be saved under a lowercase drive letter that the CLI doesn't match. **Viewer:** run `claude` once in a VS Code terminal in the project folder and accept the trust prompt. |
 | A marketplace add or plugin install fails while cloning over SSH | Put `$env:CLAUDE_CODE_PLUGIN_PREFER_HTTPS = '1'` at the start of the block and retry. |
 | `claude plugin list` shows each plugin twice | Expected: step 9 installs them at user scope, and the template's `.claude/settings.json` turns them on at project scope. Both rows are the same plugin. |
 | `roblox-dev:` skills are missing after the restart | Check that `claude plugin list` shows the plugin enabled. **Viewer:** type `/reload-plugins`, or start a new conversation. |

@@ -28,6 +28,9 @@ selene src tools
 stylua --check src tools
 ```
 
+Run each one as its own command, with nothing chained before or after it (no `; echo $?`). The
+project's settings let these five run without asking only in exactly this form.
+
 `luau-lsp analyze` reads Roblox's types from `globalTypes.None.d.luau`. Download it once, and again
 to pick up new engine APIs:
 `curl -L -o globalTypes.None.d.luau https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau`
