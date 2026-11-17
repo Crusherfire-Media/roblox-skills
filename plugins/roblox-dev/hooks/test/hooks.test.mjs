@@ -356,6 +356,16 @@ describe('skill-hints', () => {
     assert.equal(hint({ hook_event_name: 'UserPromptSubmit', prompt: report, transcript_path: fresh }), undefined);
   });
 
+  test('reads inflected performance words and adds vide-performance for slow UI', () => {
+    const fresh = transcript(human('x'));
+    const uiLag = hint({ hook_event_name: 'UserPromptSubmit', prompt: 'the shop UI lags when it opens', transcript_path: fresh });
+    assert.match(uiLag, /`roblox-dev:roblox-performance`/);
+    assert.match(uiLag, /`roblox-dev:vide-performance`/);
+    assert.match(hint({ hook_event_name: 'UserPromptSubmit', prompt: 'The server keeps lagging', transcript_path: fresh }), /`roblox-dev:roblox-performance`/);
+    assert.doesNotMatch(hint({ hook_event_name: 'UserPromptSubmit', prompt: 'The server keeps lagging', transcript_path: fresh }), /vide-performance/);
+    assert.doesNotMatch(hint({ hook_event_name: 'UserPromptSubmit', prompt: 'Add a shop menu', transcript_path: fresh }), /vide-performance/);
+  });
+
   test('a skill loaded from another plugin does not silence the hint', () => {
     const privateLoad = transcript(human('x'), skill('roblox:roblox-performance'));
     assert.match(hint({ hook_event_name: 'UserPromptSubmit', prompt: 'Fix the lag', transcript_path: privateLoad }), /`roblox-dev:roblox-performance`/);
