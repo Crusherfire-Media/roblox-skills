@@ -78,7 +78,7 @@ GitHub account and a Claude plan that includes Claude Code.
 Open an empty folder in VS Code, open the Claude Code panel, and paste:
 
 ```
-Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download `https://raw.githubusercontent.com/Crusherfire-Media/roblox-skills/v0.1.3/SETUP.md` with `curl.exe` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
+Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download `https://raw.githubusercontent.com/Crusherfire-Media/roblox-skills/v0.1.4/SETUP.md` with `curl.exe` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
 ```
 
 Claude follows [`SETUP.md`](SETUP.md) from that release. Along the way you click **Yes** on a few
@@ -91,10 +91,25 @@ ready.
 The plugin, in a terminal:
 
 ```
-claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.3
+claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.4
 claude plugin install roblox-dev@crusherfire
 claude plugin install pages@crusherfire
 ```
+
+To upgrade, run this in PowerShell. It runs from `$env:TEMP` because removing the marketplace
+inside a project also removes it from that project's `.claude/settings.json`, and it reinstalls
+both plugins because the remove uninstalls them:
+
+```powershell
+Push-Location $env:TEMP
+claude plugin marketplace remove crusherfire
+claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.4
+claude plugin install roblox-dev@crusherfire
+claude plugin install pages@crusherfire
+Pop-Location
+```
+
+Then copy the new template's `.claude/settings.json` into each existing project and commit it.
 
 The Studio MCP, which needs Node.js 22 or later:
 
@@ -119,14 +134,14 @@ from the latest release. It holds only `template/`, with no history. Unzip it, r
 install [Rokit](https://github.com/rojo-rbx/rokit#installation) and
 [pesde](https://docs.pesde.dev/installation/), and run `rokit install` and `pesde install` in that
 folder. The template's `CLAUDE.md` lists the checks. From a terminal with Node.js,
-`npx tiged Crusherfire-Media/roblox-skills/template#v0.1.3 my-game` copies the same files.
+`npx tiged Crusherfire-Media/roblox-skills/template#v0.1.4 my-game` copies the same files.
 
 ## Develop
 
 - Run the hook tests with `npm test` (Node.js 22 or later).
 - Check the manifests with `claude plugin validate .` and `claude plugin validate plugins/roblox-dev`.
 - To release, replace the old tag in `SETUP.md` (its "Release tag" line), in this README (the
-  prompt, the marketplace command, and the `tiged` command), and in
+  prompt, the marketplace commands, the upgrade block, and the `tiged` command), and in
   `template/.claude/settings.json` (the marketplace's `ref`). Bump `version` in
   `plugins/<plugin>/.claude-plugin/plugin.json` for every plugin whose files changed since the last
   tag (`git diff --stat <last-tag> -- plugins` lists them): installs are cached by version, so an
