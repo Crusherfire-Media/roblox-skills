@@ -24,7 +24,7 @@ and the `roblox-dev` plugin both come from that tag.
   PATH only after the restart, and the prelude lets you call them by name before then:
 
   ```powershell
-  $env:Path = "$env:USERPROFILE\.rokit\bin;$env:USERPROFILE\.pesde\bin;$env:USERPROFILE\.local\bin;$env:ProgramFiles\nodejs;$env:ProgramFiles\GitHub CLI;$env:ProgramFiles\Git\cmd;$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin;$env:Path"
+  $env:Path = "$env:USERPROFILE\.rokit\bin;$env:USERPROFILE\.pesde\bin;$env:USERPROFILE\.local\bin;$env:ProgramFiles\nodejs;$env:ProgramFiles\GitHub CLI;$env:ProgramFiles\Git\cmd;$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin;$env:LOCALAPPDATA\Microsoft\WindowsApps;$env:Path"
   ```
 
 - In PowerShell, call `npx.cmd`: the execution policy can block `npx.ps1`. The saved MCP command in
@@ -243,7 +243,7 @@ if (-not ($m | Where-Object name -eq 'claude-plugins-official')) { claude plugin
 $cf = $m | Where-Object name -eq 'crusherfire'
 if ($cf -and $cf.ref -ne 'TAG') { claude plugin marketplace remove crusherfire; $cf = $null }
 if (-not $cf) { claude plugin marketplace add 'Crusherfire-Media/roblox-skills#TAG' }
-$installed = claude plugin list --json | ConvertFrom-Json | Where-Object scope -eq 'user' | ForEach-Object { $_.id }
+$installed = (claude plugin list --json | ConvertFrom-Json) | Where-Object scope -eq 'user' | ForEach-Object { $_.id }
 foreach ($id in 'roblox-dev@crusherfire', 'pages@crusherfire', 'mattpocock-skills@claude-plugins-official') { if ($installed -notcontains $id) { claude plugin install $id } }
 ```
 
@@ -381,7 +381,7 @@ Done when `gh secret list` shows `ROBLOX_API_KEY` and `gh variable list` shows a
 
 | Symptom | Fix |
 |---|---|
-| `winget` "is not recognized" | Run `Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe`, then retry. |
+| `winget` "is not recognized" | Check that the block starts with the PATH prelude, which adds winget's folder. If it does, run `Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe`, then retry. |
 | A winget install fails right after the UAC prompt | The prompt was declined or timed out. Run the install again and have the viewer click **Yes**. |
 | A tool "is not recognized" before the restart | Start the block with the PATH prelude. |
 | A tool "is not recognized" after the restart | **Viewer:** close every VS Code window and terminal and reopen. If that fails, sign out of Windows and back in, or restart Windows. |

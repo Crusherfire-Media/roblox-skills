@@ -125,10 +125,12 @@ folder. The template's `CLAUDE.md` lists the checks. From a terminal with Node.j
 
 - Run the hook tests with `npm test` (Node.js 22 or later).
 - Check the manifests with `claude plugin validate .` and `claude plugin validate plugins/roblox-dev`.
-- Bump `version` in `plugins/roblox-dev/.claude-plugin/plugin.json` when you publish, so installs pick up the change.
 - To release, replace the old tag in `SETUP.md` (its "Release tag" line), in this README (the
   prompt, the marketplace command, and the `tiged` command), and in
-  `template/.claude/settings.json` (the marketplace's `ref`), commit that to `main`, then publish a
+  `template/.claude/settings.json` (the marketplace's `ref`). Bump `version` in
+  `plugins/<plugin>/.claude-plugin/plugin.json` for every plugin whose files changed since the last
+  tag (`git diff --stat <last-tag> -- plugins` lists them): installs are cached by version, so an
+  unchanged version keeps the old copy. Commit that to `main`, then publish a
   GitHub release with a new tag on that commit. The Release workflow attaches
   `roblox-game-template.zip` to it; for a release without the zip, run the workflow by hand with
   its tag.
