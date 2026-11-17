@@ -60,15 +60,18 @@ has the numbers.
 
 ## One-prompt setup
 
-The setup runs on Windows. First install [Git](https://git-scm.com/downloads/win),
-[VS Code](https://code.visualstudio.com), [Claude Code](https://code.claude.com/docs/en/setup), and
+The setup runs on Windows. First install [VS Code](https://code.visualstudio.com), then
+[Git](https://git-scm.com/downloads/win): Git's installer asks for your editor, so VS Code has to be
+there first. In Git's installer, pick **Use Visual Studio Code as Git's default editor** and set
+**Override the default branch name for new repositories** to `main`. Then install
+[Claude Code](https://code.claude.com/docs/en/setup) and
 [Roblox Studio](https://create.roblox.com/landing), and sign in to Studio once. You also need a
 GitHub account and a Claude plan that includes Claude Code.
 
 Open an empty folder in VS Code, open the Claude Code panel, and paste:
 
 ```
-Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download `https://raw.githubusercontent.com/Crusherfire-Media/roblox-skills/v0.1.0/SETUP.md` with `curl.exe` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
+Set up this folder as a Roblox game project with the Crusherfire Roblox AI workflow. Download `https://raw.githubusercontent.com/Crusherfire-Media/roblox-skills/v0.1.1/SETUP.md` with `curl.exe` and follow it step by step. Skip anything that's already installed, and stop and ask me before any step that needs my accounts or keys.
 ```
 
 Claude follows [`SETUP.md`](SETUP.md) from that release. Along the way you click **Yes** on a few
@@ -81,7 +84,7 @@ ready.
 The plugin, in a terminal:
 
 ```
-claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.0
+claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.1
 claude plugin install roblox-dev@crusherfire
 ```
 
@@ -108,7 +111,7 @@ from the latest release. It holds only `template/`, with no history. Unzip it, r
 install [Rokit](https://github.com/rojo-rbx/rokit#installation) and
 [pesde](https://docs.pesde.dev/installation/), and run `rokit install` and `pesde install` in that
 folder. The template's `CLAUDE.md` lists the checks. From a terminal with Node.js,
-`npx tiged Crusherfire-Media/roblox-skills/template#v0.1.0 my-game` copies the same files.
+`npx tiged Crusherfire-Media/roblox-skills/template#v0.1.1 my-game` copies the same files.
 
 ## Develop
 
