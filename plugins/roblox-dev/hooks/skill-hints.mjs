@@ -24,11 +24,14 @@ const PROMPT_HINTS = [
   { pattern: /\b(vide|ui|gui|hud|screens?|menus?|buttons?|panels?|stor(y|ies)|ui labs)\b/i, skills: ['vide', 'vide-ui-labs', 'game-ui-design'], topic: 'UI' },
   { pattern: /\bcharm\b/i, skills: ['vide-charm'], topic: 'Charm state' },
   { pattern: /\bfigma\b/i, skills: ['figma-to-roblox'], topic: 'a Figma design' },
-  { pattern: /\b(lag|laggy|fps|stutter\w*|slow|optimi[sz]\w*|perf|performance|profil\w*|memory|ping|benchmark\w*)\b/i, skills: ['roblox-performance'], topic: 'performance' },
+  { pattern: /\b(lag\w*|fps|stutter\w*|slow\w*|optimi[sz]\w*|perf|performance|profil\w*|memory|ping|benchmark\w*)\b/i, skills: ['roblox-performance'], topic: 'performance' },
   { pattern: /\b(specs?|jest|unit tests?|tdd|test-first|regression tests?)\b/i, skills: ['roblox-testing'], topic: 'specs' },
   { pattern: /\b(new (system|module|service|script)s?|module ?loader|cyclic|relocat\w*)\b/i, skills: ['game-architecture'], topic: 'module structure' },
   { pattern: /\b(rojo|pesde|syncback)\b/i, skills: ['rojo-workflow'], topic: 'the Rojo workflow' },
 ];
+
+// Added when a prompt matches both the UI and the performance topics.
+const UI_PERFORMANCE_HINT = { skills: ['vide-performance'], topic: 'UI performance' };
 
 // Subagent reports and background-task notices arrive as prompts too; only the user's own
 // wording says what the task is.
@@ -42,6 +45,10 @@ function promptHint(input) {
   const matched = PROMPT_HINTS.filter((hint) => hint.pattern.test(prompt));
   if (matched.length === 0) {
     return undefined;
+  }
+  const topics = new Set(matched.map((hint) => hint.topic));
+  if (topics.has('UI') && topics.has('performance')) {
+    matched.push(UI_PERFORMANCE_HINT);
   }
   const loaded = loadedSkills(readEntries(transcriptPathFor(input), { since: 'compaction' }));
   const parts = matched
