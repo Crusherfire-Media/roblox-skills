@@ -1,6 +1,6 @@
 # Roblox AI workflow setup
 
-Release tag: `v0.1.0`
+Release tag: `v0.1.1`
 
 You are setting up the folder open in VS Code as a Roblox game project for the viewer who pasted
 the prompt. Wherever a command says `TAG`, replace it with the release tag above: the template
@@ -43,6 +43,8 @@ and the `roblox-dev` plugin both come from that tag.
 Check each item:
 
 - `Get-Command winget` finds winget.
+- `Get-Command code` finds VS Code's command. When it's missing: **Viewer:** install VS Code from
+  <https://code.visualstudio.com> and reopen this folder in it.
 - `Get-Command git` finds Git. When it's missing, install it. A UAC prompt appears.
   **Viewer:** click **Yes** on the UAC prompt.
 
@@ -52,8 +54,6 @@ Check each item:
 
   Keep using PowerShell for the rest of this run, even when a Bash tool appears once Git is
   installed.
-- `Get-Command code` finds VS Code's command. When it's missing: **Viewer:** install VS Code from
-  <https://code.visualstudio.com> and reopen this folder in it.
 - Roblox Studio is installed. This prints a folder path when it is:
 
   ```powershell
@@ -278,6 +278,14 @@ if (-not (git config --global --get user.name) -or -not (git config --global --g
 
 When either was missing, tell the viewer: commits use their GitHub name and private GitHub noreply
 address, and `git config --global user.name` or `user.email` changes them.
+
+Make `main` the default branch name for new repos when nothing sets one, since a viewer who kept
+the Git installer's defaults may get `master`. This repo gets `main` either way, from
+`git init -b main` below:
+
+```powershell
+if (-not (git config --global --get init.defaultBranch)) { git config --global init.defaultBranch main }
+```
 
 Then commit and push, replacing `<name>` and `<public-or-private>` with the answers from step 5:
 
