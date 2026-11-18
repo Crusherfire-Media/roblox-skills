@@ -91,7 +91,7 @@ ready.
 The plugin, in a terminal:
 
 ```
-claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.5
+claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.6
 claude plugin install roblox-dev@crusherfire
 claude plugin install pages@crusherfire
 ```
@@ -103,7 +103,7 @@ both plugins because the remove uninstalls them:
 ```powershell
 Push-Location $env:TEMP
 claude plugin marketplace remove crusherfire
-claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.5
+claude plugin marketplace add Crusherfire-Media/roblox-skills#v0.1.6
 claude plugin install roblox-dev@crusherfire
 claude plugin install pages@crusherfire
 Pop-Location
@@ -134,7 +134,7 @@ from the latest release. It holds only `template/`, with no history. Unzip it, r
 install [Rokit](https://github.com/rojo-rbx/rokit#installation) and
 [pesde](https://docs.pesde.dev/installation/), and run `rokit install` and `pesde install` in that
 folder. The template's `CLAUDE.md` lists the checks. From a terminal with Node.js,
-`npx tiged Crusherfire-Media/roblox-skills/template#v0.1.5 my-game` copies the same files.
+`npx tiged Crusherfire-Media/roblox-skills/template#v0.1.6 my-game` copies the same files.
 
 ## Develop
 
