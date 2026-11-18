@@ -8,6 +8,9 @@ how changes travel, and how Module Loader is installed through pesde.
 
 ## Where things live
 
+In a repo with a project per place, the `src/` paths below are inside the place's folder
+(`places/<name>/src/...`).
+
 - The two `Start` scripts are `src/ServerScriptService/Start.server.luau` and
   `src/StarterPlayer/StarterPlayerScripts/Start.client.luau`. Each requires Module Loader from
   where `default.project.json` mounts it (under ReplicatedStorage). `LOAD_MODULE` tags sit in the

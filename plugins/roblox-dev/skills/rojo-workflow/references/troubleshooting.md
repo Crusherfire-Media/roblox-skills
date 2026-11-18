@@ -74,8 +74,11 @@ the workspace root, with the `rojo` on PATH. It fails when VS Code started befor
 PATH, when the opened folder isn't the project root, when the project file has another name
 (`luau-lsp.sourcemap.rojoProjectFile`), or after a Rojo crash. Open the project folder itself,
 then run **Luau: Regenerate Sourcemap**. For a one-off sourcemap from the terminal, run
-`rojo sourcemap default.project.json --output sourcemap.json`. Wally packages installed through
-pesde need the `sourcemap_generator` script in `pesde.toml` to get types.
+`rojo sourcemap default.project.json --output sourcemap.json`. In a repo with a project per place,
+`luau-lsp.sourcemap.generatorCommand` names the place to type, with `--absolute`
+(`rojo sourcemap places/<name>/default.project.json --output sourcemap.json --absolute --watch`);
+change its place to type another. Wally packages installed through pesde need the
+`sourcemap_generator` script in `pesde.toml` to get types.
 
 Instances that exist only in Studio (parts you built there) never appear in the sourcemap; the
 Luau Language Server Companion Studio plugin supplies them when `luau-lsp.plugin.enabled` is on.

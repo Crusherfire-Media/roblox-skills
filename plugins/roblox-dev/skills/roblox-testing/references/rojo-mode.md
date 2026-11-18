@@ -7,6 +7,9 @@ into the place.
 
 ## Spec files
 
+In a repo with a project per place, each place has its own `Tests` tree under
+`places/<name>/src/`, and CI runs every place's specs.
+
 - The `Tests` tree is `src/ServerScriptService/Tests/`: `Specs/jest.config.luau`, specs mirroring
   the Modules tree, and any helpers. A spec for `Modules/<path>/<Name>` is the file
   `Specs/<path>/<Name>.spec.luau`, which becomes the ModuleScript `<Name>.spec`.

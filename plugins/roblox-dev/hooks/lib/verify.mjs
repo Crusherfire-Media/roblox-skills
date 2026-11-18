@@ -280,7 +280,10 @@ export function runChecks({ root, files, tools, run = defaultRun }) {
       );
     }
     if (!setup.sourcemap) {
-      missing.push('sourcemap.json (run `rojo sourcemap default.project.json -o sourcemap.json`)');
+      missing.push(
+        'sourcemap.json (run `rojo sourcemap default.project.json -o sourcemap.json`, or with a project per place, ' +
+        '`rojo sourcemap places/<name>/default.project.json -o sourcemap.json --absolute`)',
+      );
     }
     if (missing.length > 0) {
       notes.push(`luau-lsp analyze skipped, since it would report Roblox globals as errors without ${missing.join(' and ')}.`);

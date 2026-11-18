@@ -66,7 +66,7 @@ Check each item:
   When it prints nothing: **Viewer:** install Studio with **Download Studio** at
   <https://create.roblox.com/landing>, launch it once, and sign in.
 - The project folder is empty, holds only `.claude` or `.vscode`, or already holds the template (a
-  `default.project.json`). When it holds anything else: **Stop and ask** whether this is the right
+  `places.json`). When it holds anything else: **Stop and ask** whether this is the right
   folder.
 
 Done when every item passes.
@@ -195,7 +195,7 @@ Done when the check passes and you have the repo's name and visibility.
 
 ## 6. Copy the template
 
-Check: `default.project.json` exists in the project folder, and this prints the release tag:
+Check: `places.json` exists in the project folder, and this prints the release tag:
 
 ```powershell
 (Get-Content .claude\settings.json -Raw | ConvertFrom-Json).extraKnownMarketplaces.crusherfire.source.ref
@@ -211,7 +211,7 @@ if (-not (Test-Path "$src\roblox-game-template")) {
 }
 ```
 
-When `default.project.json` is missing, copy all of it:
+When `places.json` is missing, copy all of it:
 
 ```powershell
 Copy-Item -Path "$src\roblox-game-template\*" -Destination . -Recurse -Force
@@ -228,7 +228,7 @@ Copy-Item -Path "$src\roblox-game-template\.claude\settings.json" -Destination .
 
 The template's `pesde.toml` takes the place of `pesde init`, which needs a person typing answers.
 
-Done when `default.project.json`, `rokit.toml`, and `pesde.toml` exist in the project folder and
+Done when `places.json`, `rokit.toml`, and `pesde.toml` exist in the project folder and
 the tag check prints the release tag.
 
 ## 7. Install the VS Code extensions
@@ -383,8 +383,8 @@ message.
 2. Check: the `robloxstudio` MCP server reports a connected Studio place. When it reports none:
    **Viewer:** in Studio's **Plugins** tab, open the MCP plugin and confirm it shows **Connected**.
 3. Check through the MCP server: `ServerScriptService` holds the `Start` script. Otherwise:
-   **Viewer:** in the VS Code terminal, run `rojo serve`. Then, in the Baseplate, open
-   **Plugins > Rojo** and click **Connect**.
+   **Viewer:** in the VS Code terminal, run `rojo serve places/main/default.project.json`. Then,
+   in the Baseplate, open **Plugins > Rojo** and click **Connect**.
 
 Done when all three checks pass. Tell the viewer the setup is finished, list anything that still
 needs them, and mention that CI setup is optional: they can ask for it any time.
@@ -392,12 +392,13 @@ needs them, and mention that CI setup is optional: they can ask for it any time.
 ## CI setup (optional)
 
 Run this section when the viewer asks for it, once step 12 is done. Pull requests already run the
-lint and type checks; this adds the specs in a CI place, publishing to staging on each merge to
+lint and type checks; this adds the specs in a CI experience, publishing to staging on each merge to
 `main`, and publishing to production on each GitHub release. `tools/ci/README.md` explains each
 part; walk the viewer through its Setup section like this:
 
-1. **Viewer:** create three places in the Creator Dashboard: a CI place in an experience of its own,
-   a staging place, and the production place.
+1. **Viewer:** create three experiences in the Creator Dashboard: CI, staging, and production. A new
+   game has one place, `main`, which is each experience's start place, so nothing more is needed.
+   With more folders in `places/`, each experience needs a place for each.
 2. **Viewer:** create an Open Cloud API key under **API Keys** in the Creator Dashboard, with exactly
    these permissions:
    - **universe-places**: **Write**, on the CI, staging, and production experiences.
@@ -415,25 +416,27 @@ part; walk the viewer through its Setup section like this:
    ```
 
    Check: `gh secret list` shows `ROBLOX_API_KEY`.
-4. Ask the viewer for each place's Creator Dashboard URL
+4. Ask the viewer for the Creator Dashboard URL of each place in each experience
    (`.../experiences/<universe id>/places/<place id>/...`), which holds both IDs. IDs aren't
-   secret, so they can go in the chat. Run each line below unless `gh variable list` already shows
-   that variable with the viewer's value:
+   secret, so they can go in the chat. Put them in `places.json`, replacing each `null`:
 
-   ```powershell
-   gh variable set CI_UNIVERSE_ID --body <id>
-   gh variable set CI_PLACE_ID --body <id>
-   gh variable set STAGING_UNIVERSE_ID --body <id>
-   gh variable set STAGING_PLACE_ID --body <id>
-   gh variable set PRODUCTION_UNIVERSE_ID --body <id>
-   gh variable set PRODUCTION_PLACE_ID --body <id>
+   ```json
+   {
+     "universes": { "ci": <CI universe id>, "staging": <id>, "production": <id> },
+     "places": {
+       "main": { "ci": <CI place id>, "staging": <id>, "production": <id> }
+     }
+   }
    ```
+
+   Check: `lune run tools/ci/build` builds every place without a `places.json:` error. Then commit
+   and push: `git add places.json; git commit -m "Set up CI places"; git push`.
 
 5. Tell the viewer how to retire the key, for example after trying CI with their own account: delete
    the secret with `gh secret delete ROBLOX_API_KEY` **and** revoke the key in the Creator Dashboard.
    Deleting the secret alone leaves the key working.
 
-Done when `gh secret list` shows `ROBLOX_API_KEY` and `gh variable list` shows all four variables.
+Done when `gh secret list` shows `ROBLOX_API_KEY` and the pushed `places.json` has no `null` left.
 
 ## Common problems
 
@@ -465,7 +468,7 @@ Done when `gh secret list` shows `ROBLOX_API_KEY` and `gh variable list` shows a
 | The `robloxstudio` MCP server is missing after the restart | Run `claude mcp list`. When it's listed, the session started before it was added: **Viewer:** start a new conversation. When the saved command contains `cmd` or `C:/`, run `claude mcp remove robloxstudio` and add it again as in step 9. |
 | The Studio MCP plugin never shows **Connected**, or reports a version mismatch | **Viewer:** quit every Claude Code session and every Studio window, then reopen both. If the plugin is missing, run `npx.cmd -y @chrrxs/robloxstudio-mcp@latest --install-plugin` first. |
 | Rojo plugin: "different protocol version" | Run `rojo --version` in the project folder and expect 7.7.x, then `rojo plugin install` and restart Studio. When Studio also has the Creator Store Rojo plugin, uninstall that copy. |
-| `rojo serve`: port 34872 already in use | Another `rojo serve` is running. Close it, or run `rojo serve --port 34873` and enter that port in the Rojo plugin. |
+| `rojo serve`: port 34872 already in use | Another `rojo serve` is running. Close it, or add `--port 34873` to the command and enter that port in the Rojo plugin. |
 | `rojo serve` crashes after a folder is deleted or a folder module becomes a file | A known Rojo 7.7.x bug. Run `rojo serve` again and click **Connect**. |
 | luau-lsp shows no Roblox types or requires in the editor | Open VS Code on the project root, restart VS Code so Rojo is on its PATH, then run **Luau: Regenerate Sourcemap**. |
 | A CI run fails | Find it under "When a run fails" in `tools/ci/README.md`. |

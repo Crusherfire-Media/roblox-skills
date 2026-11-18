@@ -12,10 +12,33 @@ env:
   ROKIT_VERSION: v1.2.0
 
 jobs:
+  # Whether places.json has the production experience. Publishing skips until it does.
+  places:
+    name: Places
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      production: ${{ steps.read.outputs.production }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: places.json
+          sparse-checkout-cone-mode: false
+      - name: Read places.json
+        id: read
+        run: |
+          if jq -e '.universes.production != null' places.json > /dev/null; then
+            echo "production=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "places.json has no production universe yet, so nothing publishes (tools/ci/README.md)."
+          fi
+
   production:
     name: Publish to production
+    needs: places
     # Pre-releases stay off production.
-    if: ${{ !github.event.release.prerelease && vars.PRODUCTION_PLACE_ID != '' }}
+    if: ${{ !github.event.release.prerelease && needs.places.outputs.production == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -43,12 +66,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Install packages
         run: pesde install --locked || { echo "Retrying in 30 seconds"; sleep 30; pesde install --locked; }
-      - name: Build and publish
+      # Every place publishes, so shared code matches across them.
+      - name: Build and publish every place
         run: |
-          mkdir -p build
-          rojo build default.project.json -o build/game.rbxl
-          lune run tools/ci/publish build/game.rbxl
+          lune run tools/ci/build
+          lune run tools/ci/publish production
         env:
           ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
-          ROBLOX_UNIVERSE_ID: ${{ vars.PRODUCTION_UNIVERSE_ID }}
-          ROBLOX_PLACE_ID: ${{ vars.PRODUCTION_PLACE_ID }}

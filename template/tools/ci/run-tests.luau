@@ -2,10 +2,13 @@
 
 local fs = require("@lune/fs")
 local process = require("@lune/process")
+local roblox = require("@lune/roblox")
 local serde = require("@lune/serde")
 local task = require("@lune/task")
 
 local OpenCloud = require("./open-cloud")
+local Places = require("./places")
+local PrepareTestPlace = require("./prepare-test-place")
 
 local TASK_SCRIPT_PATH = "tools/ci/run-specs-task.luau"
 local TASK_TIMEOUT = "300s"
@@ -15,6 +18,11 @@ local TASK_DEADLINE = 12 * 60
 -- Roblox sometimes ends a stuck task with INTERNAL_ERROR; a second task usually runs.
 local MAX_TASK_ATTEMPTS = 2
 local RETRYABLE_ERROR = "INTERNAL_ERROR"
+
+type Outcome = {
+	Passed: boolean,
+	Output: string,
+}
 
 local function readLogs(taskPath: string): string
 	local ok, logs = pcall(function()
@@ -57,43 +65,77 @@ local function runTask(
 	return state, nil
 end
 
-local placePath = process.args[1]
-if not placePath or not fs.isFile(placePath) then
-	error("usage: lune run tools/ci/run-tests <test.rbxl>")
-end
-local universeId, placeId = OpenCloud.universeId(), OpenCloud.placeId()
-local source = fs.readFile(TASK_SCRIPT_PATH)
+-- Saves one place's test build as an unpublished version and runs its specs.
+local function testPlace(universeId: string, place: Places.Place, source: string): Outcome
+	local game = roblox.deserializePlace(fs.readFile(place.BuildPath))
+	local disabled = PrepareTestPlace.prepare(game)
+	-- Each task is pinned to its own saved version, so two pull requests never run each other's code.
+	local version =
+		OpenCloud.uploadPlace(universeId, place.PlaceId, roblox.serializePlace(game), false)
+	print(`{place.Name}: disabled {disabled} server scripts, saved as version {version}`)
 
--- Each task is pinned to its own saved version, so two pull requests never run each other's code.
-local version = OpenCloud.uploadPlace(fs.readFile(placePath), false)
-print(`Saved the test place as version {version}`)
-
--- The whole suite runs as one task, since Luau Execution allows 5 task creates per minute per key owner.
-local finished, reason
-for attempt = 1, MAX_TASK_ATTEMPTS do
-	finished, reason = runTask(universeId, placeId, version, source)
-	local isRetryable = finished
-		and finished.state == "FAILED"
-		and typeof(finished.error) == "table"
-		and finished.error.code == RETRYABLE_ERROR
-	if not isRetryable or attempt == MAX_TASK_ATTEMPTS then
-		break
+	local finished, reason
+	for attempt = 1, MAX_TASK_ATTEMPTS do
+		finished, reason = runTask(universeId, place.PlaceId, version, source)
+		local isRetryable = finished
+			and finished.state == "FAILED"
+			and typeof(finished.error) == "table"
+			and finished.error.code == RETRYABLE_ERROR
+		if not isRetryable or attempt == MAX_TASK_ATTEMPTS then
+			break
+		end
+		print(`{place.Name}: Roblox ended the task with {RETRYABLE_ERROR}; running it once more`)
 	end
-	print(`Roblox ended the task with {RETRYABLE_ERROR}; running it once more`)
+	if not finished then
+		return { Passed = false, Output = reason or "the task never finished" }
+	end
+
+	local logs = readLogs(finished.path)
+	if finished.state == "COMPLETE" then
+		local results = finished.output and finished.output.results
+		local summary = if results then results[1] else "Specs passed"
+		return { Passed = true, Output = `{logs}\n\n{summary}` }
+	end
+	local failure = if typeof(finished.error) == "table" then finished.error else {}
+	local heading = `The specs failed ({failure.code or finished.state}):`
+	return { Passed = false, Output = `{logs}\n\n{heading}\n{failure.message or ""}` }
 end
 
-if not finished then
-	print(reason)
-	process.exit(1)
-end
-
-print(readLogs(finished.path))
-if finished.state == "COMPLETE" then
-	local results = finished.output and finished.output.results
-	print(`\n{if results then results[1] else "Specs passed"}`)
+local target = Places.target("ci")
+if not target then
+	print("places.json has no CI universe yet, so there's nothing to test (tools/ci/README.md)")
 	process.exit(0)
 end
+local places = (target :: Places.Target).Places
+local universeId = (target :: Places.Target).UniverseId
+local source = fs.readFile(TASK_SCRIPT_PATH)
 
-local failure = if typeof(finished.error) == "table" then finished.error else {}
-print(`\nThe specs failed ({failure.code or finished.state}):\n{failure.message or ""}`)
-process.exit(1)
+-- Every place tests at once, one task each, so the run takes about as long as
+-- the slowest place. Luau Execution allows 5 task creates per minute per key
+-- owner; past 5 places, request() waits out the 429s.
+local outcomes: { Outcome } = {}
+local pending = #places
+for index, place in places do
+	task.spawn(function()
+		local ok, result = pcall(testPlace, universeId, place, source)
+		outcomes[index] = if ok then result else { Passed = false, Output = tostring(result) }
+		pending -= 1
+	end)
+end
+while pending > 0 do
+	task.wait(1)
+end
+
+local failed = {}
+for index, place in places do
+	local outcome = outcomes[index]
+	print(`\n===== {place.Name} =====\n{outcome.Output}`)
+	if not outcome.Passed then
+		table.insert(failed, place.Name)
+	end
+end
+if #failed > 0 then
+	print(`\nSpecs failed in: {table.concat(failed, ", ")}`)
+	process.exit(1)
+end
+print(`\nSpecs passed in every place ({#places})`)
