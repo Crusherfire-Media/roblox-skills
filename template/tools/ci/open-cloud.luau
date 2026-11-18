@@ -32,6 +32,26 @@ local function readId(name: string): string
 	return value
 end
 
+--[[
+	A secret pasted into GitHub's web form often keeps the line break after
+	it, which Lune rejects as a header value with no hint of which header.
+	Surrounding whitespace is trimmed; anything left that a header can't hold
+	means a mangled key. The error never includes the key.
+]]
+local function readApiKey(): string
+	local key = string.match(readEnv("ROBLOX_API_KEY"), "^%s*(.-)%s*$") :: string
+	if key == "" then
+		error("ROBLOX_API_KEY holds only whitespace. Store it again with tools/set-api-key.ps1.")
+	end
+	if string.find(key, "[%s%c]") then
+		error(
+			"ROBLOX_API_KEY has spaces, line breaks, or control characters inside it. "
+				.. "Store it again with tools/set-api-key.ps1 or tools/set-api-key.sh."
+		)
+	end
+	return key
+end
+
 local function retryDelay(response: net.FetchResponse, attempt: number): number?
 	local isRetryable = response.statusCode == TOO_MANY_REQUESTS
 		or response.statusCode >= SERVER_ERROR
@@ -72,7 +92,7 @@ function Module.request(
 	body: string?,
 	contentType: string?
 ): any
-	local headers: net.HttpHeaderMap = { ["x-api-key"] = readEnv("ROBLOX_API_KEY") }
+	local headers: net.HttpHeaderMap = { ["x-api-key"] = readApiKey() }
 	if contentType then
 		headers["content-type"] = contentType
 	end
