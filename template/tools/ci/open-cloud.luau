@@ -10,24 +10,23 @@ local MAX_ATTEMPTS = 5
 local FIRST_RETRY_DELAY = 2
 -- A longer Retry-After means an hourly lockout, which retrying can't outlast.
 local MAX_RETRY_AFTER = 60
+-- Rate limits count per minute (Luau Execution allows 5 task creates per
+-- minute per key owner), so a 429 without Retry-After waits 15, 30, then
+-- 60 seconds: long enough to outlast the window.
+local FIRST_RATE_LIMIT_DELAY = 15
 local TOO_MANY_REQUESTS = 429
 local SERVER_ERROR = 500
 local MAX_PLACE_BYTES = 10 * 1024 * 1024
 
 local Module = {}
 
+-- Place Publishing's limit on a place file.
+Module.MaxPlaceBytes = MAX_PLACE_BYTES
+
 local function readEnv(name: string): string
 	local value = process.env[name]
 	if not value or value == "" then
-		error(`{name} is not set. tools/ci/README.md lists the secrets and variables CI needs.`)
-	end
-	return value
-end
-
-local function readId(name: string): string
-	local value = readEnv(name)
-	if not string.match(value, "^%d+$") then
-		error(`{name} must be a number, the id shown in the Creator Dashboard`)
+		error(`{name} is not set. tools/ci/README.md covers the secret CI needs.`)
 	end
 	return value
 end
@@ -62,22 +61,13 @@ local function retryDelay(response: net.FetchResponse, attempt: number): number?
 	if retryAfter and retryAfter > MAX_RETRY_AFTER then
 		return nil
 	end
-	return retryAfter or FIRST_RETRY_DELAY * 2 ^ (attempt - 1)
-end
-
---[[
-	The place id from ROBLOX_PLACE_ID.
-]]
-function Module.placeId(): string
-	return readId("ROBLOX_PLACE_ID")
-end
-
---[[
-	The universe id from ROBLOX_UNIVERSE_ID, which Place Publishing and Luau
-	Execution need.
-]]
-function Module.universeId(): string
-	return readId("ROBLOX_UNIVERSE_ID")
+	if retryAfter then
+		return retryAfter
+	end
+	local firstDelay = if response.statusCode == TOO_MANY_REQUESTS
+		then FIRST_RATE_LIMIT_DELAY
+		else FIRST_RETRY_DELAY
+	return math.min(firstDelay * 2 ^ (attempt - 1), MAX_RETRY_AFTER)
 end
 
 --[[
@@ -121,21 +111,25 @@ function Module.request(
 end
 
 --[[
-	Uploads a binary place file as a new version of ROBLOX_PLACE_ID through
-	the Place Publishing API and returns the version number. A published
+	Uploads a binary place file as a new version of a place through the
+	Place Publishing API and returns the version number. A published
 	version is the one players join; a saved one isn't.
 
 	This needs the universe-places Write permission, which can be restricted
 	to experiences. The Assets API's Update Asset can't: its Write reaches
 	every asset the key's account can access.
 ]]
-function Module.uploadPlace(contents: string, isPublished: boolean): number
+function Module.uploadPlace(
+	universeId: string,
+	placeId: string,
+	contents: string,
+	isPublished: boolean
+): number
 	if #contents > MAX_PLACE_BYTES then
 		error(`the place file is {#contents} bytes, over Place Publishing's 10 MB limit`)
 	end
 	local versionType = if isPublished then "Published" else "Saved"
-	local path = `/universes/v1/{Module.universeId()}/places/{Module.placeId()}`
-		.. `/versions?versionType={versionType}`
+	local path = `/universes/v1/{universeId}/places/{placeId}/versions?versionType={versionType}`
 	local result = Module.request("POST", path, contents, "application/octet-stream")
 	local version = tonumber(result.versionNumber)
 	if not version then

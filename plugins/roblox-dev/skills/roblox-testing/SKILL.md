@@ -33,7 +33,8 @@ ServerScriptService
 - A spec for `Modules/<path>/<Name>` is the ModuleScript `Specs/<path>/<Name>.spec`. A spec that
   runs several systems together is `Specs/Integration/<Journey>.spec`.
 - Nothing under `Modules` ever requires anything under `Tests`.
-- In a Rojo repo (a `default.project.json` at its root), specs are files: read
+- In a Rojo repo (a `default.project.json` at its root, or one per place in `places/<name>/`),
+  specs are files: read
   [references/rojo-mode.md](references/rojo-mode.md) before writing or running one. It replaces
   the `PackageLink` rule for pesde packages, and moves the whole-suite run to CI.
 - A shared package's own behavior is specced in its package repo, outside every package folder.

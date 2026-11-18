@@ -5,7 +5,8 @@ description: Working on a Roblox game kept in Git and synced into Studio by Rojo
 
 # Rojo workflow
 
-In a Rojo repo, Git is the source of truth. Code lives in files under `src/`, and `rojo serve`
+In a Rojo repo, Git is the source of truth. Code lives in files under `src/` (in a repo with a
+project per place, `places/<name>/src/`), and `rojo serve`
 syncs them into the developer's dev place in Studio, where a connected Studio MCP still analyzes,
 tests, and playtests. This skill covers how files map to the place, how changes travel, and how
 shared code and Studio-side edits get into Git. The other skills keep their rules; where one
@@ -14,8 +15,11 @@ assumes code is edited in Studio, it points to its own Rojo reference.
 **The mode.** A `default.project.json` holding a `tree`, in the session's folder or a parent,
 means Rojo mode. A repo with several places may keep one project per place (for example
 `places/<name>/default.project.json`): a file in a place folder belongs to that place, and code
-outside the place folders to all of them. Without any project, the place is edited in Studio as
-the other skills describe.
+outside the place folders to all of them. There, run every `rojo` command below from the repo
+root with the place's project in place of `default.project.json`
+(`rojo serve places/<name>/default.project.json`), and give `rojo sourcemap` `--absolute`: Rojo
+writes paths relative to the place folder, and luau-lsp reads them relative to the repo root.
+Without any project, the place is edited in Studio as the other skills describe.
 
 ## Files and the place
 

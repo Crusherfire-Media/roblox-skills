@@ -17,7 +17,8 @@ The loader's exact behavior (discovery, relocation, error handling, API, the rel
 is in [references/module-loader.md](references/module-loader.md). Read it before relying on any
 loader detail this file does not state, and whenever you debug the loader itself.
 
-**In a Rojo repo** (a `default.project.json` at its root), read
+**In a Rojo repo** (a `default.project.json` at its root, or one per place in
+`places/<name>/`), read
 [references/rojo-mode.md](references/rojo-mode.md) first. Code is files there, and it overrides
 the rules below that assume Studio: attribute references in Requires, setting attributes, and
 where shared systems (pesde packages) live.

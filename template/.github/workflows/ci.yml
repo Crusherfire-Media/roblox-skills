@@ -19,6 +19,31 @@ env:
   ROKIT_VERSION: v1.2.0
 
 jobs:
+  # Which experiences places.json has set up. Specs and staging skip until theirs is.
+  places:
+    name: Places
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ci: ${{ steps.read.outputs.ci }}
+      staging: ${{ steps.read.outputs.staging }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: places.json
+          sparse-checkout-cone-mode: false
+      - name: Read places.json
+        id: read
+        run: |
+          for environment in ci staging; do
+            if jq -e --arg e "$environment" '.universes[$e] != null' places.json > /dev/null; then
+              echo "$environment=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "places.json has no $environment universe yet, so its jobs skip (tools/ci/README.md)."
+            fi
+          done
+
   checks:
     name: Checks
     runs-on: ubuntu-latest
@@ -37,27 +62,34 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Install packages
         run: pesde install --locked || { echo "Retrying in 30 seconds"; sleep 30; pesde install --locked; }
-      - name: Generate the sourcemap
-        run: rojo sourcemap default.project.json -o sourcemap.json
+      # Also checks places.json against the place folders.
+      - name: Build every place
+        run: lune run tools/ci/build
       - name: Download Roblox type definitions
         run: >-
           curl -fsSL --retry 3 -o globalTypes.None.d.luau
           https://luau-lsp.pages.dev/type-definitions/globalTypes.None.d.luau
+      # Each place has its own DataModel, so each gets its own sourcemap.
+      # The build step checked the names, so they're safe as words here.
       - name: luau-lsp analyze
-        run: >-
-          luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json
-          --definitions:@roblox=globalTypes.None.d.luau
-          --ignore="**/roblox_packages/**" src
+        run: |
+          for place in $(jq -r '.places | keys[]' places.json); do
+            echo "Analyzing places/$place"
+            rojo sourcemap "places/$place/default.project.json" -o sourcemap.json --absolute
+            luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
+              --definitions:@roblox=globalTypes.None.d.luau \
+              --ignore="**/roblox_packages/**" "places/$place/src"
+          done
       - name: selene
-        run: selene src tools
+        run: selene places tools
       - name: StyLua
-        run: stylua --check src tools
+        run: stylua --check places tools
 
   specs:
     name: Specs
-    needs: checks
-    # Skipped until the CI place is set up (tools/ci/README.md).
-    if: vars.CI_PLACE_ID != ''
+    needs: [places, checks]
+    # Skipped until places.json has the CI experience (tools/ci/README.md).
+    if: needs.places.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Luau Execution allows 5 task creates per minute per key owner, so a
@@ -79,23 +111,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Install packages
         run: pesde install --locked || { echo "Retrying in 30 seconds"; sleep 30; pesde install --locked; }
-      - name: Build the test place
-        run: |
-          mkdir -p build
-          rojo build default.project.json -o build/game.rbxl
-          lune run tools/ci/prepare-test-place build/game.rbxl build/test.rbxl
-      - name: Run the specs in the CI place
-        run: lune run tools/ci/run-tests build/test.rbxl
+      - name: Build every place
+        run: lune run tools/ci/build
+      # One task per place, all at once, each in that place's CI place.
+      - name: Run the specs in the CI places
+        run: lune run tools/ci/run-tests
         env:
           ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
-          ROBLOX_UNIVERSE_ID: ${{ vars.CI_UNIVERSE_ID }}
-          ROBLOX_PLACE_ID: ${{ vars.CI_PLACE_ID }}
 
   staging:
     name: Publish to staging
-    needs: [checks, specs]
-    # Runs only after the specs pass, so it also waits for the CI place setup.
-    if: github.event_name == 'push' && vars.STAGING_PLACE_ID != ''
+    needs: [places, checks, specs]
+    # Runs only after the specs pass, so it also waits for the CI experience.
+    if: github.event_name == 'push' && needs.places.outputs.staging == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -132,13 +160,11 @@ jobs:
       - name: Install packages
         if: steps.head.outputs.current == 'true'
         run: pesde install --locked || { echo "Retrying in 30 seconds"; sleep 30; pesde install --locked; }
-      - name: Build and publish
+      # Every place publishes, so shared code matches across them.
+      - name: Build and publish every place
         if: steps.head.outputs.current == 'true'
         run: |
-          mkdir -p build
-          rojo build default.project.json -o build/game.rbxl
-          lune run tools/ci/publish build/game.rbxl
+          lune run tools/ci/build
+          lune run tools/ci/publish staging
         env:
           ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
-          ROBLOX_UNIVERSE_ID: ${{ vars.STAGING_UNIVERSE_ID }}
-          ROBLOX_PLACE_ID: ${{ vars.STAGING_PLACE_ID }}

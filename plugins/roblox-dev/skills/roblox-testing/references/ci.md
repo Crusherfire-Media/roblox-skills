@@ -9,7 +9,8 @@ script calls Jest and fails the task when Jest reports failures. Roblox's
 ## How the job works
 
 1. Build the place (`rojo build default.project.json -o build/ci.rbxl`) and upload it as a new
-   version of the CI place.
+   version of the CI place. With a project per place, build each place and upload it to its own
+   place in the CI experience, then run steps 2 to 4 for every place at once.
 2. Create one Luau Execution task pinned to that version
    (`POST .../universes/{universeId}/places/{placeId}/versions/{versionId}/luau-execution-session-tasks`),
    with the entry script below as `script`. Pinning the version keeps two pull requests that upload
@@ -19,9 +20,10 @@ script calls Jest and fails the task when Jest reports failures. Roblox's
 
 ## Rules the job follows
 
-- **One task per run.** Task creation is limited to 5 per minute per API key owner, and a place
-  allows at most 10 unfinished tasks; past either limit the API answers HTTP 429. Run the whole
-  suite in one task, and honor `retry-after` on a 429 instead of retrying in a loop.
+- **One task per place per run.** Task creation is limited to 5 per minute per API key owner, and
+  a place allows at most 10 unfinished tasks; past either limit the API answers HTTP 429. Run a
+  place's whole suite in one task. On a 429, honor `retry-after`, or without one wait long enough
+  to outlast the minute, instead of retrying in a tight loop.
 - **A `concurrency` group** on the test job, so pushes in quick succession queue (or cancel the
   older run) instead of creating tasks in parallel:
 

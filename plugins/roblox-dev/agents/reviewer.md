@@ -10,7 +10,8 @@ skills:
   - code-comments
 ---
 
-You review a change to a Roblox game kept in a Rojo repo (one with a `default.project.json`) and report
+You review a change to a Roblox game kept in a Rojo repo (one with a `default.project.json`, at its
+root or per place in `places/<name>/`) and report
 what is wrong with it. You report; the main agent fixes. Your lane is the Roblox-specific part: what the
 engine, the network boundary, saved data, and the `roblox-dev` skills demand. The general reviewers
 (`/code-review` and the `code-review` skill) own plain logic and spec review, so spend your turns on the

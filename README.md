@@ -55,9 +55,11 @@ skill is loaded. It's [agent-html-kit](https://github.com/leex279/agent-html-kit
 
 `template/` is a game project ready to sync: Rojo 7.7.1, pesde with Module Loader, Jest Roblox
 specs, StyLua, selene, luau-lsp, VS Code settings, a `CLAUDE.md`, and GitHub Actions workflows.
-Every pull request runs the lint and type checks. After the optional CI setup in
-`template/tools/ci/README.md`, pull requests also run the specs (in a CI place, through Open
-Cloud), a merge to `main` publishes to staging, and a GitHub release publishes to production.
+Each place in the experience is a folder under `places/`, and `places.json` maps each one to its
+place in the CI, staging, and production experiences. Every pull request runs the lint and type
+checks. After the optional CI setup in `template/tools/ci/README.md`, pull requests also run every
+place's specs (in a CI experience, through Open Cloud), a merge to `main` publishes every place to
+staging, and a GitHub release publishes them to production.
 
 ### Evals
 

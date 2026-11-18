@@ -2,20 +2,22 @@
 
 | When | Workflow job | Does |
 |---|---|---|
-| Every pull request and push to `main` | `CI / Checks` | `luau-lsp analyze` with Roblox's types and a sourcemap, then selene and StyLua |
-| Every pull request and push to `main` | `CI / Specs` | Builds the place, saves it to the CI place, and runs every spec there in one Luau Execution task |
-| A push to `main` (a merged pull request) | `CI / Publish to staging` | Publishes the build to the staging place, after Checks and Specs pass |
-| A published GitHub release | `Release / Publish to production` | Publishes the release's commit to the production place, if that commit is on `main` |
+| Every pull request and push to `main` | `CI / Checks` | Builds every place, then `luau-lsp analyze` on each with Roblox's types and its own sourcemap, then selene and StyLua |
+| Every pull request and push to `main` | `CI / Specs` | Saves each place's test build to its place in the CI experience and runs its specs there, one Luau Execution task per place, all at once |
+| A push to `main` (a merged pull request) | `CI / Publish to staging` | Publishes every place to the staging experience, after Checks and Specs pass |
+| A published GitHub release | `Release / Publish to production` | Publishes every place at the release's commit to the production experience, if that commit is on `main` |
 
-Specs and the two publish jobs skip themselves until their place's repository variable exists, so
-a new repo starts green.
+`places.json` at the repo root says where each place goes. Specs and the two publish jobs skip
+themselves while its universe for their experience is `null`, so a new repo starts green. Staging
+publishes only after the specs pass, so it also waits for the CI experience.
 
 | Script | Does |
 |---|---|
 | `install-pesde.sh` | Installs pesde in a CI job from its GitHub release |
-| `prepare-test-place.luau <game.rbxl> <test.rbxl>` | Turns on `LoadStringEnabled`, which Jest needs on a game server, and disables server Scripts. Only the CI place gets this |
-| `run-tests.luau <test.rbxl>` | Saves the test place as an unpublished version and runs `run-specs-task.luau` in one task pinned to that version. Exits 1 when a spec fails |
-| `publish.luau <game.rbxl>` | Removes `ServerScriptService.Tests` and publishes the build as the version players join |
+| `build.luau` | Checks `places.json` against the folders in `places/`, then builds each place into `build/<name>.rbxl` |
+| `run-tests.luau` | For each place: turns on `LoadStringEnabled` (Jest needs it on a game server) and disables server Scripts, saves that as an unpublished version of its CI place, and runs `run-specs-task.luau` in a task pinned to that version. Exits 1 when any place's specs fail |
+| `publish.luau <staging\|production>` | Removes `ServerScriptService.Tests` from every place's build, then publishes each as the version players join |
+| `places.luau`, `open-cloud.luau`, `prepare-test-place.luau` | Modules the scripts share: reading `places.json`, Open Cloud requests, and the test-place changes |
 
 The scripts run on Lune 0.10.5, which doesn't parse `const`, so they use `local`. Run `lune setup`
 once for editor types on `@lune/...` requires.
@@ -24,9 +26,10 @@ once for editor types on `@lune/...` requires.
 
 ### 1. The places
 
-Create three places in Roblox: a CI place for the specs, a staging place, and the production place.
-Give the CI place an experience of its own. Specs can reach real data stores, which belong to an
-experience, so this keeps tests away from your players' data.
+Create three experiences in Roblox: CI for the specs, staging, and production. Each needs the same
+places as the repo's `places/` folders. A new game has one place, `main`, which is the start place
+every experience already has. Specs can reach real data stores, which belong to an experience, so
+a CI experience of its own keeps tests away from your players' data.
 
 ### 2. The Open Cloud API key
 
@@ -60,19 +63,20 @@ powershell -ExecutionPolicy Bypass -File tools/set-api-key.ps1
 
 On macOS or Linux, run `bash tools/set-api-key.sh`.
 
-Then set the place and universe ids as repository variables. The ids are in each place's Creator
-Dashboard URL: `.../experiences/<universe id>/places/<place id>/...`.
+Then fill in `places.json` and commit it. The ids are in each place's Creator Dashboard URL:
+`.../experiences/<universe id>/places/<place id>/...`. They aren't secrets.
 
-```
-gh variable set CI_UNIVERSE_ID --body <id>
-gh variable set CI_PLACE_ID --body <id>
-gh variable set STAGING_UNIVERSE_ID --body <id>
-gh variable set STAGING_PLACE_ID --body <id>
-gh variable set PRODUCTION_UNIVERSE_ID --body <id>
-gh variable set PRODUCTION_PLACE_ID --body <id>
+```json
+{
+  "universes": { "ci": 111, "staging": 222, "production": 333 },
+  "places": {
+    "main": { "ci": 1001, "staging": 2001, "production": 3001 }
+  }
+}
 ```
 
-When staging and production are places in the same experience, their universe ids are the same.
+An experience can stay `null` until it exists. With more places, each gets a line under `places`
+with its id in all three experiences (`CLAUDE.md`, "To add a place").
 
 Last, add a branch ruleset for `main` in the repo's settings that requires the `Checks` and `Specs`
 status checks. Changes then reach `main`, and with it staging, only through a passing pull request.
@@ -97,7 +101,8 @@ the new version number.
 ## When a run fails
 
 - **Specs fail with 429:** Luau Execution allows 5 task creates per minute per key owner and 10
-  unfinished tasks per place. The script retries short waits. A long `retry-after` means an hourly
+  unfinished tasks per place, and each place creates one task. A 429 waits up to a minute, then
+  retries. A long `retry-after` means an hourly
   lockout: rerun the job later. Use your own key, not the CI account's, for any Luau Execution you
   run by hand.
 - **Specs end with `INTERNAL_ERROR`:** a Roblox-side failure. The script runs the task once more.
@@ -105,7 +110,11 @@ the new version number.
 - **A spec passes in Studio and fails here:** CI runs specs on a game server, where
   `RunService:IsServer()` is true. In Studio's edit mode it's false.
 - **Publishing fails with 409 "Server is busy":** someone has that place open in Studio or Team
-  Create. Close it and rerun the job.
+  Create. Close it and rerun the job. Places publish one at a time, so the ones before it are
+  already out: rerun soon, so every place runs the same code.
+- **A job fails with a `places.json:` message:** the message names the entry or folder to fix.
+  Every folder in `places/` with a `default.project.json` needs an entry, and once an
+  experience's universe is set, every place needs its id there.
 - **Specs fail with "ROBLOX_API_KEY is not set" on a pull request from a fork or Dependabot:**
   GitHub withholds secrets from those runs.
 - **Specs fail with "ROBLOX_API_KEY has spaces, line breaks, or control characters inside it",
