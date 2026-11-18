@@ -400,12 +400,13 @@ part; walk the viewer through its Setup section like this:
    a staging place, and the production place.
 2. **Viewer:** create an Open Cloud API key under **API Keys** in the Creator Dashboard, with exactly
    these permissions:
-   - **assets**: **Read** and **Write**, on the CI, staging, and production experiences.
+   - **universe-places**: **Write**, on the CI, staging, and production experiences.
    - **luau-execution-sessions**: **Write**, on the CI experience only.
 
-   Keep **Restrict by Experience** on, leave **Restrict IP addresses** off, and set an expiration
-   date. A key acts as the account that created it, so Roblox recommends a dedicated account for CI;
-   `tools/ci/README.md` says what that account needs.
+   Don't add **assets**: it can't be restricted to experiences, so its Write reaches every asset
+   the account can access. Keep **Restrict by Experience** on, leave **Restrict IP addresses**
+   off, and set an expiration date. A key acts as the account that created it, so Roblox
+   recommends a dedicated account for CI; `tools/ci/README.md` says what that account needs.
 3. **Viewer:** store the key by running this in the VS Code terminal at the project root, and paste
    the key only into its hidden prompt:
 
@@ -414,15 +415,17 @@ part; walk the viewer through its Setup section like this:
    ```
 
    Check: `gh secret list` shows `ROBLOX_API_KEY`.
-4. Ask the viewer for the CI experience's universe ID and the three place IDs, or the Creator
-   Dashboard URLs they appear in (`.../experiences/<universe id>/places/<place id>/...`). IDs aren't
+4. Ask the viewer for each place's Creator Dashboard URL
+   (`.../experiences/<universe id>/places/<place id>/...`), which holds both IDs. IDs aren't
    secret, so they can go in the chat. Run each line below unless `gh variable list` already shows
    that variable with the viewer's value:
 
    ```powershell
    gh variable set CI_UNIVERSE_ID --body <id>
    gh variable set CI_PLACE_ID --body <id>
+   gh variable set STAGING_UNIVERSE_ID --body <id>
    gh variable set STAGING_PLACE_ID --body <id>
+   gh variable set PRODUCTION_UNIVERSE_ID --body <id>
    gh variable set PRODUCTION_PLACE_ID --body <id>
    ```
 

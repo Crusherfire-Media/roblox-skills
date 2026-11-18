@@ -39,10 +39,12 @@ In the Creator Dashboard, under **API Keys**, create a key with exactly these pe
 
 | Select API System | Experiences | Operations | Scopes it grants | Used by |
 |---|---|---|---|---|
-| **assets** | CI, staging, and production | **Read**, **Write** | `asset:read`, `asset:write` | Saving the test place and publishing (Update Asset, Get Operation) |
+| **universe-places** | CI, staging, and production | **Write** | `universe-places:write` | Saving the test place and publishing (Publish a Place) |
 | **luau-execution-sessions** | CI only | **Write** | `universe.place.luau-execution-session:write` | Creating the spec task and reading its state and logs |
 
 - Keep **Restrict by Experience** on, with only the experiences above.
+- Don't add **assets**. CI doesn't use it, and its operations apply to every asset the account
+  can access: it can only be restricted by creator, not by experience.
 - Leave **Restrict IP addresses** off. GitHub's runners have no fixed address.
 - Roblox expires a key after 60 days without use. A production publish can be that rare, so if a
   release fails with 401, open the key in the dashboard and turn **Enable Key** off and on.
@@ -64,9 +66,13 @@ Dashboard URL: `.../experiences/<universe id>/places/<place id>/...`.
 ```
 gh variable set CI_UNIVERSE_ID --body <id>
 gh variable set CI_PLACE_ID --body <id>
+gh variable set STAGING_UNIVERSE_ID --body <id>
 gh variable set STAGING_PLACE_ID --body <id>
+gh variable set PRODUCTION_UNIVERSE_ID --body <id>
 gh variable set PRODUCTION_PLACE_ID --body <id>
 ```
+
+When staging and production are places in the same experience, their universe ids are the same.
 
 Last, add a branch ruleset for `main` in the repo's settings that requires the `Checks` and `Specs`
 status checks. Changes then reach `main`, and with it staging, only through a passing pull request.
@@ -74,16 +80,19 @@ GitHub offers rulesets on public repos, and on private repos with GitHub Pro, Te
 
 ## Publishing endpoint
 
-Both publish and the test upload use the Assets API, `PATCH https://apis.roblox.com/assets/v1/assets/{placeId}`,
-then poll the operation it returns for the new version number.
+Both publish and the test upload use the Place Publishing API,
+`POST https://apis.roblox.com/universes/v1/{universeId}/places/{placeId}/versions`, which returns
+the new version number.
 
-- It's the endpoint Roblox's place publishing guide documents now.
-- It saves an unpublished version (`"published": false`) for the specs and publishes
-  (`"published": true`) for staging and production, so one permission covers both.
-- It needs only the place id.
-- `rojo upload` calls the older `universes/v1/.../versions` endpoint with `versionType=Published`
-  fixed, so it can't save the unpublished version the specs run against. It also builds straight
-  from the project, which would ship the specs and Jest to players.
+- Its permission, **universe-places**, can be restricted to the CI, staging, and production
+  experiences. Roblox's place publishing guide now documents the Assets API's Update Asset
+  instead, but that needs **assets**, whose Write reaches every asset the account can access.
+- It saves an unpublished version (`versionType=Saved`) for the specs and publishes
+  (`versionType=Published`) for staging and production, so one permission covers both.
+- It accepts place files up to 10 MB.
+- The scripts call it themselves rather than through `rojo upload`, which always publishes, so it
+  can't save the unpublished version the specs run against. `rojo upload` also builds straight from
+  the project, which would ship the specs and Jest to players.
 
 ## When a run fails
 
