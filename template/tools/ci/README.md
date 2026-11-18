@@ -108,3 +108,7 @@ the new version number.
   Create. Close it and rerun the job.
 - **Specs fail with "ROBLOX_API_KEY is not set" on a pull request from a fork or Dependabot:**
   GitHub withholds secrets from those runs.
+- **Specs fail with "ROBLOX_API_KEY has spaces, line breaks, or control characters inside it",
+  or with "failed to parse header value" in an older copy of these scripts:** the secret holds
+  more than the key, usually from pasting it into GitHub's web form. Store it again with
+  `tools/set-api-key.ps1` or `tools/set-api-key.sh`.
