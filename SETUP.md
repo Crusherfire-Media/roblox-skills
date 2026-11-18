@@ -1,6 +1,6 @@
 # Roblox AI workflow setup
 
-Release tag: `v0.1.5`
+Release tag: `v0.1.6`
 
 You are setting up the folder open in VS Code as a Roblox game project for the viewer who pasted
 the prompt. Wherever a command says `TAG`, replace it with the release tag above: the template
