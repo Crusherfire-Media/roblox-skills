@@ -12,8 +12,7 @@ local FIRST_RETRY_DELAY = 2
 local MAX_RETRY_AFTER = 60
 local TOO_MANY_REQUESTS = 429
 local SERVER_ERROR = 500
-local OPERATION_POLL_INTERVAL = 2
-local OPERATION_DEADLINE = 5 * 60
+local MAX_PLACE_BYTES = 10 * 1024 * 1024
 
 local Module = {}
 
@@ -46,16 +45,6 @@ local function retryDelay(response: net.FetchResponse, attempt: number): number?
 	return retryAfter or FIRST_RETRY_DELAY * 2 ^ (attempt - 1)
 end
 
--- A random boundary that never appears in the file, so the form parses.
-local function makeBoundary(contents: string): string
-	while true do
-		local boundary = `----roblox-ci-{math.random(1e9)}{math.random(1e9)}`
-		if not string.find(contents, boundary, 1, true) then
-			return boundary
-		end
-	end
-end
-
 --[[
 	The place id from ROBLOX_PLACE_ID.
 ]]
@@ -64,7 +53,8 @@ function Module.placeId(): string
 end
 
 --[[
-	The universe id from ROBLOX_UNIVERSE_ID, which Luau Execution needs.
+	The universe id from ROBLOX_UNIVERSE_ID, which Place Publishing and Luau
+	Execution need.
 ]]
 function Module.universeId(): string
 	return readId("ROBLOX_UNIVERSE_ID")
@@ -111,50 +101,25 @@ function Module.request(
 end
 
 --[[
-	Uploads a place file as a new version of ROBLOX_PLACE_ID through the
-	Assets API and returns the version number. A published version is the
-	one players join; an unpublished one is only saved.
+	Uploads a binary place file as a new version of ROBLOX_PLACE_ID through
+	the Place Publishing API and returns the version number. A published
+	version is the one players join; a saved one isn't.
+
+	This needs the universe-places Write permission, which can be restricted
+	to experiences. The Assets API's Update Asset can't: its Write reaches
+	every asset the key's account can access.
 ]]
 function Module.uploadPlace(contents: string, isPublished: boolean): number
-	local placeId = Module.placeId()
-	local boundary = makeBoundary(contents)
-	local requestJson = serde.encode("json", {
-		assetId = tonumber(placeId),
-		assetType = "Place",
-		published = isPublished,
-	})
-	local form = table.concat({
-		`--{boundary}\r\n`,
-		'Content-Disposition: form-data; name="request"\r\n',
-		"Content-Type: application/json\r\n\r\n",
-		requestJson,
-		`\r\n--{boundary}\r\n`,
-		'Content-Disposition: form-data; name="fileContent"; filename="place.rbxl"\r\n',
-		"Content-Type: application/octet-stream\r\n\r\n",
-		contents,
-		`\r\n--{boundary}--\r\n`,
-	})
-	local operation = Module.request(
-		"PATCH",
-		`/assets/v1/assets/{placeId}`,
-		form,
-		`multipart/form-data; boundary={boundary}`
-	)
-
-	local deadline = os.time() + OPERATION_DEADLINE
-	while not operation.done do
-		if os.time() > deadline then
-			error(`upload still processing after {OPERATION_DEADLINE} seconds: {operation.path}`)
-		end
-		task.wait(OPERATION_POLL_INTERVAL)
-		operation = Module.request("GET", `/assets/v1/{operation.path}`)
+	if #contents > MAX_PLACE_BYTES then
+		error(`the place file is {#contents} bytes, over Place Publishing's 10 MB limit`)
 	end
-	if operation.error then
-		error(`upload failed: {serde.encode("json", operation.error)}`)
-	end
-	local version = tonumber(operation.response and operation.response.revisionId)
+	local versionType = if isPublished then "Published" else "Saved"
+	local path = `/universes/v1/{Module.universeId()}/places/{Module.placeId()}`
+		.. `/versions?versionType={versionType}`
+	local result = Module.request("POST", path, contents, "application/octet-stream")
+	local version = tonumber(result.versionNumber)
 	if not version then
-		error(`upload finished without a version number: {serde.encode("json", operation)}`)
+		error(`upload finished without a version number: {serde.encode("json", result)}`)
 	end
 	return version
 end
